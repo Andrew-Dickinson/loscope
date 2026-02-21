@@ -1,3 +1,5 @@
+import os
+
 import laspy
 import numpy as np
 from PIL import Image
@@ -39,54 +41,88 @@ intensity_image = ((composite_grid - composite_grid.min()) / (EXPOSURE_SCALE_VAL
 img = Image.fromarray(intensity_image, 'L').rotate(90)
 img.save('data/grayscale_height_no_noise_slice.png')
 
-# --- Voxel OBJ export for Blender ---
-VOXEL_RESOLUTION = 500  # Downsample to this grid size (adjust for detail vs file size)
-VOXEL_Z_LEVELS = 255     # Quantise heights into this many discrete levels
-
 from scipy.ndimage import zoom as ndimage_zoom
 
-def export_voxel_obj(grid, filename, resolution=VOXEL_RESOLUTION, z_levels=VOXEL_Z_LEVELS):
-    small = ndimage_zoom(grid, (resolution / grid.shape[0], resolution / grid.shape[1]))
-    h, w = small.shape
+def export_voxel_obj(grid, filename):
+    os.makedirs(filename, exist_ok=True)
 
-    z_min, z_max = small.min(), small.max()
-    voxel_z = np.round((small - z_min) / (z_max - z_min) * (z_levels - 1)).astype(int)
+    with open(os.path.join(filename, "model.mtl"), 'w') as f:
+        f.write("""newmtl mtl1\nKd 1.000 1.000 1.000\nd 1.0\nillum 0\nmap_Kd texture.bmp\n""")
 
-    with open(filename, 'w') as f:
-        f.write(f"# LiDAR voxel grid — {h}x{w} cells, {z_levels} height levels\n")
+    shifted = grid - grid.min()
+    h, w = shifted.shape
+
+    z_min, z_max = shifted.min(), grid.max()
+    with open(os.path.join(filename, "model.obj"), 'w') as f:
+        f.write(f"# LiDAR voxel grid — {h}x{w} cells\n")
         f.write("# Blender: File > Import > Wavefront (.obj)\n\n")
 
         vi = 1  # OBJ vertex indices are 1-based
-        with tqdm(total=h * w, desc='Writing voxels', unit=' cubes') as pbar:
+
+        f.write("mtllib model.mtl\n")
+        f.write("usemtl mtl1\n")
+        f.write("o testobject\n")
+
+        # Bottom Face
+        f.write(f"v {0} {0} {0}\n")
+        f.write(f"v {w} {0} {0}\n")
+        f.write(f"v {w} {h} {0}\n")
+        f.write(f"v {0} {h} {0}\n")
+        o = vi
+        f.write(f"f {o} {o + 1} {o + 2} {o + 3}\n")
+        vi += 4
+
+        vti = 1
+        with tqdm(total=h * w, desc='Writing voxels', unit=' cells') as pbar:
             for y in range(h):
                 for x in range(w):
-                    z = int(voxel_z[y, x])
-                    x0, y0, z0 = float(x), float(y), 0.0
-                    x1, y1, z1 = x0 + 1.0, y0 + 1.0, float(z) + 1.0
+                    z = shifted[x, y]
+                    x0, y0 = float(x), float(y)
+                    x1, y1 = x0 + 1.0, y0 + 1.0
+                    zt = float(z) + 1.0
 
-                    # 8 cube corners
-                    f.write(f"v {x0} {y0} {z0}\n")  # 0 bottom-front-left
-                    f.write(f"v {x1} {y0} {z0}\n")  # 1
-                    f.write(f"v {x1} {y1} {z0}\n")  # 2
-                    f.write(f"v {x0} {y1} {z0}\n")  # 3
-                    f.write(f"v {x0} {y0} {z1}\n")  # 4 top-front-left
-                    f.write(f"v {x1} {y0} {z1}\n")  # 5
-                    f.write(f"v {x1} {y1} {z1}\n")  # 6
-                    f.write(f"v {x0} {y1} {z1}\n")  # 7
-
+                    # Top face
+                    f.write(f"v {x0} {y0} {zt}\n")
+                    f.write(f"v {x1} {y0} {zt}\n")
+                    f.write(f"v {x1} {y1} {zt}\n")
+                    f.write(f"v {x0} {y1} {zt}\n")
                     o = vi
-                    f.write(f"f {o}   {o+3} {o+2} {o+1}\n")  # bottom  (-z)
-                    f.write(f"f {o+4} {o+5} {o+6} {o+7}\n")  # top     (+z)
-                    f.write(f"f {o}   {o+1} {o+5} {o+4}\n")  # front   (-y)
-                    f.write(f"f {o+2} {o+6} {o+5} {o+1}\n")  # right   (+x)
-                    f.write(f"f {o+3} {o+7} {o+6} {o+2}\n")  # back    (+y)
-                    f.write(f"f {o}   {o+4} {o+7} {o+3}\n")  # left    (-x)
+                    # UV Coordinates
+                    f.write(f"vt {x0/w} {y0/h}\n")
+                    f.write(f"vt {x1/w} {y0/h}\n")
+                    f.write(f"vt {x1/w} {y1/h}\n")
+                    f.write(f"vt {x0/w} {y1/h}\n")
+                    vto = vti
+                    f.write(f"f {o}/{vto} {o+1}/{vto+1} {o+2}/{vto+2} {o+3}/{vto+3}\n")
 
-                    vi += 8
+                    vi += 4
+                    vti += 4
+
+                    # Side faces: only emit where this cell is higher than its
+                    # neighbour. The bottom of each face meets the neighbour's
+                    # top (zb = neighbour_z + 1), or z=0 at the grid boundary.
+                    for dy, dx, ax, ay, bx, by in [
+                        (-1,  0,  x0, y0, x1, y0),  # front (-y)
+                        (+1,  0,  x1, y1, x0, y1),  # back  (+y)
+                        ( 0, +1,  x1, y0, x1, y1),  # right (+x)
+                        ( 0, -1,  x0, y1, x0, y0),  # left  (-x)
+                    ]:
+                        ny, nx = y + dy, x + dx
+                        nz = shifted[nx, ny] if 0 <= ny < h and 0 <= nx < w else -1
+                        if z > nz:
+                            zb = float(nz + 1) if nz >= 0 else 0.0
+                            f.write(f"v {ax} {ay} {zb}\n")
+                            f.write(f"v {bx} {by} {zb}\n")
+                            f.write(f"v {bx} {by} {zt}\n")
+                            f.write(f"v {ax} {ay} {zt}\n")
+                            o = vi
+                            f.write(f"f {o} {o+1} {o+2} {o+3}\n")
+                            vi += 4
+
                     pbar.update(1)
 
-    print(f"Saved: {filename}  ({h}x{w} voxels, ~{vi//8} cubes)")
+    print(f"Saved: {filename}  ({h}x{w} terrain cells)")
 
 # composite_grid is indexed [x, y] (x-major). Transpose so the export loop
 # sees [y, x], then flip y so north is at the top (LiDAR y=0 is south).
-export_voxel_obj(composite_grid, 'data/voxel_terrain_slice.obj')
+export_voxel_obj(composite_grid, 'data/voxel_terrain_slice')
