@@ -1,0 +1,62 @@
+COMPD_CS[
+    "NAD83(2011) / New York Long Island (ftUS) + NAVD88 height (ftUS) - US Geoid Model of 2018",
+    PROJCS[
+        "NAD83(2011) / New York Long Island (ftUS)",
+        GEOGCS[
+            "NAD83(2011)",
+            DATUM[
+                "NAD83 (National Spatial Reference System 2011)",
+                SPHEROID[
+                    "GRS 1980",
+                    6378137,
+                    298.257222101,
+                    AUTHORITY["EPSG","7019"]
+                ]
+                ,AUTHORITY["EPSG","1116"]
+            ]
+            ,PRIMEM[
+                "Greenwich",
+                0,
+                AUTHORITY["EPSG","8901"]
+            ]
+            ,UNIT[
+                "Degree",
+                0.0174532925199433,
+                AUTHORITY["EPSG","9102"]
+            ]
+            ,AXIS["Geodetic longitude",EAST]
+            ,AXIS["Geodetic latitude",NORTH]
+            ,AUTHORITY["EPSG","6318"]
+        ],
+        PROJECTION["Lambert_Conformal_Conic_2SP"]
+        ,PARAMETER["central_meridian",-74]
+        ,PARAMETER["latitude_of_origin",40.166666666667]
+        ,PARAMETER["standard_parallel_1",41.033333333333]
+        ,PARAMETER["standard_parallel_2",40.666666666667]
+        ,PARAMETER["false_easting",984250]
+        ,PARAMETER["false_northing",0]
+        ,UNIT[
+            "US Survey Foot",
+            0.304800609601222,
+            AUTHORITY["EPSG","9003"]
+        ]
+        ,AXIS["Easting",EAST]
+        ,AXIS["Northing",NORTH]
+        ,AUTHORITY["EPSG","6539"]
+    ],
+    VERT_CS[
+        "NAVD88 height (ftUS) - US Geoid Model of 2018",
+        VERT_DATUM[
+            "North American Vertical Datum 1988",
+            2005,
+            AUTHORITY["EPSG","5103"]
+        ]
+        ,UNIT[
+            "US Survey Foot",
+            0.304800609601222,
+            AUTHORITY["EPSG","9003"]
+        ]
+        ,AXIS["Gravity-related height",UP]
+        ,AUTHORITY["EPSG","6360"]
+    ]
+]
