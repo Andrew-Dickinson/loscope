@@ -14,9 +14,28 @@ intensity_grid = np.zeros((WIDTH, HEIGHT), dtype=np.float64)
 # intensity_sum = np.zeros((WIDTH, HEIGHT), dtype=np.float64)
 intensity_count = np.zeros((WIDTH, HEIGHT), dtype=np.int32)
 
-with laspy.open('data/235.las') as f:
-    origin = f.header.mins[0:2]
-    extents = f.header.maxs[0:2] - f.header.mins[0:2]
+def fname_int_to_coordinate(fname_str):
+    if len(fname_str) > 0:
+        fname_int = int(fname_str)
+    else:
+        fname_int = 0
+
+    if fname_int % 5 != 0:
+        return fname_int * 1000 + 500
+    return fname_int * 1000
+
+def file_id_to_offset(file_id):
+    x_min = fname_int_to_coordinate(file_id[:-3])
+    y_min = fname_int_to_coordinate(file_id[-3:])
+    if x_min < 500000:
+        x_min += 1000000
+
+    return (x_min, y_min)
+
+file_id = "235"
+with laspy.open(f'data/{file_id}.las') as f:
+    origin = file_id_to_offset(file_id)
+    extents = (WIDTH, HEIGHT)
     total = f.header.point_count
     with tqdm(total=total, unit=' pts', desc='Processing') as pbar:
         for points in f.chunk_iterator(10000):
