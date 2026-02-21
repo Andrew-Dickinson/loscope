@@ -72,7 +72,7 @@ Fresnel zone geometry is computed in an absolute coordinate frame such as ENU or
 storage, and outputs are processed in the NY State Plane - Long Island (EPSG:6539+6360)
 
 Always make sure to use the appropriate coordinate system for each step as highlighted below. An example of converting
-coordinates can be found in `coordinates_test.py`
+coordinates can be found in `src/test_scripts/coordinates_test.py`
 
 Always use US Survey feet (usft) as the standard definition for foot.
 
@@ -80,12 +80,12 @@ Always use US Survey feet (usft) as the standard definition for foot.
 
 #### Input
 An LAS file, vended by NYS, encoding the point cloud data from the 2021 NYC lidar survey. Data is already projected into
-EPSG:6539+6360. An example of reading and rasterizing LAS data can be found in `las_explore.py`. 
+EPSG:6539+6360. An example of reading and rasterizing LAS data can be found in `src/test_scripts/las_explore.py`. 
 
 Each file represents a 2500 usft square, which we will slice into 25 smaller tiles.
 
 Each file has a unique identifier in the file name, like 997240 or 235. This identifier can be used to identify the
-southwest corner of the lidar tile, see `file_id_to_offset()` in `las_explore.py` for the algorithm.
+southwest corner of the lidar tile, see `file_id_to_offset()` in `src/test_scripts/las_explore.py` for the algorithm.
 
 #### Output
 25 square tiles with side length 500 usft. Each tile has:
@@ -102,7 +102,7 @@ the lidar data at that location, in inches, using the zero point of the EPSG:636
 A list of UUID identifiers which point to “additional obstructions”, for now this list will be empty
 
 #### Implementation
-Borrow heavily from `las_explore.py`. Each grid point represents the maximum altitude of Lidar data recorded at that
+Borrow heavily from `src/test_scripts/las_explore.py`. Each grid point represents the maximum altitude of Lidar data recorded at that
 XY position.
 
 Filter out any points categorized as noise (classification 7 or 18). 

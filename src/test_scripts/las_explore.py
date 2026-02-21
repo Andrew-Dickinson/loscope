@@ -144,4 +144,4 @@ def export_voxel_obj(grid, filename):
 
 # composite_grid is indexed [x, y] (x-major). Transpose so the export loop
 # sees [y, x], then flip y so north is at the top (LiDAR y=0 is south).
-export_voxel_obj(composite_grid, 'data/voxel_terrain_slice')
+export_voxel_obj(composite_grid, '../../data/voxel_terrain_slice')
