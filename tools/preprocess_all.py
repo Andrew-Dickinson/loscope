@@ -1,18 +1,28 @@
 """
-Preprocess all .las files in data/nys_raw/.
+Preprocess all .las files in data/nys_raw/ in parallel.
 
 Usage:
     python tools/preprocess_all.py [out_dir]
 
 Default out_dir: data/preprocessed
 """
+import contextlib
+import os
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.los_analyzer.preprocessing.preprocess import run_preprocessing
+
+
+def _worker(args):
+    las_file, out_dir = args
+    with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull):
+        tiles = run_preprocessing(las_file, out_dir)
+    return las_file.name, len(tiles)
 
 
 def main():
@@ -24,25 +34,21 @@ def main():
         print(f"No .las files found in {raw_dir}")
         sys.exit(1)
 
-    real_stdout = sys.stdout
+    n_workers = os.cpu_count() or 1
+    print(f"Found {len(las_files)} file(s) · {n_workers} workers · output -> {out_dir}")
 
-    class TqdmWriter:
-        def write(self, msg):
-            if msg.strip():
-                tqdm.write(msg.rstrip(), file=real_stdout)
-        def flush(self):
-            pass
-
-    tqdm_writer = TqdmWriter()
-    tqdm.write(f"Found {len(las_files)} file(s). Output -> {out_dir}", file=real_stdout)
-    with tqdm(las_files, desc="Preprocessing", unit="file", file=real_stdout) as bar:
-        for las_file in bar:
-            bar.set_postfix(file=las_file.name)
-            sys.stdout = tqdm_writer
-            try:
-                run_preprocessing(las_file, out_dir)
-            finally:
-                sys.stdout = real_stdout
+    args = [(f, out_dir) for f in las_files]
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = {executor.submit(_worker, a): a[0] for a in args}
+        with tqdm(total=len(las_files), desc="Preprocessing", unit="file") as bar:
+            for future in as_completed(futures):
+                las_file = futures[future]
+                try:
+                    name, n_tiles = future.result()
+                    tqdm.write(f"  {name}: {n_tiles} tiles")
+                except Exception as e:
+                    tqdm.write(f"  ERROR {las_file.name}: {e}")
+                bar.update(1)
 
 
 if __name__ == "__main__":
