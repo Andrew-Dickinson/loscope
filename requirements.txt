@@ -4,3 +4,5 @@ pillow~=12.1.1
 tqdm~=4.67.3
 scipy
 pyproj
+pytest
+tifffile
