@@ -1,5 +1,5 @@
 """Tests for src.preprocessing.tile_id"""
-from src.preprocessing.tile_id import (
+from los_analyzer.preprocessing.tile_id import (
     file_id_to_offset,
     make_tile_id,
     tile_nw_corner,

@@ -5,9 +5,9 @@ import numpy as np
 import pytest
 import tifffile
 
-from src.preprocessing.io import save_tile, load_tile
-from src.preprocessing.tile import TileData
-from src.preprocessing.tile_id import TILE_SIDE_USFT
+from los_analyzer.preprocessing.io import save_tile, load_tile
+from los_analyzer.preprocessing.tile import TileData
+from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT
 
 
 @pytest.fixture

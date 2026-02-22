@@ -2,8 +2,8 @@
 import numpy as np
 import pytest
 
-from src.preprocessing.tile import split_tiles, TileData
-from src.preprocessing.tile_id import GRID_N, TILE_SIDE_USFT, LAS_SIDE_USFT
+from los_analyzer.preprocessing.tile import split_tiles, TileData
+from los_analyzer.preprocessing.tile_id import GRID_N, TILE_SIDE_USFT, LAS_SIDE_USFT
 
 
 ORIGIN = (1000000, 235000)
