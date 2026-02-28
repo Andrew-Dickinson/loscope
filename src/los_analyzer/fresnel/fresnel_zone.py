@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import os
 import numpy as np
 import pyproj
 
@@ -106,3 +107,8 @@ def compute_fresnel_zone(
 
     return FresnelZone(top=top, bottom=bottom, mask=mask,
                        x_offset=x_offset, y_offset=y_offset)
+
+if __name__ == "__main__":
+    print(os.getpid())
+    input("Press enter key to continue...")
+    compute_fresnel_zone((40.650, -73.979, 100.0), (40.7173, -74.0060, 100.0), 2400000000.0, 1.0)
