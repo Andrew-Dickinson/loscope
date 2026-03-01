@@ -7,6 +7,8 @@ import numpy as np
 
 from math import sqrt, ceil, floor
 
+from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT
+
 SPEED_OF_LIGHT_M_S = 299_792_458
 USFT_PER_METER = 1 / 0.3048006096
 EARTH_RADIUS_METERS = 6_369_160 # (approx) In NYC
@@ -93,15 +95,34 @@ def compute_fresnel_zone(
     A_nys_to_ellipsoid = construct_homogenous_coordinate_transformation(midpoint_nys, angle_context)
     Q_nys = np.linalg.matrix_transpose(A_nys_to_ellipsoid) @ Q_ellipsoid @ A_nys_to_ellipsoid
 
-    # Establish bounds for the zone, in the NYS Y axis
+    # Establish NYS Y axis sample plane grid
     max_t = np.linalg.norm(np.array([semi_minor, semi_major]) * np.array([angle_context.sin_omega, angle_context.cos_omega]))
-    t_bounds = (-max_t, max_t)
-    t_vals = get_integer_grid_within_bounds(t_bounds)
+    t_bounds = np.array((-max_t, max_t))
+    y_bounds = t_bounds + midpoint_nys[1]
+    y_vals = get_integer_grid_within_bounds(tuple(y_bounds))
 
-    for i, t in enumerate(t_vals):
-        # Plane representing y=t in the NYS coordinate system
+    # Compute absolute maximum outer bounds
+    los_bounds_x = np.array((np.min([point_a_nys[0], point_b_nys[0]]), np.max([point_a_nys[0], point_b_nys[0]])))
+    los_bounds_y = np.array((np.min([point_a_nys[1], point_b_nys[1]]), np.max([point_a_nys[1], point_b_nys[1]])))
+    fresnel_bounds_x = los_bounds_x + np.array((-semi_minor, semi_minor))
+    fresnel_bounds_y = los_bounds_y + np.array((-semi_minor, semi_minor))
+    padded_bounds_x = fresnel_bounds_x + np.array((-TILE_SIDE_USFT, TILE_SIDE_USFT))
+    padded_bounds_y = fresnel_bounds_y + np.array((-TILE_SIDE_USFT, TILE_SIDE_USFT))
+
+    output_bounds_x = floor(padded_bounds_x[0]), ceil(padded_bounds_x[1])
+    output_bounds_y = floor(padded_bounds_y[0]), ceil(padded_bounds_y[1])
+
+    output_offset = output_bounds_x[0], output_bounds_y[0]
+    output_shape = output_bounds_x[1] - output_bounds_x[0], output_bounds_y[1] - output_bounds_y[0]
+
+    output_array_upper = np.full(output_shape, np.nan)
+    output_array_lower = np.full(output_shape, np.nan)
+    output_array_mask = np.full(output_shape, 0)
+
+    for i, y in enumerate(y_vals):
+        # Plane representing the current y coordinate in the NYS coordinate system
         offset_homogenous = np.append(midpoint_nys, 1)
-        offset_homogenous[1] += t
+        offset_homogenous[1] = y
         E_slice_plane_nys = np.hstack((
             np.array([
                 [1, 0],
@@ -137,15 +158,22 @@ def compute_fresnel_zone(
         # also an approximation even on the centerline, since it assumes a spherical earth. However, we expect these
         # errors to be < 0.1 usft so we don't care
         x_grid_relative_to_midpoint = x_grid_nys - midpoint_nys[0]
-        xy_grid_coordinates_relative_to_midpoint = np.vstack((x_grid_relative_to_midpoint, np.full(x_grid_relative_to_midpoint.shape, t)))
+        xy_grid_coordinates_relative_to_midpoint = np.vstack((x_grid_relative_to_midpoint, np.full(x_grid_relative_to_midpoint.shape, y - midpoint_nys[1])))
         sample_point_grid_axial_distance_from_center = (R_around_Z_for_correction_func @ xy_grid_coordinates_relative_to_midpoint)[1]
 
         sample_point_grid_correction_factor = np.sqrt(EARTH_RADIUS_USFT**2 - sample_point_grid_axial_distance_from_center**2) - math.sqrt(EARTH_RADIUS_USFT**2 - (1 / 4)*major_axis**2)
         corrected_lower = lower_z_points_nys - sample_point_grid_correction_factor
         corrected_upper = upper_z_points_nys - sample_point_grid_correction_factor
 
+        output_y = y - output_offset[1]
+        output_x_start = x_grid_nys[0] - output_offset[0]
+        output_x_end = output_x_start + x_grid_nys.shape[0]
 
+        output_array_lower[output_x_start:output_x_end, output_y] = corrected_lower
+        output_array_upper[output_x_start:output_x_end, output_y] = corrected_upper
+        output_array_mask[output_x_start:output_x_end, output_y] = np.full(x_grid_nys.shape, 1)
 
+    return FresnelZone(output_array_upper, output_array_lower, output_array_mask, output_offset[0], output_offset[1])
 
 def translate_to_nys_plane(gps_points: list[tuple[float, float, float]]) -> list[tuple[float, float, float]]:
     nys_crs = pyproj.CRS.from_string("EPSG:6539+6360")
