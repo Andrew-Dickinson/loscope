@@ -67,9 +67,11 @@ JSON outputs should be indented to improve readability. There may eventually be 
 for now, read/write inputs and outputs directly to disk
 
 ### Coordinate Systems
-This project uses 3 different coordinate systems. The input endpoints for the LOS line are provided in WSG84 + EGM96. 
-Fresnel zone geometry is computed in an absolute coordinate frame such as ENU or ECEF. Finally, most computation, data
-storage, and outputs are processed in the NY State Plane - Long Island (EPSG:6539+6360)
+This project uses 2 different coordinate systems. The input endpoints for the LOS line are provided in WGS84 + EGM96
+(latitude, longitude, meters altitude). These must be converted to NYS State Plane before passing to Step 2.1, using
+`translate_to_nys_plane()`. All computation, data storage, and outputs are processed in the NY State Plane - Long Island
+(EPSG:6539+6360) with heights in US survey feet on the EPSG:6360 vertical datum. Earth curvature effects are corrected
+for analytically within Step 2.1 rather than by changing coordinate frames.
 
 Always make sure to use the appropriate coordinate system for each step as highlighted below. An example of converting
 coordinates can be found in `src/test_scripts/coordinates_test.py`
@@ -134,76 +136,102 @@ the zero point of the EPSG:6360 datum.
 ## Part 2: Obstruction Detection
 ### Step 2.1: Compute fresnel zone shape
 #### Input
-A pair of latitude, longitude, meters altitude (WSG84 + EGM96) tuples for the start and end of the LOS line
+A pair of (easting, northing, elevation) tuples for the start and end of the LOS line, already projected into
+NYS State Plane - Long Island (EPSG:6539+6360). Elevation is in US survey feet using the EPSG:6360 vertical datum.
+Use `translate_to_nys_plane()` to convert GPS (WGS84 + EGM96) coordinates before calling this step.
 
 A radio frequency F, and a radius multiplier alpha, for which to generate fresnel-zone ellipsoid
 
 #### Output
-Two 2D arrays, where each entry represents a sampled altitude value from the surface of the 1st fresnel zone, in a grid 
-with spacing equal to one US survey foot. One array representing the bottom of the fresnel zone ellipsoid, 
-and the other representing the top.
+A `FresnelZone` dataclass with a width-offset encoded representation of the fresnel zone, sampled on a 1 usft grid
+aligned to integer NYS state plane coordinates. The encoding stores only the valid (non-empty) extent of each
+northing row, dramatically reducing memory compared to a full 2D bounding-box array.
 
-Also include a mask array, where 1 represents the presence of an altitude value for the fresnel zone in the main arrays
-and a 0 represents no value (because the fresnel zone misses that pixel when viewed from above).
+Fields:
+- `top`: uint16 array of shape `(H, maxW)`, heights in inches. Row `i` has `widths[i]` valid entries starting at
+  column 0; entries beyond `widths[i]` are zero and must be ignored.
+- `bottom`: uint16 array of shape `(H, maxW)`, same layout as `top`.
+- `widths`: uint32 array of shape `(H,)`. Number of valid grid cells in each northing row.
+- `offsets`: uint32 array of shape `(H,)`. Per-row easting offset in usft relative to `x_base_offset`.
+  The easting of column `j` in row `i` is `x_base_offset + offsets[i] + j`.
+- `x_base_offset`: int. Easting (usft) of the west edge of the output grid (minimum possible column start).
+- `y_base_offset`: int. Northing (usft) of the south edge of the output grid (row 0).
 
-The datum for these arrays is the NYS Survey plane - Long Island (EPSG:6539+6360). Use a false northing & easting as 
-an integer offset so that the arrays don't need to stretch all the way to the corner of the survey plane coordinates. Include
-this offset as an output. Always subtract one tile width/height from each dimension of the offset (and also
-add them to the size of the array twice), so that there is a buffer zone of one tile all the way around all four edges 
-of the output array.
+Row `i` corresponds to northing `y_base_offset + i`. `H` is the total number of northing rows spanned by the
+fresnel zone. `maxW` is the maximum width across all rows.
+
+Heights are encoded as uint16 inches (same convention as the tile raster data). Values are clipped to [0, 65535].
 
 #### Implementation
-First compute the radius of the output fresnel zone at each point along the LOS line based on the frequency, then 
+First compute the radius of the output fresnel zone at each point along the LOS line based on the frequency, then
 scale it by multiplying the computed radius value by alpha. This lets callers set alpha=0.6 to identify if the fresnel
 zone is at least 60% clear (if a first request with alpha=1 identifies an obstruction)
 
-Compute the fresnel ellipsoid using an ENU or ECEF coordinate system, not the NYS Plane (to prevent projection 
-distortions over long distances), and then convert to the NYS plane when sampling heights.
+Compute the fresnel ellipsoid in the NYS plane using conic section / quadratic form math. Apply a spherical Earth
+curvature correction along the LOS axis to account for the fact that the NYS projection does not model Earth's
+curvature. Because the fresnel zone radius is much smaller than the LOS length, it is sufficient to compute the
+correction factor on the LOS centerline for each row and apply it uniformly across that row's width.
 
 ### Step 2.2: Identify tiles
 #### Input
-The 1-foot mask grid and offset from step 2.1, in the NYS Survey plane - Long Island (EPSG:6539+6360)
+The `FresnelZone` output from step 2.1, in the NYS Survey plane - Long Island (EPSG:6539+6360)
 
 #### Output
-A list of the tile identifiers created in part 1, in which any part of the fresnel zone is present according to the
-input mask. Also include in the list, any tiles which are adjacent to the tiles identified via that query 
-(expand by one tile in all 4 cardinal directions).
+A list of the tile identifiers created in part 1, in which any part of the fresnel zone is present. Derive tile
+membership from the `FresnelZone` width-offset encoding: for each row `i`, the occupied eastings run from
+`x_base_offset + offsets[i]` to `x_base_offset + offsets[i] + widths[i] - 1`
 
 ### Step 2.3: Load Rasterized tiles
 #### Input
-The offset and total grid size from step 2.1
+The `FresnelZone` from step 2.1 (for its `x_base_offset`, `y_base_offset`, and total extent)
 
 The list of tile identifiers from the output of step 2.2
 
 A list of "additional obstruction" type strings to include, or the special string '*'
-(meaning all should types should be used)
+(meaning all types should be used)
 
 #### Output
-A single combined raster grid, with the same offset and size as the step 2.1 grid, where the grid's values are sourced 
-from the height map in each tile (as well as the specified additional obstruction types)
+A `TerrainGrid` dataclass using the same width-offset encoding as `FresnelZone`, covering the same spatial extent.
 
-Also include a mask for which grid coordinates are actually populated with values from loaded tiles and obstructions, vs
-left blank
+Fields:
+- `heights`: uint16 array of shape `(H, maxW)`, heights in inches. Row `i` has `widths[i]` valid entries starting at
+  column 0; entries beyond `widths[i]` are zero and must be ignored.
+- `widths`: uint32 array of shape `(H,)`. Number of valid grid cells in each northing row.
+- `offsets`: uint32 array of shape `(H,)`. Per-row easting offset in usft relative to `x_base_offset`.
+- `x_base_offset`: int. Easting (usft) of the west edge of the output grid.
+- `y_base_offset`: int. Northing (usft) of the south edge of the output grid (row 0).
 
-Also include a list of the additional obstruction IDs that matched the input filter
+Also include a list of the additional obstruction IDs that matched the input filter.
+
+The `widths` and `offsets` arrays must match those of the input `FresnelZone` exactly, so that corresponding rows
+and columns in the two structures refer to the same NYS coordinates without any additional alignment step.
 
 ##### Implementation
-First, fill the output grid with heightmap data from the referenced tiles. As we load each tile, keep track of the ID of 
+First, fill the output object with heightmap data from the referenced tiles. As we load each tile, keep track of the ID of 
 all the additional obstructions referenced by that tile that match our filter from the input, keeping in mind that
 one obstruction may span many tiles. 
 
-Next, use our filtered list of obstruction IDs to load each one. Apply it to the output grid by taking the maximum 
-height at each grid coordinate, between the existing grid and the obstruction.
+Next, use our filtered list of obstruction IDs to load each one. Apply it to the output object by taking the maximum 
+height at each grid coordinate, between the existing output data and the obstruction we loaded.
 
 ### Step 2.4: Compute Intersection
 #### Input
-The two grids (and a mask) with fresnel zone upper and lower bounds from step 2.1
+The `FresnelZone` (with its `top`, `bottom`, `widths`, and `offsets` fields) from step 2.1
 
-The combined grid from step 2.3
+The `TerrainGrid` from step 2.3
 
-If generated according to this spec, these inputs are already in the same reference frame and require no offsets
+Because both inputs share the same `widths`, `offsets`, `x_base_offset`, and `y_base_offset`, corresponding entries
+refer to the same NYS coordinates and require no additional alignment.
 
-### Output
-A raster grid with the same reference frame as the inputs, containing the level of obstruction at each grid location on
-a scale of 0 to 1. That is, for each grid location, report how far the combined surface grid is located above the 
-fresnel zone lower bound, as a fraction of the upper bound position
+#### Output
+An `ObstructionGrid` dataclass using the same width-offset encoding as `FresnelZone` and `TerrainGrid`.
+
+Fields:
+- `values`: float32 array of shape `(H, maxW)`. Row `i` has `widths[i]` valid entries starting at column 0.
+  Each value is the obstruction level on a scale of 0 to 1: how far the terrain height is above the fresnel zone
+  lower bound, as a fraction of the total fresnel zone height at that location
+  (`(terrain - bottom) / (top - bottom)`). Clipped to [0, 1]
+- `widths`: uint32 array of shape `(H,)`. Copied from the input `FresnelZone`.
+- `offsets`: uint32 array of shape `(H,)`. Copied from the input `FresnelZone`.
+- `x_base_offset`: int. Copied from the input `FresnelZone`.
+- `y_base_offset`: int. Copied from the input `FresnelZone`.
