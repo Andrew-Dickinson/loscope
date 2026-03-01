@@ -182,9 +182,31 @@ def test_stress_test_fresnel_zone():
     alpha = 0.8
 
     nys_a, nys_b = translate_to_nys_plane([gps_A, gps_B])
-    compute_fresnel_zone(nys_a, nys_b, frequency_hz, alpha)
+    zone = compute_fresnel_zone(nys_a, nys_b, frequency_hz, alpha)
+    print(zone)
 
 def test_old_stress_test_fresnel_zone():
     gps_A, gps_B = (40.650, -73.979, 100.0), (40.7173, -74.0060, 100.0)
     nys_a, nys_b = translate_to_nys_plane([gps_A, gps_B])
-    compute_fresnel_zone(nys_a, nys_b, 2400000000.0, 1.0)
+    zone = compute_fresnel_zone(nys_a, nys_b, 2400000000.0, 1.0)
+    print(zone)
+
+def test_east_west_long_fresnel_zone():
+    gps_A = (40.650, -73.800, 100.0)
+    gps_B = (40.650, -74.000, 100.0)
+    frequency_hz = 5_000_000_000
+    alpha = 1
+
+    nys_a, nys_b = translate_to_nys_plane([gps_A, gps_B])
+    zone = compute_fresnel_zone(nys_a, nys_b, frequency_hz, alpha)
+    print(zone)
+
+def test_north_south_long_fresnel_zone():
+    gps_A = (40.650, -73.800, 100.0)
+    gps_B = (40.8, -73.800, 100.0)
+    frequency_hz = 5_000_000_000
+    alpha = 1
+
+    nys_a, nys_b = translate_to_nys_plane([gps_A, gps_B])
+    zone = compute_fresnel_zone(nys_a, nys_b, frequency_hz, alpha)
+    print(zone)

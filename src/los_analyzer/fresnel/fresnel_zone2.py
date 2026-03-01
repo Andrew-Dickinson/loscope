@@ -9,6 +9,7 @@ from math import sqrt, ceil, floor
 
 from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT
 
+UINT16_MAX = 2**16 -  1
 SPEED_OF_LIGHT_M_S = 299_792_458
 USFT_PER_METER = 1 / 0.3048006096
 EARTH_RADIUS_METERS = 6_369_160 # (approx) In NYC
@@ -63,11 +64,12 @@ class AngleContext:
 
 @dataclass
 class FresnelZone:
-    top: np.ndarray       # float64, shape (W, H), usft; NaN outside mask
-    bottom: np.ndarray    # float64, shape (W, H), usft; NaN outside mask
-    mask: np.ndarray      # uint8,   shape (W, H), 1=present 0=absent
-    x_offset: int         # min easting  (west edge)  of grid in NYS usft
-    y_offset: int         # min northing (south edge) of grid in NYS usft
+    top: np.ndarray       # uint16, shape (H, maxW), inches; Filled with 0 outside widths[i] for each row  i
+    bottom: np.ndarray    # uint16, shape (H, maxW), inches; Filled with 0 outside widths[i] for each row  i
+    widths: np.ndarray    # uint32, shape (H), usft, width of fresnel, equals the number of measurements in top & bottom
+    offsets: np.ndarray   # uint32, shape (H), usft, per-row offset, add to x_base_offset
+    x_base_offset: int    # min easting  (west edge)  of grid in NYS usft, add to per-row offset to find starting point
+    y_base_offset: int    # min northing (south edge) of grid in NYS usft
 
 
 def compute_fresnel_zone(
@@ -101,23 +103,14 @@ def compute_fresnel_zone(
     y_bounds = t_bounds + midpoint_nys[1]
     y_vals = get_integer_grid_within_bounds(tuple(y_bounds))
 
-    # Compute absolute maximum outer bounds
-    los_bounds_x = np.array((np.min([point_a_nys[0], point_b_nys[0]]), np.max([point_a_nys[0], point_b_nys[0]])))
-    los_bounds_y = np.array((np.min([point_a_nys[1], point_b_nys[1]]), np.max([point_a_nys[1], point_b_nys[1]])))
-    fresnel_bounds_x = los_bounds_x + np.array((-semi_minor, semi_minor))
-    fresnel_bounds_y = los_bounds_y + np.array((-semi_minor, semi_minor))
-    padded_bounds_x = fresnel_bounds_x + np.array((-TILE_SIDE_USFT, TILE_SIDE_USFT))
-    padded_bounds_y = fresnel_bounds_y + np.array((-TILE_SIDE_USFT, TILE_SIDE_USFT))
-
-    output_bounds_x = floor(padded_bounds_x[0]), ceil(padded_bounds_x[1])
-    output_bounds_y = floor(padded_bounds_y[0]), ceil(padded_bounds_y[1])
-
-    output_offset = output_bounds_x[0], output_bounds_y[0]
-    output_shape = output_bounds_x[1] - output_bounds_x[0], output_bounds_y[1] - output_bounds_y[0]
-
-    output_array_upper = np.full(output_shape, np.nan)
-    output_array_lower = np.full(output_shape, np.nan)
-    output_array_mask = np.full(output_shape, 0)
+    # Construct output containers
+    max_width = abs(ceil(2 * semi_minor / angle_context.sin_theta))
+    output_height = y_vals.shape[0]
+    base_offsets = floor(np.min([point_a_nys[0], point_b_nys[0]]) - semi_minor - TILE_SIDE_USFT), y_vals[0]
+    aggregated_offsets = np.zeros((output_height,), dtype=np.uint32)
+    aggregated_widths = np.zeros((output_height,), dtype=np.uint32)
+    aggregated_upper = np.zeros((output_height,  max_width), dtype=np.float64)
+    aggregated_lower = np.zeros((output_height, max_width), dtype=np.float64)
 
     for i, y in enumerate(y_vals):
         # Plane representing the current y coordinate in the NYS coordinate system
@@ -165,15 +158,23 @@ def compute_fresnel_zone(
         corrected_lower = lower_z_points_nys - sample_point_grid_correction_factor
         corrected_upper = upper_z_points_nys - sample_point_grid_correction_factor
 
-        output_y = y - output_offset[1]
-        output_x_start = x_grid_nys[0] - output_offset[0]
-        output_x_end = output_x_start + x_grid_nys.shape[0]
+        output_width = x_grid_nys.shape[0]
+        aggregated_widths[i] = output_width
+        aggregated_offsets[i] = x_grid_nys[0] - base_offsets[0]
+        aggregated_lower[i, 0:output_width] = corrected_lower
+        aggregated_upper[i, 0:output_width] = corrected_upper
 
-        output_array_lower[output_x_start:output_x_end, output_y] = corrected_lower
-        output_array_upper[output_x_start:output_x_end, output_y] = corrected_upper
-        output_array_mask[output_x_start:output_x_end, output_y] = np.full(x_grid_nys.shape, 1)
+    top_aggregated_inches = np.array(aggregated_upper.clip(0, UINT16_MAX) * 12, dtype=np.uint16)
+    bottom_aggregated_inches = np.array(aggregated_lower.clip(0, UINT16_MAX) * 12, dtype=np.uint16)
 
-    return FresnelZone(output_array_upper, output_array_lower, output_array_mask, output_offset[0], output_offset[1])
+    return FresnelZone(
+        top=top_aggregated_inches,
+        bottom=bottom_aggregated_inches,
+        widths=aggregated_widths,
+        offsets=aggregated_offsets,
+        x_base_offset=base_offsets[0],
+        y_base_offset=base_offsets[1]
+    )
 
 def translate_to_nys_plane(gps_points: list[tuple[float, float, float]]) -> list[tuple[float, float, float]]:
     nys_crs = pyproj.CRS.from_string("EPSG:6539+6360")
