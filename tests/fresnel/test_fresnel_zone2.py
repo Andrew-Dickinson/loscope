@@ -210,3 +210,13 @@ def test_north_south_long_fresnel_zone():
     nys_a, nys_b = translate_to_nys_plane([gps_A, gps_B])
     zone = compute_fresnel_zone(nys_a, nys_b, frequency_hz, alpha)
     print(zone)
+
+def test_new_fresnel_zone():
+    GPS_A = (40.81399261450678, -73.9576824966002, 100.0)
+    GPS_B = (40.81669146433694, -73.93829606722406, 100.0)
+    FREQUENCY_HZ = 5_000_000_000
+    ALPHA = 1.0
+
+    nys_a, nys_b = translate_to_nys_plane([GPS_A, GPS_B])
+    zone = compute_fresnel_zone(nys_a, nys_b, FREQUENCY_HZ, ALPHA)
+    print(zone)

@@ -104,7 +104,7 @@ def compute_fresnel_zone(
     y_vals = get_integer_grid_within_bounds(tuple(y_bounds))
 
     # Construct output containers
-    max_width = abs(ceil(2 * semi_minor / angle_context.sin_theta))
+    max_width = abs(ceil(2 * semi_minor / angle_context.sin_theta)) + 1
     output_height = y_vals.shape[0]
     base_offsets = floor(np.min([point_a_nys[0], point_b_nys[0]]) - semi_minor - TILE_SIDE_USFT), y_vals[0]
     aggregated_offsets = np.zeros((output_height,), dtype=np.uint32)
