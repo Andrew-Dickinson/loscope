@@ -7,7 +7,7 @@ from los_analyzer.fresnel.fresnel_zone2 import (
     construct_fresnel_quadratic,
     homogenous_rotation_matrix_ellipsoid_to_nys,
     translate_to_nys_plane, AngleContext, construct_homogenous_coordinate_transformation,
-    get_integer_grid_within_bounds, compute_fresnel_zone, normalize_ellipse,
+    get_integer_grid_within_bounds, compute_fresnel_zone, normalize_ellipse, FresnelZone,
 )
 
 
@@ -220,3 +220,18 @@ def test_new_fresnel_zone():
     nys_a, nys_b = translate_to_nys_plane([GPS_A, GPS_B])
     zone = compute_fresnel_zone(nys_a, nys_b, FREQUENCY_HZ, ALPHA)
     print(zone)
+
+
+def test_fresnel_zone_empty_x_grid():
+    # At 24 GHz the Fresnel zone is tiny (~0.17 usft semi-minor), so the
+    # x_bounds_nys span is < 1 usft wide (e.g. [1000574.22, 1000574.39]).
+    # ceil(lower) > floor(upper), so get_integer_grid_within_bounds returns an
+    # empty array, which then crashes on x_grid_nys[0] at line 163.
+    GPS_A = (40.861448, -73.907696, 76.0)
+    GPS_B = (40.830477, -73.941012, 80.0)
+    FREQUENCY_HZ = 24_000_000_000
+    ALPHA = 1.0
+
+    nys_a, nys_b = translate_to_nys_plane([GPS_A, GPS_B])
+    zone = compute_fresnel_zone(nys_a, nys_b, FREQUENCY_HZ, ALPHA)
+    assert isinstance(zone, FresnelZone)

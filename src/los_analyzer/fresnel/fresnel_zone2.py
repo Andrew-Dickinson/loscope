@@ -136,6 +136,11 @@ def compute_fresnel_zone(
         ellipse_nys_x_offset = ellipse_offset_xz[0] + midpoint_nys[0]
         x_bounds_nys = ellipse_nys_x_offset + np.array(ellipse_x_bounds)
         x_grid_nys = get_integer_grid_within_bounds(x_bounds_nys)
+
+        # No integer x falls within the ellipse bounds for this row — leave width=0 and skip sampling
+        if x_grid_nys.shape[0] == 0:
+            continue
+
         x_grid_ellipse = x_grid_nys - ellipse_nys_x_offset
 
         lower_z_points_ellipse, upper_z_points_ellipse = sample_conic_at_x_grid(C_ellipse_conic_section_norm, x_grid_ellipse)
