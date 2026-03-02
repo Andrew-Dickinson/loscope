@@ -6,3 +6,4 @@ scipy
 pyproj
 pytest
 tifffile
+boto3

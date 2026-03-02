@@ -11,6 +11,7 @@ import base64
 import io
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -291,10 +292,31 @@ def run(tile_dir="data/preprocessed"):
     print()
     print("=== Step 2.2: Identify tiles ===")
     print(f"  tile_dir: {tile_dir}")
+
+    # Compute all tiles that geometrically intersect the zone, regardless of
+    # what is already on disk.
+    all_needed = identify_tiles(zone, require_exists=False)
+    print(f"  {len(all_needed)} tile(s) intersect the zone:")
+
+    # If S3 is configured, fetch any tiles not already in the local cache.
+    if "LOS_S3_BUCKET" in os.environ and "LOS_S3_PREFIX" in os.environ:
+        from los_analyzer.tiles.fetch import s3_fetcher_from_env
+        fetcher = s3_fetcher_from_env(tile_dir)
+        missing = [t for t in all_needed if not fetcher.is_cached(t)]
+        if missing:
+            print(f"  Fetching {len(missing)} tile(s) from S3 ...")
+            fetcher.ensure_tiles(missing)
+        else:
+            print("  All tiles already cached — skipping S3 fetch")
+    else:
+        print("  LOS_S3_BUCKET / LOS_S3_PREFIX not set — using local tiles only")
+
+    # Identify which tiles are actually present on disk (after any fetching).
     tiles = identify_tiles(zone, tile_dir)
-    print(f"  {len(tiles)} tile(s) found:")
-    for t in tiles:
-        print(f"    {t}")
+    if len(tiles) < len(all_needed):
+        missing_local = set(all_needed) - set(tiles)
+        print(f"  Warning: {len(missing_local)} tile(s) not available locally: {sorted(missing_local)}")
+    print(f"  {len(tiles)} tile(s) ready to load")
 
     print()
     print("=== Step 2.3: Load rasterized tiles ===")
