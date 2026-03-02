@@ -18,8 +18,8 @@ from los_analyzer.fresnel.fresnel_zone2 import compute_fresnel_zone, translate_t
 from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT, file_id_to_offset
 from los_analyzer.tiles.identify import identify_tiles
 
-GPS_A = (40.650, -73.800, 100.0)
-GPS_B = (40.7173, -74.0060, 10000.0)
+GPS_A = (40.81399261450678, -73.9576824966002, 100.0)
+GPS_B = (40.81669146433694, -73.93829606722406, 101.0)
 FREQUENCY_HZ = 5_000_000_000
 ALPHA = 0.8
 
