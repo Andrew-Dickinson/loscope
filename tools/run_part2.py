@@ -25,10 +25,10 @@ from los_analyzer.tiles.identify import identify_tiles
 from los_analyzer.tiles.intersect import compute_intersection
 from los_analyzer.tiles.load import load_terrain_grid
 
-GPS_A = (40.81399261450678, -73.9576824966002, 25.0)
-GPS_B = (40.81669146433694, -73.93829606722406, 51.0)
-FREQUENCY_HZ = 5_000_000_000
-ALPHA = 0.8
+GPS_A = (40.861448, -73.907696, 76.0)
+GPS_B = ( 40.830477, -73.941012, 80.0)
+FREQUENCY_HZ = 24_000_000_000
+ALPHA = 1.0
 
 _TO_WGS84 = Transformer.from_crs("EPSG:6539", "EPSG:4326", always_xy=True)
 
@@ -92,43 +92,75 @@ def _lonlat(easting: float, northing: float) -> list[float]:
     return [lon, lat]
 
 
-def _obstruction_raster_overlay(obstruction) -> tuple[str, list] | tuple[None, None]:
-    """Render the ObstructionGrid as a base64 PNG and return (data_url, leaflet_bounds).
+def _tile_obstruction_overlay(
+    tile_id: str,
+    obstruction,
+) -> tuple[str, list] | tuple[None, None]:
+    """Render the obstruction values for a single tile as a base64 PNG.
 
-    Colors: green (0) → yellow (0.5) → red (1.0).  Transparent outside the valid zone.
-    Returns (None, None) if the grid is empty.
+    Color scale: green (0) → yellow (0.5) → red (1.0).  Pixels with
+    obstruction == 0 are fully transparent so only obstructed cells are drawn.
+    Returns (None, None) when the tile has no overlap with the obstruction grid
+    or all overlapping values are zero.
     """
+    sw = _tile_sw_corner_nys(tile_id)
+    if sw is None:
+        return None, None
+    e0, n0 = sw
+
     H = int(obstruction.widths.shape[0])
-    if H == 0 or int(obstruction.widths.max()) == 0:
+    i_start = max(0, n0 - obstruction.y_base_offset)
+    i_end = min(H, n0 + TILE_SIDE_USFT - obstruction.y_base_offset)
+    if i_start >= i_end:
         return None, None
 
-    img_w = int(np.max(obstruction.offsets + obstruction.widths))
-    rgba = np.zeros((H, img_w, 4), dtype=np.uint8)
+    img_h = i_end - i_start
+    rgba = np.zeros((img_h, TILE_SIDE_USFT, 4), dtype=np.uint8)
+    has_obstruction = False
 
-    for i in range(H):
-        w = int(obstruction.widths[i])
-        if w == 0:
+    for i in range(i_start, i_end):
+        width = int(obstruction.widths[i])
+        if width == 0:
             continue
-        off = int(obstruction.offsets[i])
-        vals = obstruction.values[i, :w].clip(0.0, 1.0)
+        e_row_start = obstruction.x_base_offset + int(obstruction.offsets[i])
+
+        overlap_e_start = max(e_row_start, e0)
+        overlap_e_end = min(e_row_start + width, e0 + TILE_SIDE_USFT)
+        if overlap_e_start >= overlap_e_end:
+            continue
+
+        col_start = overlap_e_start - e_row_start
+        col_end = overlap_e_end - e_row_start
+        vals = obstruction.values[i, col_start:col_end].clip(0.0, 1.0)
+
+        nonzero = vals > 0
+        if not nonzero.any():
+            continue
+        has_obstruction = True
+
+        img_col = overlap_e_start - e0
+        img_row = i - i_start
 
         r = np.where(vals <= 0.5, vals * 2.0 * 255, 255).astype(np.uint8)
         g = np.where(vals <= 0.5, 255, (1.0 - (vals - 0.5) * 2.0) * 255).astype(np.uint8)
-        b = np.zeros(w, dtype=np.uint8)
-        a = np.full(w, 200, dtype=np.uint8)
+        b = np.zeros(len(vals), dtype=np.uint8)
+        a = np.where(nonzero, 200, 0).astype(np.uint8)
 
-        rgba[i, off:off + w] = np.stack([r, g, b, a], axis=1)
+        rgba[img_row, img_col:img_col + len(vals)] = np.stack([r, g, b, a], axis=1)
 
-    # Flip vertically: image row 0 = northernmost NYS row
-    rgba = rgba[::-1]
+    if not has_obstruction:
+        return None, None
+
+    rgba = rgba[::-1]  # flip: image row 0 = northernmost
 
     buf = io.BytesIO()
     Image.fromarray(rgba, "RGBA").save(buf, format="PNG")
     data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
-    sw_ll = _lonlat(obstruction.x_base_offset, obstruction.y_base_offset)
-    ne_ll = _lonlat(obstruction.x_base_offset + img_w, obstruction.y_base_offset + H)
-    # Leaflet bounds: [[south_lat, west_lon], [north_lat, east_lon]]
+    actual_n0 = obstruction.y_base_offset + i_start
+    actual_n1 = obstruction.y_base_offset + i_end
+    sw_ll = _lonlat(e0, actual_n0)
+    ne_ll = _lonlat(e0 + TILE_SIDE_USFT, actual_n1)
     bounds = [[sw_ll[1], sw_ll[0]], [ne_ll[1], ne_ll[0]]]
 
     return data_url, bounds
@@ -144,6 +176,17 @@ def generate_tile_map(
     obstruction=None,
 ) -> None:
     """Write an interactive Leaflet HTML map of selected tiles to output_path."""
+    # Build per-tile obstruction overlays first so we know which tiles are obstructed
+    # before constructing tile features (needed for styling).
+    obstructed_tile_ids: set[str] = set()
+    tile_overlays: list[dict] = []
+    if obstruction is not None:
+        for tid in tile_ids:
+            url, bounds = _tile_obstruction_overlay(tid, obstruction)
+            if url is not None:
+                tile_overlays.append({"url": url, "bounds": bounds})
+                obstructed_tile_ids.add(tid)
+
     tile_features = []
     for tile_id in tile_ids:
         sw = _tile_sw_corner_nys(tile_id)
@@ -160,7 +203,7 @@ def generate_tile_map(
         ]
         tile_features.append({
             "type": "Feature",
-            "properties": {"id": tile_id},
+            "properties": {"id": tile_id, "hasObstruction": tile_id in obstructed_tile_ids},
             "geometry": {"type": "Polygon", "coordinates": [ring]},
         })
 
@@ -193,11 +236,7 @@ def generate_tile_map(
 
     tiles_js = json.dumps({"type": "FeatureCollection", "features": tile_features})
     los_js = json.dumps({"type": "FeatureCollection", "features": los_features})
-
-    raster_url, raster_bounds = (None, None)
-    if obstruction is not None:
-        raster_url, raster_bounds = _obstruction_raster_overlay(obstruction)
-    raster_js = json.dumps({"url": raster_url, "bounds": raster_bounds}) if raster_url else "null"
+    tile_overlays_js = json.dumps(tile_overlays)
 
     # Fallback center (midpoint of LOS line in lat/lon) if no tiles are present.
     cx = (a_ll[1] + b_ll[1]) / 2
@@ -218,19 +257,21 @@ def generate_tile_map(
 <body>
 <div id="map"></div>
 <script>
-var map = L.map('map');
+var map = L.map('map', {{maxZoom: 22}});
 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  maxNativeZoom: 19,
+  maxZoom: 22
 }}).addTo(map);
 
 var tilesData = {tiles_js};
 var losData = {los_js};
 var ellipseData = {ellipse_js};
-var rasterOverlay = {raster_js};
+var tileOverlays = {tile_overlays_js};
 
-if (rasterOverlay) {{
-  L.imageOverlay(rasterOverlay.url, rasterOverlay.bounds, {{opacity: 0.85, zIndex: 200}}).addTo(map);
-}}
+tileOverlays.forEach(function(o) {{
+  L.imageOverlay(o.url, o.bounds, {{opacity: 0.85, zIndex: 200}}).addTo(map);
+}});
 
 if (ellipseData) {{
   L.geoJSON(ellipseData, {{
@@ -239,9 +280,16 @@ if (ellipseData) {{
 }}
 
 var tileLayer = L.geoJSON(tilesData, {{
-  style: {{ color: '#3388ff', weight: 1, fillOpacity: 0.3, fillColor: '#3388ff' }},
+  style: function(f) {{
+    return f.properties.hasObstruction
+      ? {{ color: '#e63030', weight: 2, fillOpacity: 0.15, fillColor: '#e63030' }}
+      : {{ color: '#3388ff', weight: 1, fillOpacity: 0.05, fillColor: '#3388ff' }};
+  }},
   onEachFeature: function(f, l) {{
-    l.bindPopup('<code>' + f.properties.id + '</code>');
+    var label = f.properties.hasObstruction
+      ? '<code>' + f.properties.id + '</code> <span style="color:#e63030;font-weight:bold">obstructed</span>'
+      : '<code>' + f.properties.id + '</code>';
+    l.bindPopup(label);
   }}
 }}).addTo(map);
 
@@ -256,11 +304,11 @@ L.geoJSON(losData, {{
   }}
 }}).addTo(map);
 
-var bounds = tileLayer.getBounds();
-if (bounds.isValid()) {{
-  map.fitBounds(bounds.pad(0.3));
+var losBounds = L.geoJSON(losData).getBounds();
+if (losBounds.isValid()) {{
+  map.fitBounds(losBounds.pad(0.15));
 }} else {{
-  map.setView([{cx:.6f}, {cy:.6f}], 13);
+  map.setView([{cx:.6f}, {cy:.6f}], 15);
 }}
 </script>
 </body>
