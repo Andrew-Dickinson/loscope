@@ -2,7 +2,7 @@
 from los_analyzer.preprocessing.tile_id import (
     file_id_to_offset,
     make_tile_id,
-    tile_nw_corner,
+    tile_sw_corner,
     LAS_SIDE_USFT,
     TILE_SIDE_USFT,
 )
@@ -33,25 +33,25 @@ def test_make_tile_id_se_corner():
     assert make_tile_id("235", 4, 0) == "235_40"
 
 
-def test_tile_nw_corner_nw_tile():
-    """When xi=0, yi=4 (NW tile), tile_nw_corner should return origin + (0, LAS_SIDE_USFT)."""
+def test_tile_sw_corner_nw_tile():
+    """When xi=0, yi=4 (NW tile), tile_sw_corner should return origin + (0, 4*TILE_SIDE_USFT)."""
     origin = (1000000, 235000)
-    x, y = tile_nw_corner(origin, 0, 4)
+    x, y = tile_sw_corner(origin, 0, 4)
     assert x == origin[0]
-    assert y == origin[1] + LAS_SIDE_USFT
+    assert y == origin[1] + 4 * TILE_SIDE_USFT
 
 
-def test_tile_nw_corner_se_tile():
-    """When xi=4, yi=0 (SE tile), tile_nw_corner should return the top-left of that tile."""
+def test_tile_sw_corner_se_tile():
+    """When xi=4, yi=0 (SE tile), tile_sw_corner should return the bottom-left of that tile."""
     origin = (1000000, 235000)
-    x, y = tile_nw_corner(origin, 4, 0)
+    x, y = tile_sw_corner(origin, 4, 0)
     assert x == origin[0] + 4 * TILE_SIDE_USFT
-    assert y == origin[1] + TILE_SIDE_USFT
+    assert y == origin[1]
 
 
-def test_tile_nw_corner_y_is_max_y_of_tile():
-    """tile_nw_corner y-coordinate should equal the top (max Y) edge of the tile."""
+def test_tile_sw_corner_y_is_min_y_of_tile():
+    """tile_sw_corner y-coordinate should equal the bottom (min Y) edge of the tile."""
     origin = (1000000, 235000)
     for yi in range(5):
-        _, y = tile_nw_corner(origin, 0, yi)
-        assert y == origin[1] + (yi + 1) * TILE_SIDE_USFT
+        _, y = tile_sw_corner(origin, 0, yi)
+        assert y == origin[1] + yi * TILE_SIDE_USFT

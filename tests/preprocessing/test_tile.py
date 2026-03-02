@@ -44,17 +44,17 @@ def test_each_tile_dtype_is_uint16(tiles):
 
 
 def test_nw_corner_tile_id_and_offsets(tiles):
-    """When xi=0, yi=4 (NW tile), tile_id should be '235_04' and offsets should match NW corner."""
+    """When xi=0, yi=4 (NW tile), tile_id should be '235_04' and offsets should match SW corner."""
     nw = next(t for t in tiles if t.tile_id == "235_04")
     assert nw.x_offset == ORIGIN[0]
-    assert nw.y_offset == ORIGIN[1] + LAS_SIDE_USFT
+    assert nw.y_offset == ORIGIN[1] + 4 * TILE_SIDE_USFT
 
 
 def test_se_corner_tile_id_and_offsets(tiles):
-    """When xi=4, yi=0 (SE tile), tile_id should be '235_40' and offsets should match SE NW corner."""
+    """When xi=4, yi=0 (SE tile), tile_id should be '235_40' and offsets should match SW corner."""
     se = next(t for t in tiles if t.tile_id == "235_40")
     assert se.x_offset == ORIGIN[0] + 4 * TILE_SIDE_USFT
-    assert se.y_offset == ORIGIN[1] + TILE_SIDE_USFT
+    assert se.y_offset == ORIGIN[1]
 
 
 def test_tiles_have_no_overlap(tiles):
@@ -77,8 +77,8 @@ def test_raster_data_matches_source_grid(tiles, sample_grid):
     for tile in tiles:
         # Recover xi from x_offset
         xi = (tile.x_offset - ORIGIN[0]) // TILE_SIDE_USFT
-        # Recover yi from y_offset: y_offset = origin[1] + (yi+1)*500 → yi = (y_offset - origin[1])/500 - 1
-        yi = (tile.y_offset - ORIGIN[1]) // TILE_SIDE_USFT - 1
+        # Recover yi from y_offset: y_offset = origin[1] + yi*500 → yi = (y_offset - origin[1])/500
+        yi = (tile.y_offset - ORIGIN[1]) // TILE_SIDE_USFT
         expected = sample_grid[xi * TILE_SIDE_USFT:(xi + 1) * TILE_SIDE_USFT,
                                yi * TILE_SIDE_USFT:(yi + 1) * TILE_SIDE_USFT]
         np.testing.assert_array_equal(tile.raster, expected)

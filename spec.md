@@ -89,6 +89,10 @@ Each file represents a 2500 usft square, which we will slice into 25 smaller til
 Each file has a unique identifier in the file name, like 997240 or 235. This identifier can be used to identify the
 southwest corner of the lidar tile, see `file_id_to_offset()` in `src/test_scripts/las_explore.py` for the algorithm.
 
+These file names form a grid of 2500x2500 ft tiles, and that grid ALWAYS starts at `912117` in the very south-west, with
+a lower left (SW) corner of 912500,117500 (in NYS - Long island coordinates) The grid is always aligned to that 
+starting value
+
 #### Output
 25 square tiles with side length 500 usft. Each tile has:
 
@@ -96,7 +100,7 @@ A unique identifying ID string, computed by taking the identifier of the source 
 XY is a grid index within the 5x5 square tile grid formed by slicing up the source lidar tile. E.g. `_04` would be the 
 north-west corner of the source lidar tile
 
-An integer x, y offset representing the position of the top left corner of the tile (in the NYS coordinate frame)
+An integer x, y offset representing the position of the bottom left corner (SW) of the tile (in the NYS coordinate frame)
 
 A 1 usft raster grid of points, where each point is a 16 bit unsigned integer which encodes the integer height of 
 the lidar data at that location, in inches, using the zero point of the EPSG:6360 datum.

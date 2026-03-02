@@ -27,6 +27,6 @@ def make_tile_id(file_id, xi, yi):
     return f"{file_id}_{xi}{yi}"
 
 
-def tile_nw_corner(origin, xi, yi):
-    """Return the NW corner (min X, max Y) of tile at grid position (xi, yi)."""
-    return (origin[0] + xi * TILE_SIDE_USFT, origin[1] + (yi + 1) * TILE_SIDE_USFT)
+def tile_sw_corner(origin, xi, yi):
+    """Return the SW corner (min X, min Y) of tile at grid position (xi, yi)."""
+    return (origin[0] + xi * TILE_SIDE_USFT, origin[1] + yi * TILE_SIDE_USFT)
