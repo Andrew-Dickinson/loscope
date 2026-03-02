@@ -1,5 +1,5 @@
 """
-Run Part 2 obstruction-detection steps 2.1 and 2.2.
+Run Part 2 obstruction-detection steps 2.1 through 2.4.
 
 Usage:
     python tools/run_part2.py [tile_dir]
@@ -7,19 +7,25 @@ Usage:
 Default tile_dir: data/preprocessed
 Writes an interactive HTML tile map to data/tile_map.html.
 """
+import base64
+import io
 import json
 import math
 import sys
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
 from pyproj import Transformer
 
 from los_analyzer.fresnel.fresnel_zone2 import compute_fresnel_zone, translate_to_nys_plane
 from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT, file_id_to_offset
 from los_analyzer.tiles.identify import identify_tiles
+from los_analyzer.tiles.intersect import compute_intersection
+from los_analyzer.tiles.load import load_terrain_grid
 
-GPS_A = (40.81399261450678, -73.9576824966002, 100.0)
-GPS_B = (40.81669146433694, -73.93829606722406, 101.0)
+GPS_A = (40.81399261450678, -73.9576824966002, 25.0)
+GPS_B = (40.81669146433694, -73.93829606722406, 51.0)
 FREQUENCY_HZ = 5_000_000_000
 ALPHA = 0.8
 
@@ -85,6 +91,48 @@ def _lonlat(easting: float, northing: float) -> list[float]:
     return [lon, lat]
 
 
+def _obstruction_raster_overlay(obstruction) -> tuple[str, list] | tuple[None, None]:
+    """Render the ObstructionGrid as a base64 PNG and return (data_url, leaflet_bounds).
+
+    Colors: green (0) → yellow (0.5) → red (1.0).  Transparent outside the valid zone.
+    Returns (None, None) if the grid is empty.
+    """
+    H = int(obstruction.widths.shape[0])
+    if H == 0 or int(obstruction.widths.max()) == 0:
+        return None, None
+
+    img_w = int(np.max(obstruction.offsets + obstruction.widths))
+    rgba = np.zeros((H, img_w, 4), dtype=np.uint8)
+
+    for i in range(H):
+        w = int(obstruction.widths[i])
+        if w == 0:
+            continue
+        off = int(obstruction.offsets[i])
+        vals = obstruction.values[i, :w].clip(0.0, 1.0)
+
+        r = np.where(vals <= 0.5, vals * 2.0 * 255, 255).astype(np.uint8)
+        g = np.where(vals <= 0.5, 255, (1.0 - (vals - 0.5) * 2.0) * 255).astype(np.uint8)
+        b = np.zeros(w, dtype=np.uint8)
+        a = np.full(w, 200, dtype=np.uint8)
+
+        rgba[i, off:off + w] = np.stack([r, g, b, a], axis=1)
+
+    # Flip vertically: image row 0 = northernmost NYS row
+    rgba = rgba[::-1]
+
+    buf = io.BytesIO()
+    Image.fromarray(rgba, "RGBA").save(buf, format="PNG")
+    data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    sw_ll = _lonlat(obstruction.x_base_offset, obstruction.y_base_offset)
+    ne_ll = _lonlat(obstruction.x_base_offset + img_w, obstruction.y_base_offset + H)
+    # Leaflet bounds: [[south_lat, west_lon], [north_lat, east_lon]]
+    bounds = [[sw_ll[1], sw_ll[0]], [ne_ll[1], ne_ll[0]]]
+
+    return data_url, bounds
+
+
 def generate_tile_map(
     tile_ids: list[str],
     nys_a: tuple[float, float, float],
@@ -92,6 +140,7 @@ def generate_tile_map(
     output_path: Path,
     frequency_hz: float = FREQUENCY_HZ,
     alpha: float = ALPHA,
+    obstruction=None,
 ) -> None:
     """Write an interactive Leaflet HTML map of selected tiles to output_path."""
     tile_features = []
@@ -144,6 +193,11 @@ def generate_tile_map(
     tiles_js = json.dumps({"type": "FeatureCollection", "features": tile_features})
     los_js = json.dumps({"type": "FeatureCollection", "features": los_features})
 
+    raster_url, raster_bounds = (None, None)
+    if obstruction is not None:
+        raster_url, raster_bounds = _obstruction_raster_overlay(obstruction)
+    raster_js = json.dumps({"url": raster_url, "bounds": raster_bounds}) if raster_url else "null"
+
     # Fallback center (midpoint of LOS line in lat/lon) if no tiles are present.
     cx = (a_ll[1] + b_ll[1]) / 2
     cy = (a_ll[0] + b_ll[0]) / 2
@@ -171,6 +225,11 @@ L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
 var tilesData = {tiles_js};
 var losData = {los_js};
 var ellipseData = {ellipse_js};
+var rasterOverlay = {raster_js};
+
+if (rasterOverlay) {{
+  L.imageOverlay(rasterOverlay.url, rasterOverlay.bounds, {{opacity: 0.85, zIndex: 200}}).addTo(map);
+}}
 
 if (ellipseData) {{
   L.geoJSON(ellipseData, {{
@@ -232,14 +291,39 @@ def run(tile_dir="data/preprocessed"):
     print()
     print("=== Step 2.2: Identify tiles ===")
     print(f"  tile_dir: {tile_dir}")
-    tiles = identify_tiles(zone, tile_dir, require_exists=False)
+    tiles = identify_tiles(zone, tile_dir)
     print(f"  {len(tiles)} tile(s) found:")
     for t in tiles:
         print(f"    {t}")
 
     print()
+    print("=== Step 2.3: Load rasterized tiles ===")
+    terrain = load_terrain_grid(zone, tiles, tile_dir, obstruction_types="*")
+    valid_mask = (np.arange(terrain.heights.shape[1])[None, :] < zone.widths[:, None])
+    n_cells = int(zone.widths.sum())
+    n_nonzero = int((terrain.heights[valid_mask] > 0).sum())
+    max_h = int(terrain.heights[valid_mask].max()) if n_cells > 0 else 0
+    print(f"  Loaded {len(tiles)} tile(s) into TerrainGrid")
+    print(f"  Total valid cells : {n_cells}")
+    print(f"  Non-zero cells    : {n_nonzero}  ({100 * n_nonzero / max(n_cells, 1):.1f}%)")
+    print(f"  Max terrain height: {max_h} in  ({max_h / 12:.1f} ft)")
+
+    print()
+    print("=== Step 2.4: Compute intersection ===")
+    obstruction = compute_intersection(zone, terrain)
+    valid_vals = obstruction.values[valid_mask]
+    obstructed = (valid_vals > 0).sum()
+    fully_blocked = (valid_vals >= 1.0).sum()
+    mean_val = float(valid_vals.mean()) if n_cells > 0 else 0.0
+    max_val = float(valid_vals.max()) if n_cells > 0 else 0.0
+    print(f"  Obstructed cells (>0)  : {obstructed} / {n_cells}  ({100 * obstructed / max(n_cells, 1):.1f}%)")
+    print(f"  Fully blocked  (>=1.0) : {fully_blocked} / {n_cells}  ({100 * fully_blocked / max(n_cells, 1):.1f}%)")
+    print(f"  Mean obstruction level : {mean_val:.4f}")
+    print(f"  Max  obstruction level : {max_val:.4f}")
+
+    print()
     print("=== Visualization ===")
-    generate_tile_map(tiles, nys_a, nys_b, Path("data/tile_map.html"))
+    generate_tile_map(tiles, nys_a, nys_b, Path("data/tile_map.html"), obstruction=obstruction)
 
 
 if __name__ == "__main__":
