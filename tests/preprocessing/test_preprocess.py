@@ -4,7 +4,7 @@ import os
 import numpy as np
 import pytest
 
-LAS_PATH = os.path.join(os.path.dirname(__file__), "../../data/235.las")
+LAS_PATH = os.path.join(os.path.dirname(__file__), "../../data/nys_raw/235.las")
 
 pytestmark = pytest.mark.skipif(
     not os.path.exists(LAS_PATH),
@@ -35,10 +35,10 @@ def test_all_tiles_written_as_pairs(tiles, tmp_path_factory):
 
 
 def test_nw_tile_has_correct_offsets(tiles):
-    """When preprocessing 235.las, tile 235_04 (NW corner) should have x_offset=1000000, y_offset=237500."""
+    """When preprocessing 235.las, tile 235_04 (SW corner) should have x_offset=1000000, y_offset=237000."""
     nw = next(t for t in tiles if t.tile_id == "235_04")
     assert nw.x_offset == 1000000
-    assert nw.y_offset == 237500
+    assert nw.y_offset == 237000
 
 
 def test_all_rasters_are_uint16_500x500(tiles):
