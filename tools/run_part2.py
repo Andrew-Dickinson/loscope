@@ -319,7 +319,139 @@ if (losBounds.isValid()) {{
     print(f"  Map saved to: {output_path}")
 
 
-def run(tile_dir="data/preprocessed"):
+def export_zone_obj(zone, tile_id: str, out_dir: Path) -> None:
+    """Write a Minecraft-style Fresnel zone volume OBJ for one tile.
+
+    Coordinate system matches tile_to_obj.py exactly:
+        X = easting  (local usft, origin at tile SW corner)
+        Y = northing (local usft, origin at tile SW corner)
+        Z = elevation (usft)
+
+    Each zone cell is rendered as a solid slab from its bottom height to its
+    top height.  Flat top and bottom faces are emitted for every cell.
+    Vertical step walls fill gaps between adjacent cells (same rule as the
+    terrain OBJ: top-surface wall where zt > neighbour_zt, bottom-surface wall
+    where zb < neighbour_zb).  Cells at the boundary of the zone (or tile)
+    get a full closure wall from zb → zt on that side.
+    """
+    sw = _tile_sw_corner_nys(tile_id)
+    if sw is None:
+        return
+    tile_e, tile_n = sw
+
+    S = TILE_SIDE_USFT
+
+    # Build dense tile-local arrays for zone cells that overlap this tile.
+    top_z = np.zeros((S, S), dtype=np.float32)
+    bot_z = np.zeros((S, S), dtype=np.float32)
+    in_zone = np.zeros((S, S), dtype=bool)
+
+    H = int(zone.widths.shape[0])
+    for i in range(H):
+        w = int(zone.widths[i])
+        if w == 0:
+            continue
+        n = zone.y_base_offset + i
+        yi = n - tile_n
+        if not (0 <= yi < S):
+            continue
+        e_row_start = zone.x_base_offset + int(zone.offsets[i])
+        j_lo = max(0, tile_e - e_row_start)
+        j_hi = min(w, tile_e + S - e_row_start)
+        if j_lo >= j_hi:
+            continue
+        xi_lo = e_row_start + j_lo - tile_e
+        xi_hi = e_row_start + j_hi - tile_e
+        top_z[xi_lo:xi_hi, yi] = zone.top[i, j_lo:j_hi] / 12.0
+        bot_z[xi_lo:xi_hi, yi] = zone.bottom[i, j_lo:j_hi] / 12.0
+        in_zone[xi_lo:xi_hi, yi] = True
+
+    if not in_zone.any():
+        return
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{tile_id}_zone.obj"
+
+    vi = 1
+    with open(out_path, "w") as f:
+        f.write(f"# Fresnel zone volume mesh — tile {tile_id}\n")
+        f.write("# 1 unit = 1 US survey foot\n")
+        f.write("# X = easting (local), Y = northing (local), Z = elevation\n\n")
+        f.write(f"o zone_{tile_id.replace('-', '_')}\n\n")
+
+        for xi in range(S):
+            for yi in range(S):
+                if not in_zone[xi, yi]:
+                    continue
+
+                zt = float(top_z[xi, yi])
+                zb = float(bot_z[xi, yi])
+                x0, y0 = float(xi), float(yi)
+                x1, y1 = x0 + 1.0, y0 + 1.0
+
+                # Top face (CCW, normal +Z)
+                f.write(f"v {x0} {y0} {zt:.3f}\n")
+                f.write(f"v {x1} {y0} {zt:.3f}\n")
+                f.write(f"v {x1} {y1} {zt:.3f}\n")
+                f.write(f"v {x0} {y1} {zt:.3f}\n")
+                o = vi
+                f.write(f"f {o} {o+1} {o+2} {o+3}\n")
+                vi += 4
+
+                # Bottom face (reversed winding, normal -Z)
+                f.write(f"v {x0} {y1} {zb:.3f}\n")
+                f.write(f"v {x1} {y1} {zb:.3f}\n")
+                f.write(f"v {x1} {y0} {zb:.3f}\n")
+                f.write(f"v {x0} {y0} {zb:.3f}\n")
+                o = vi
+                f.write(f"f {o} {o+1} {o+2} {o+3}\n")
+                vi += 4
+
+                # Side walls — same edge convention as tile_to_obj.py.
+                # ax,ay → bx,by traces the shared edge (CCW outward winding).
+                for dxi, dyi, ax, ay, bx, by in (
+                    ( 0, -1, x0, y0, x1, y0),  # south (-Y)
+                    ( 0, +1, x1, y1, x0, y1),  # north (+Y)
+                    (+1,  0, x1, y0, x1, y1),  # east  (+X)
+                    (-1,  0, x0, y1, x0, y0),  # west  (-X)
+                ):
+                    nxi, nyi = xi + dxi, yi + dyi
+                    if 0 <= nxi < S and 0 <= nyi < S and in_zone[nxi, nyi]:
+                        nzt = float(top_z[nxi, nyi])
+                        nzb = float(bot_z[nxi, nyi])
+                        # Top-surface step: fill gap where this cell is higher.
+                        if zt > nzt:
+                            f.write(f"v {ax} {ay} {nzt:.3f}\n")
+                            f.write(f"v {bx} {by} {nzt:.3f}\n")
+                            f.write(f"v {bx} {by} {zt:.3f}\n")
+                            f.write(f"v {ax} {ay} {zt:.3f}\n")
+                            o = vi
+                            f.write(f"f {o} {o+1} {o+2} {o+3}\n")
+                            vi += 4
+                        # Bottom-surface step: fill gap where this cell is lower.
+                        if zb < nzb:
+                            f.write(f"v {ax} {ay} {zb:.3f}\n")
+                            f.write(f"v {bx} {by} {zb:.3f}\n")
+                            f.write(f"v {bx} {by} {nzb:.3f}\n")
+                            f.write(f"v {ax} {ay} {nzb:.3f}\n")
+                            o = vi
+                            f.write(f"f {o} {o+1} {o+2} {o+3}\n")
+                            vi += 4
+                    else:
+                        # No zone neighbour on this side — close with a full
+                        # vertical wall from bottom to top.
+                        f.write(f"v {ax} {ay} {zb:.3f}\n")
+                        f.write(f"v {bx} {by} {zb:.3f}\n")
+                        f.write(f"v {bx} {by} {zt:.3f}\n")
+                        f.write(f"v {ax} {ay} {zt:.3f}\n")
+                        o = vi
+                        f.write(f"f {o} {o+1} {o+2} {o+3}\n")
+                        vi += 4
+
+    print(f"  Zone OBJ saved: {out_path}  ({vi - 1:,} verts)")
+
+
+def run(tile_dir="data/preprocessed", zone_obj_dir=None):
     tile_dir = Path(tile_dir)
 
     print("=== Step 2.1: Compute Fresnel zone ===")
@@ -395,7 +527,29 @@ def run(tile_dir="data/preprocessed"):
     print("=== Visualization ===")
     generate_tile_map(tiles, nys_a, nys_b, Path("data/tile_map.html"), obstruction=obstruction)
 
+    if zone_obj_dir is not None:
+        print()
+        print("=== Zone OBJ export ===")
+        obj_dir = Path(zone_obj_dir)
+        for tile_id in tiles:
+            export_zone_obj(zone, tile_id, obj_dir)
+
 
 if __name__ == "__main__":
-    td = sys.argv[1] if len(sys.argv) > 1 else "data/preprocessed"
-    run(td)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run Part 2 obstruction-detection steps.")
+    parser.add_argument(
+        "tile_dir",
+        nargs="?",
+        default="data/preprocessed",
+        help="Directory containing preprocessed tile pairs (default: data/preprocessed)",
+    )
+    parser.add_argument(
+        "--zone-obj-dir",
+        default=None,
+        metavar="DIR",
+        help="If set, export per-tile Fresnel zone OBJ files to this directory",
+    )
+    args = parser.parse_args()
+    run(args.tile_dir, zone_obj_dir=args.zone_obj_dir)
