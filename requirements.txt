@@ -6,4 +6,5 @@ scipy
 pyproj
 pytest
 tifffile
+imagecodecs
 boto3
