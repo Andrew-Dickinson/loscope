@@ -129,7 +129,7 @@ An “obstruction type” which is one of:
 
 A JSON string representing arbitrary key value attributes for this obstruction 
 
-An integer X, Y point representing the top left corner of the obstruction geometry grid, in NYS coordinates
+An integer X, Y point representing the southwest corner of the obstruction geometry grid, in NYS coordinates
 
 A pair of integers H and W representing the height and width of the obstruction (measured in usft) 
 
