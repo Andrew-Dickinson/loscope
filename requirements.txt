@@ -8,3 +8,4 @@ pytest
 tifffile
 imagecodecs
 boto3
+shapely
