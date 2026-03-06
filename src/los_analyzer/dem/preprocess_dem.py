@@ -141,6 +141,10 @@ def split_dem(dem_path: str | Path, out_dir: str | Path) -> list[str]:
             skipped += 1
             continue
 
+        if not np.any(raster):
+            skipped += 1
+            continue
+
         tile_id = _tile_id_from_sw_corner(e_sw, n_sw)
         if tile_id is None:
             skipped += 1
