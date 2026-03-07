@@ -98,5 +98,4 @@ LEFT JOIN building_footprints bf ON bf.bin  = r.bin
 LEFT JOIN latest_height       lh ON lh.bin  = r.bin
 -- Exclude buildings the footprints dataset already identifies as 2021+ construction
 WHERE (bf.construction_year IS NULL OR bf.construction_year < 2021)
---   AND tax_lot_geom IS NULL
 ORDER BY r.tco_date;
