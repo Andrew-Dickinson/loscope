@@ -9,6 +9,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import pyproj
+from tqdm import tqdm
 import shapely.ops
 from shapely import wkt
 from shapely.geometry import mapping
@@ -36,10 +37,10 @@ def _strip_commas(val: str) -> str:
 def parse_row(row: dict) -> dict | None:
     """Parse one CSV row. Returns a lot dict or None if unusable."""
     geom_str = row.get("the_geom", "").strip()
-    boro = _strip_commas(row.get("BORO", ""))
-    block = _strip_commas(row.get("BLOCK", ""))
-    lot = _strip_commas(row.get("LOT", ""))
-    bbl = _strip_commas(row.get("BBL", ""))
+    boro = _strip_commas(row.get("boro", ""))
+    block = _strip_commas(row.get("block", ""))
+    lot = _strip_commas(row.get("lot", ""))
+    bbl = _strip_commas(row.get("bbl", ""))
 
     if not geom_str or not boro or not block or not lot:
         return None
@@ -104,7 +105,8 @@ def parse_csv(csv_path: str | Path) -> dict[str, dict[str, dict]]:
 
     with csv_path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        for row in reader:
+        for _row in tqdm(reader, desc="Parsing lots", unit=" lots"):
+            row = {k.lower(): v for k, v in _row.items()}
             lot = parse_row(row)
             if lot is None:
                 skipped += 1
