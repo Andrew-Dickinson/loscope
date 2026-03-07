@@ -39,3 +39,29 @@ wget "https://data.cityofnewyork.us/resource/i38t-6if2.json?\$limit=99999999999"
 ```
 python tools/parse_tax_lots.py data/tax-lots/TAX_LOT_POLYGON_20260306.csv output-dir
 ```
+
+
+
+### New Building Permits (Part 1)
+Download here:
+https://data.cityofnewyork.us/Housing-Development/DOB-Job-Application-Filings/ic3t-wcy2/about_data
+- Actions
+- Query Data
+- Filter: `Job type` `is one of` `NB`
+
+Also here:
+https://data.cityofnewyork.us/Housing-Development/DOB-NOW-Build-Job-Application-Filings/w9ak-ipjd/
+
+All Certificates of occupancy issued since March 2021:
+https://data.cityofnewyork.us/Housing-Development/DOB-NOW-Certificate-of-Occupancy/pkdm-hqz6/about_data
+
+#### Construction Phases
+1. Pre filing
+2. Application filed / under review / changes requested
+3. Application Approved
+4. Permits Issued
+5. Permits fully issued?
+6. Sign-off
+https://web.archive.org/web/20150907123328/http://www.nyc.gov/html/dob/downloads/pdf/bisjobstatus.pdf
+https://www.nyc.gov/assets/buildings/pdf/job-status-types-and-codes.pdf
+7. 
