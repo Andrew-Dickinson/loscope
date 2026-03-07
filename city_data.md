@@ -23,3 +23,19 @@ https://github.com/CityOfNewYork/nyc-geo-metadata/blob/main/Metadata/Metadata_Di
 ```
 python -m los_analyzer.dem.preprocess_dem /mnt/dem/city_raw/DEM_LiDAR_1ft_2010_Improved_NYC_int.tif /mnt/dem/preprocessed/
 ```
+
+### Tax Lots
+Download here:
+https://data.cityofnewyork.us/City-Government/TAX_LOT_POLYGON/i38t-6if2/about_data
+- Export
+- CSV
+- Download
+
+Or
+```
+wget "https://data.cityofnewyork.us/resource/i38t-6if2.json?\$limit=99999999999"
+```
+
+```
+python tools/parse_tax_lots.py data/tax-lots/TAX_LOT_POLYGON_20260306.csv output-dir
+```
