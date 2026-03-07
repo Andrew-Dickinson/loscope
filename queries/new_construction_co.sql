@@ -79,23 +79,21 @@ resolved AS (
 -- ── Final join ───────────────────────────────────────────────────────────────
 SELECT
     r.bin,
-    r.billing_bbl,
     r.tax_lot_bbl,
-    r.borough,
-    r.borough_number,
-    r.block,
-    r.lot,
-    r.house_no,
-    r.street_name,
-    r.tco_date,
-    lh.proposed_height                  AS proposed_height_ft,
-    tl.the_geom                         AS tax_lot_geom,
-    bf.construction_year,
-    bf.the_geom                         AS building_geom
+    tl.the_geom                         AS output_geometry,
+    null                                AS ground_elevation,
+    lh.proposed_height                  AS height_roof,
+    'new_construction_certificate_of_occupancy' AS type,
+    json_object(
+        'bin', r.bin,
+        'bbl', r.tax_lot_bbl,
+        'ground_elevation', null,
+        'height_roof', lh.proposed_height,
+        'street_addr', concat(r.house_no, ' ', r.street_name),
+        'borough', r.borough,
+        'tco_date', r.tco_date
+    ) AS props
 FROM resolved r
 LEFT JOIN tax_lots            tl ON tl.bbl  = r.tax_lot_bbl
-LEFT JOIN building_footprints bf ON bf.bin  = r.bin
 LEFT JOIN latest_height       lh ON lh.bin  = r.bin
--- Exclude buildings the footprints dataset already identifies as 2021+ construction
-WHERE (bf.construction_year IS NULL OR bf.construction_year < 2021)
-ORDER BY r.tco_date;
+WHERE output_geometry IS NOT NULL;
