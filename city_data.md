@@ -40,6 +40,10 @@ wget "https://data.cityofnewyork.us/resource/i38t-6if2.json?\$limit=99999999999"
 python tools/parse_tax_lots.py data/tax-lots/TAX_LOT_POLYGON_20260306.csv output-dir
 ```
 
+Unfortunately this is only "base" lots. You need to join this with the condo
+lot mappings to get a true list of all BBL polys:
+https://data.cityofnewyork.us/City-Government/Digital-Tax-Map-Condominiums/p8u6-a6it/about_data
+
 
 
 ### New Building Permits (Part 1)

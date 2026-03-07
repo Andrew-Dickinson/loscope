@@ -22,7 +22,7 @@ nb_cos AS (
         street_name,
         MIN(c_of_o_issuance_date) AS tco_date
     FROM certificates_of_occupancy
-    WHERE job_type = 'NEW BUILDING'
+    WHERE lower(job_type) LIKE '%new%'
       AND c_of_o_status = 'CO Issued'
       AND c_of_o_issuance_date > '2021-05-01'
     GROUP BY bin
@@ -30,20 +30,20 @@ nb_cos AS (
 
 -- ── 2. Proposed height from all job applications ──────────────────────────────
 all_job_heights AS (
-    SELECT bin, proposed_height, latest_action_date AS job_date
+    SELECT bin, proposed_height, pre_filing_date AS job_date
     FROM dob_job_applications
-    WHERE bin IS NOT NULL AND bin != ''
+    WHERE bin IS NOT NULL AND bin != '' AND bin NOT in (1000000, 2000000, 3000000, 4000000, 5000000)
       AND proposed_height IS NOT NULL AND proposed_height != 0
 
     UNION ALL
 
-    SELECT bin, proposed_height, current_status_date AS job_date
+    SELECT bin, proposed_height, filing_date AS job_date
     FROM dob_now_job_applications
-    WHERE bin IS NOT NULL AND bin != ''
+    WHERE bin IS NOT NULL AND bin != '' AND bin NOT in (1000000, 2000000, 3000000, 4000000, 5000000)
       AND proposed_height IS NOT NULL AND proposed_height != 0
 ),
 
--- ── 3. Most recent proposed height per BIN ───────────────────────────────────
+-- ── 3. Proposed height from most recent filing per BIN ───────────────────────────────────
 latest_height AS (
     SELECT bin, proposed_height
     FROM (
@@ -54,24 +54,49 @@ latest_height AS (
         FROM all_job_heights
     )
     WHERE rn = 1
+),
+
+-- ── 4. Resolve condo BBLs ─────────────────────────────────────────────────────
+-- If the CO's BBL is a condo billing BBL, replace it with the base BBL(s).
+-- One billing BBL mapping to N base BBLs produces N output rows.
+-- Non-condo BBLs pass through unchanged via the LEFT JOIN + COALESCE.
+resolved AS (
+    SELECT
+        co.bin,
+        co.bbl                              AS billing_bbl,
+        COALESCE(cu.condo_base_bbl, co.bbl) AS tax_lot_bbl,
+        co.borough,
+        co.borough_number,
+        co.block,
+        co.lot,
+        co.house_no,
+        co.street_name,
+        co.tco_date
+    FROM nb_cos co
+    LEFT JOIN condo_units cu ON cu.condo_billing_bbl = co.bbl
 )
 
 -- ── Final join ───────────────────────────────────────────────────────────────
 SELECT
-    co.bin,
-    co.bbl,
-    co.borough,
-    co.borough_number,
-    co.block,
-    co.lot,
-    co.house_no,
-    co.street_name,
-    co.tco_date,
+    r.bin,
+    r.billing_bbl,
+    r.tax_lot_bbl,
+    r.borough,
+    r.borough_number,
+    r.block,
+    r.lot,
+    r.house_no,
+    r.street_name,
+    r.tco_date,
     lh.proposed_height                  AS proposed_height_ft,
     tl.the_geom                         AS tax_lot_geom,
+    bf.construction_year,
     bf.the_geom                         AS building_geom
-FROM nb_cos co
-LEFT JOIN tax_lots            tl ON tl.bbl  = co.bbl
-LEFT JOIN building_footprints bf ON bf.bin  = co.bin
-LEFT JOIN latest_height       lh ON lh.bin  = co.bin
-ORDER BY co.tco_date;
+FROM resolved r
+LEFT JOIN tax_lots            tl ON tl.bbl  = r.tax_lot_bbl
+LEFT JOIN building_footprints bf ON bf.bin  = r.bin
+LEFT JOIN latest_height       lh ON lh.bin  = r.bin
+-- Exclude buildings the footprints dataset already identifies as 2021+ construction
+WHERE (bf.construction_year IS NULL OR bf.construction_year < 2021)
+--   AND tax_lot_geom IS NULL
+ORDER BY r.tco_date;

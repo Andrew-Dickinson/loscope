@@ -70,6 +70,14 @@ def _to_numeric(series: pd.Series) -> pd.Series:
     )
 
 
+def _strip_commas(chunk: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """Remove commas from string identifier columns (e.g. block, lot) without type conversion."""
+    for col in cols:
+        if col in chunk.columns:
+            chunk[col] = chunk[col].str.replace(',', '', regex=False).str.strip()
+    return chunk
+
+
 def _transform_dates(chunk: pd.DataFrame, date_cols: dict[str, str]) -> pd.DataFrame:
     for col, fmt in date_cols.items():
         if col in chunk.columns:
@@ -101,19 +109,95 @@ def _add_borough_name(chunk: pd.DataFrame, col: str = 'boro') -> pd.DataFrame:
         chunk['borough_number'] = nums
     return chunk
 
+
+def _fill_bbl(chunk: pd.DataFrame) -> pd.DataFrame:
+    """Bidirectionally fill BBL ↔ (borough_number, block, lot).
+
+    BBL format: 1-digit boro + 5-digit block (zero-padded) + 4-digit lot (zero-padded).
+
+    Pass 1 — BBL → components: where BBL is present but borough_number / block / lot
+              are missing, parse them out of the BBL string.
+    Pass 2 — components → BBL: where all three components are present but BBL is
+              missing, construct and zero-pad the BBL.
+    """
+    def _is_blank(s: pd.Series) -> pd.Series:
+        return s.isna() | (s.astype(str).str.strip() == '')
+
+    # ── Pass 1: BBL → components ─────────────────────────────────────────────
+    if 'bbl' in chunk.columns:
+        has_bbl = ~_is_blank(chunk['bbl'])
+        if has_bbl.any():
+            bbl_str = chunk.loc[has_bbl, 'bbl'].astype(str).str.strip().str.zfill(10)
+
+            parsed_boro  = pd.to_numeric(bbl_str.str[0:1],  errors='coerce')
+            parsed_block = pd.to_numeric(bbl_str.str[1:6],  errors='coerce')
+            parsed_lot   = pd.to_numeric(bbl_str.str[6:10], errors='coerce')
+
+            for parsed, col in [
+                (parsed_boro,  'borough_number'),
+                (parsed_block, 'block'),
+                (parsed_lot,   'lot'),
+            ]:
+                if col not in chunk.columns:
+                    chunk[col] = None
+                missing = _is_blank(chunk[col])
+                fill_mask = has_bbl & missing & parsed.notna()
+                if not fill_mask.any():
+                    continue
+                values = parsed[fill_mask]
+                # block/lot are StringDtype columns — must receive strings, not floats
+                if col in ('block', 'lot'):
+                    values = values.astype(int).astype(str)
+                chunk.loc[fill_mask, col] = values
+
+            # Also derive borough name if we resolved a borough number
+            if 'borough' in chunk.columns:
+                boro_nums = pd.to_numeric(chunk['borough_number'], errors='coerce')
+                missing_borough = _is_blank(chunk['borough'])
+                chunk.loc[missing_borough, 'borough'] = (
+                    boro_nums[missing_borough].map(BOROUGH_NUM_TO_NAME)
+                )
+
+    # ── Pass 2: components → BBL ─────────────────────────────────────────────
+    if not all(c in chunk.columns for c in ('borough_number', 'block', 'lot')):
+        return chunk
+
+    boro  = pd.to_numeric(chunk['borough_number'], errors='coerce')
+    block = pd.to_numeric(chunk['block'],          errors='coerce')
+    lot   = pd.to_numeric(chunk['lot'],            errors='coerce')
+    valid = boro.notna() & block.notna() & lot.notna()
+
+    computed = (
+        boro[valid].astype(int).astype(str)
+        + block[valid].astype(int).astype(str).str.zfill(5)
+        + lot[valid].astype(int).astype(str).str.zfill(4)
+    )
+
+    if 'bbl' not in chunk.columns:
+        chunk['bbl'] = None
+        chunk.loc[valid, 'bbl'] = computed
+    else:
+        missing = _is_blank(chunk['bbl'])
+        chunk.loc[valid & missing, 'bbl'] = computed[valid & missing]
+
+    return chunk
+
 # ── Per-table transforms ─────────────────────────────────────────────────────
 
 def _transform_co(chunk: pd.DataFrame) -> pd.DataFrame:
+    chunk = _strip_commas(chunk, ['block', 'lot'])
     chunk = _transform_dates(chunk, {
         'c_of_o_issuance_date': _FMT_mdy_TIME,
         'submitted_date':       _FMT_MDY,
     })
     chunk = _transform_numerics(chunk, ['number_of_dwelling_units', 'c_of_o_sequence'])
     chunk = _add_borough_number(chunk)
+    chunk = _fill_bbl(chunk)
     return chunk
 
 
 def _transform_dob_jobs(chunk: pd.DataFrame) -> pd.DataFrame:
+    chunk = _strip_commas(chunk, ['block', 'lot'])
     chunk = _transform_dates(chunk, {c: _FMT_MDY for c in [
         'pre_filing_date', 'paid', 'fully_paid', 'assigned',
         'approved', 'fully_permitted', 'latest_action_date',
@@ -127,10 +211,12 @@ def _transform_dob_jobs(chunk: pd.DataFrame) -> pd.DataFrame:
         'initial_cost', 'total_est_fee', 'total_construction_floor_area',
     ])
     chunk = _add_borough_number(chunk)
+    chunk = _fill_bbl(chunk)
     return chunk
 
 
 def _transform_dob_now_jobs(chunk: pd.DataFrame) -> pd.DataFrame:
+    chunk = _strip_commas(chunk, ['block', 'lot'])
     chunk = _transform_dates(chunk, {c: _FMT_MDY_TIME for c in [
         'filing_date', 'current_status_date', 'first_permit_date',
         'approved_date', 'signoff_date',
@@ -142,6 +228,7 @@ def _transform_dob_now_jobs(chunk: pd.DataFrame) -> pd.DataFrame:
         'initial_cost', 'total_construction_floor_area',
     ])
     chunk = _add_borough_number(chunk)
+    chunk = _fill_bbl(chunk)
     return chunk
 
 
@@ -155,8 +242,15 @@ def _transform_footprints(chunk: pd.DataFrame) -> pd.DataFrame:
 
 
 def _transform_tax_lots(chunk: pd.DataFrame) -> pd.DataFrame:
+    chunk = _strip_commas(chunk, ['block', 'lot'])
     chunk = _transform_numerics(chunk, ['effective_tax_year'])
     chunk = _add_borough_name(chunk, col='boro')
+    return chunk
+
+
+def _transform_condos(chunk: pd.DataFrame) -> pd.DataFrame:
+    chunk = _strip_commas(chunk, ['condo_base_block', 'condo_base_lot', 'condo_number'])
+    chunk = _add_borough_name(chunk, col='condo_base_boro')
     return chunk
 
 
@@ -166,6 +260,7 @@ TRANSFORMS: dict[str, Callable[[pd.DataFrame], pd.DataFrame]] = {
     'dob_now_job_applications':  _transform_dob_now_jobs,
     'building_footprints':       _transform_footprints,
     'tax_lots':                  _transform_tax_lots,
+    'condo_units':               _transform_condos,
 }
 
 # ── Column normalisation ─────────────────────────────────────────────────────
@@ -255,6 +350,9 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         ("certificates_of_occupancy", "bin"),
         ("certificates_of_occupancy", "bbl"),
         ("certificates_of_occupancy", "job_type"),
+        # condo unit → base lot mapping
+        ("condo_units", "condo_billing_bbl"),
+        ("condo_units", "condo_base_bbl"),
     ]
 
     print("\nCreating indexes…")
@@ -272,37 +370,46 @@ def add_indexes(conn: sqlite3.Connection) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build NYC DOB SQLite database")
+    parser = argparse.ArgumentParser(
+        description="Build (or incrementally update) the NYC DOB SQLite database. "
+                    "Only tables whose CSV flags are provided are replaced; "
+                    "omitted tables are left untouched in an existing database.",
+    )
     parser.add_argument("--db", default="data/nyc_dob.db",
-                        help="Output SQLite database path (default: data/nyc_dob.db)")
-    parser.add_argument("--dob-jobs", required=True,
-                        metavar="CSV", help="Legacy DOB job application filings CSV")
-    parser.add_argument("--dob-now-jobs", required=True,
-                        metavar="CSV", help="DOB NOW job application filings CSV")
-    parser.add_argument("--footprints", required=True,
-                        metavar="CSV", help="Building footprints CSV")
-    parser.add_argument("--tax-lots", required=True,
-                        metavar="CSV", help="Tax lot polygons CSV")
-    parser.add_argument("--co-issuance", required=True,
-                        metavar="CSV", help="Certificate of occupancy issuances CSV")
+                        help="SQLite database path (default: data/nyc_dob.db)")
+    parser.add_argument("--dob-jobs",    metavar="CSV", help="Legacy DOB job application filings CSV")
+    parser.add_argument("--dob-now-jobs",metavar="CSV", help="DOB NOW job application filings CSV")
+    parser.add_argument("--footprints",  metavar="CSV", help="Building footprints CSV")
+    parser.add_argument("--tax-lots",    metavar="CSV", help="Tax lot polygons CSV")
+    parser.add_argument("--condos",      metavar="CSV", help="Condo unit → base BBL mapping CSV")
+    parser.add_argument("--co-issuance", metavar="CSV", help="Certificate of occupancy issuances CSV")
     args = parser.parse_args()
 
-    sources = [
-        {"path": Path(args.dob_jobs),     "table": "dob_job_applications"},
-        {"path": Path(args.dob_now_jobs), "table": "dob_now_job_applications"},
-        {"path": Path(args.footprints),   "table": "building_footprints"},
-        {"path": Path(args.tax_lots),     "table": "tax_lots"},
-        {"path": Path(args.co_issuance),  "table": "certificates_of_occupancy"},
+    # Build the list of sources from whichever args were actually supplied
+    arg_map = [
+        (args.dob_jobs,     "dob_job_applications"),
+        (args.dob_now_jobs, "dob_now_job_applications"),
+        (args.footprints,   "building_footprints"),
+        (args.tax_lots,     "tax_lots"),
+        (args.condos,       "condo_units"),
+        (args.co_issuance,  "certificates_of_occupancy"),
     ]
+    sources = [
+        {"path": Path(path), "table": table}
+        for path, table in arg_map
+        if path is not None
+    ]
+
+    if not sources:
+        parser.error("No CSV inputs provided — nothing to do.")
 
     db_path = Path(args.db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     if db_path.exists():
-        print(f"Removing existing database at {db_path}")
-        db_path.unlink()
-
-    print(f"Creating database: {db_path}")
+        print(f"Updating existing database: {db_path}")
+    else:
+        print(f"Creating database: {db_path}")
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
