@@ -7,15 +7,19 @@ Tables created:
   building_footprints        — BUILDING (includes WKT geometry in the_geom)
   tax_lots                   — TAX_LOT_POLYGON (includes WKT geometry in the_geom)
   certificates_of_occupancy  — DOB_NOW Certificate_of_Occupancy
+  dob_now_approved_permits   — DOB_NOW__Build_Approved_Permits
+  dob_permit_issuance        — DOB_Permit_Issuance (legacy)
 
 Usage:
   python tools/build_database.py \\
-    --dob-jobs      data/permits/DOB_Job_Application_Filings_20260306.csv \\
-    --dob-now-jobs  "data/permits/DOB_NOW__Build_–_Job_Application_Filings_20260306.csv" \\
-    --footprints    data/new-building-footprints/BUILDING_20260305.csv \\
-    --tax-lots      data/tax-lots/TAX_LOT_POLYGON_20260306.csv \\
-    --co-issuance   data/co-issuance/DOB_NOW__Certificate_of_Occupancy_20260307.csv \\
-    --db            data/nyc_dob.db
+    --dob-jobs          data/permits/DOB_Job_Application_Filings_20260306.csv \\
+    --dob-now-jobs      "data/permits/DOB_NOW__Build_–_Job_Application_Filings_20260306.csv" \\
+    --footprints        data/new-building-footprints/BUILDING_20260305.csv \\
+    --tax-lots          data/tax-lots/TAX_LOT_POLYGON_20260306.csv \\
+    --co-issuance       data/co-issuance/DOB_NOW__Certificate_of_Occupancy_20260307.csv \\
+    --dob-now-permits   "data/permit-issuance/DOB_NOW__Build_–_Approved_Permits_20260307.csv" \\
+    --dob-permits       data/permit-issuance/DOB_Permit_Issuance_20260307.csv \\
+    --db                data/nyc_dob.db
 """
 
 import argparse
@@ -47,6 +51,7 @@ BOROUGH_NUM_TO_NAME: dict[float, str] = {float(k): v for k, v in {
 
 _FMT_MDY       = '%m/%d/%Y'            # "06/19/2019"
 _FMT_MDY_TIME  = '%m/%d/%Y %I:%M:%S %p'  # "06/05/2025 06:00:26 PM"
+_FMT_MDY_HMS   = '%m/%d/%Y %H:%M:%S'     # "05/11/2022 00:00:00" (24-hour, DOBRunDate)
 _FMT_mdy_TIME  = '%m/%d/%y %I:%M:%S %p'  # "09/02/25 1:24:22 PM" (CO, 2-digit year)
 _FMT_FOOTPRINT = '%Y %b %d %I:%M:%S %p'  # "2025 Aug 22 07:17:38 PM"
 
@@ -254,6 +259,30 @@ def _transform_condos(chunk: pd.DataFrame) -> pd.DataFrame:
     return chunk
 
 
+def _transform_dob_now_permits(chunk: pd.DataFrame) -> pd.DataFrame:
+    """DOB_NOW__Build_–_Approved_Permits"""
+    chunk = _strip_commas(chunk, ['block', 'lot'])
+    chunk = _transform_dates(chunk, {c: _FMT_FOOTPRINT for c in [
+        'approved_date', 'issued_date', 'expired_date',
+    ]})
+    chunk = _transform_numerics(chunk, ['estimated_job_costs'])
+    chunk = _add_borough_number(chunk)
+    chunk = _fill_bbl(chunk)
+    return chunk
+
+
+def _transform_dob_permit_issuance(chunk: pd.DataFrame) -> pd.DataFrame:
+    """DOB_Permit_Issuance (legacy)"""
+    chunk = _strip_commas(chunk, ['block', 'lot'])
+    chunk = _transform_dates(chunk, {c: _FMT_MDY for c in [
+        'filing_date', 'issuance_date', 'expiration_date', 'job_start_date',
+    ]})
+    chunk = _transform_dates(chunk, {'dobrundate': _FMT_MDY_HMS})
+    chunk = _add_borough_number(chunk)
+    chunk = _fill_bbl(chunk)
+    return chunk
+
+
 TRANSFORMS: dict[str, Callable[[pd.DataFrame], pd.DataFrame]] = {
     'certificates_of_occupancy': _transform_co,
     'dob_job_applications':      _transform_dob_jobs,
@@ -261,6 +290,8 @@ TRANSFORMS: dict[str, Callable[[pd.DataFrame], pd.DataFrame]] = {
     'building_footprints':       _transform_footprints,
     'tax_lots':                  _transform_tax_lots,
     'condo_units':               _transform_condos,
+    'dob_now_approved_permits':  _transform_dob_now_permits,
+    'dob_permit_issuance':       _transform_dob_permit_issuance,
 }
 
 # ── Column normalisation ─────────────────────────────────────────────────────
@@ -327,16 +358,18 @@ def load_table(conn: sqlite3.Connection, source: dict) -> None:
 def add_indexes(conn: sqlite3.Connection) -> None:
     """Add commonly useful indexes for the query phase."""
     indexes = [
-        # job applications — join on BBL, BIN, job type
+        # job applications — join on BBL, BIN, job type, job number
         ("dob_job_applications", "bin"),
         ("dob_job_applications", "block"),
         ("dob_job_applications", "lot"),
         ("dob_job_applications", "borough"),
         ("dob_job_applications", "job_type"),
-        # DOB NOW
+        ("dob_job_applications", "job"),
+        # DOB NOW job applications
         ("dob_now_job_applications", "bin"),
         ("dob_now_job_applications", "bbl"),
         ("dob_now_job_applications", "job_type"),
+        ("dob_now_job_applications", "job_filing_number"),
         # footprints — BIN and BBL are primary join keys
         ("building_footprints", "bin"),
         ("building_footprints", "base_bbl"),
@@ -353,6 +386,20 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         # condo unit → base lot mapping
         ("condo_units", "condo_billing_bbl"),
         ("condo_units", "condo_base_bbl"),
+        # DOB NOW approved permits
+        ("dob_now_approved_permits", "bin"),
+        ("dob_now_approved_permits", "bbl"),
+        ("dob_now_approved_permits", "borough"),
+        ("dob_now_approved_permits", "job_filing_number"),
+        ("dob_now_approved_permits", "work_type"),
+        # legacy DOB permit issuance
+        ("dob_permit_issuance", "bin"),
+        ("dob_permit_issuance", "block"),
+        ("dob_permit_issuance", "lot"),
+        ("dob_permit_issuance", "borough"),
+        ("dob_permit_issuance", "job_type"),
+        ("dob_permit_issuance", "permit_type"),
+        ("dob_permit_issuance", "job"),
     ]
 
     print("\nCreating indexes…")
@@ -381,18 +428,22 @@ def main() -> None:
     parser.add_argument("--dob-now-jobs",metavar="CSV", help="DOB NOW job application filings CSV")
     parser.add_argument("--footprints",  metavar="CSV", help="Building footprints CSV")
     parser.add_argument("--tax-lots",    metavar="CSV", help="Tax lot polygons CSV")
-    parser.add_argument("--condos",      metavar="CSV", help="Condo unit → base BBL mapping CSV")
-    parser.add_argument("--co-issuance", metavar="CSV", help="Certificate of occupancy issuances CSV")
+    parser.add_argument("--condos",           metavar="CSV", help="Condo unit → base BBL mapping CSV")
+    parser.add_argument("--co-issuance",      metavar="CSV", help="Certificate of occupancy issuances CSV")
+    parser.add_argument("--dob-now-permits",  metavar="CSV", help="DOB NOW approved permits CSV")
+    parser.add_argument("--dob-permits",      metavar="CSV", help="Legacy DOB permit issuance CSV")
     args = parser.parse_args()
 
     # Build the list of sources from whichever args were actually supplied
     arg_map = [
-        (args.dob_jobs,     "dob_job_applications"),
-        (args.dob_now_jobs, "dob_now_job_applications"),
-        (args.footprints,   "building_footprints"),
-        (args.tax_lots,     "tax_lots"),
-        (args.condos,       "condo_units"),
-        (args.co_issuance,  "certificates_of_occupancy"),
+        (args.dob_jobs,          "dob_job_applications"),
+        (args.dob_now_jobs,      "dob_now_job_applications"),
+        (args.footprints,        "building_footprints"),
+        (args.tax_lots,          "tax_lots"),
+        (args.condos,            "condo_units"),
+        (args.co_issuance,       "certificates_of_occupancy"),
+        (args.dob_now_permits,   "dob_now_approved_permits"),
+        (args.dob_permits,       "dob_permit_issuance"),
     ]
     sources = [
         {"path": Path(path), "table": table}

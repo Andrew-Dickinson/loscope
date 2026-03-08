@@ -68,4 +68,18 @@ https://data.cityofnewyork.us/Housing-Development/DOB-NOW-Certificate-of-Occupan
 6. Sign-off
 https://web.archive.org/web/20150907123328/http://www.nyc.gov/html/dob/downloads/pdf/bisjobstatus.pdf
 https://www.nyc.gov/assets/buildings/pdf/job-status-types-and-codes.pdf
-7. 
+
+
+### Permits
+https://data.cityofnewyork.us/Housing-Development/DOB-Permit-Issuance/ipu4-2q9a/about_data
+https://data.cityofnewyork.us/Housing-Development/DOB-NOW-Build-Approved-Permits/rbx6-tga4/about_data
+
+
+###
+
+
+Craft a SQL query that uses the new tables and produces a similar output to new_construction_co.sql based on new building
+job applications that have one or more construction permits that were active (between issuance and expiration) 
+at any time since 2025-01-01. Use the same BBL and tax lot strategy to get the geometry, don't forget to resolve condo
+billing BBLs to the base BBL
+
