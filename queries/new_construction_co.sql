@@ -96,4 +96,4 @@ SELECT
 FROM resolved r
 LEFT JOIN tax_lots            tl ON tl.bbl  = r.tax_lot_bbl
 LEFT JOIN latest_height       lh ON lh.bin  = r.bin
-WHERE output_geometry IS NOT NULL;
+WHERE output_geometry IS NOT NULL AND height_roof IS NOT NULL;
