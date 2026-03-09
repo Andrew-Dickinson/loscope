@@ -365,15 +365,23 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         ("dob_job_applications", "borough"),
         ("dob_job_applications", "job_type"),
         ("dob_job_applications", "job"),
+        # date columns used in WHERE filters (recent_job_applications, approved_job_applications)
+        ("dob_job_applications", "pre_filing_date"),
+        ("dob_job_applications", "approved"),
         # DOB NOW job applications
         ("dob_now_job_applications", "bin"),
         ("dob_now_job_applications", "bbl"),
         ("dob_now_job_applications", "job_type"),
         ("dob_now_job_applications", "job_filing_number"),
+        # date columns used in WHERE filters
+        ("dob_now_job_applications", "filing_date"),
+        ("dob_now_job_applications", "approved_date"),
         # footprints — BIN and BBL are primary join keys
         ("building_footprints", "bin"),
         ("building_footprints", "base_bbl"),
         ("building_footprints", "map_pluto_bbl"),
+        # construction_year used for range filter in new_construction_footprints.sql
+        ("building_footprints", "construction_year"),
         # tax lots
         ("tax_lots", "bbl"),
         ("tax_lots", "boro"),
@@ -383,6 +391,9 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         ("certificates_of_occupancy", "bin"),
         ("certificates_of_occupancy", "bbl"),
         ("certificates_of_occupancy", "job_type"),
+        # date and status filters in new_construction_co.sql
+        ("certificates_of_occupancy", "c_of_o_issuance_date"),
+        ("certificates_of_occupancy", "c_of_o_status"),
         # condo unit → base lot mapping
         ("condo_units", "condo_billing_bbl"),
         ("condo_units", "condo_base_bbl"),
@@ -392,6 +403,7 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         ("dob_now_approved_permits", "borough"),
         ("dob_now_approved_permits", "job_filing_number"),
         ("dob_now_approved_permits", "work_type"),
+        ("dob_now_approved_permits", "issued_date"),
         ("dob_now_approved_permits", "expired_date"),
         # legacy DOB permit issuance
         ("dob_permit_issuance", "bin"),
@@ -404,6 +416,31 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         ("dob_permit_issuance", "expiration_date"),
     ]
 
+    # Expression indexes and composite indexes that the simple (table, col) format can't express.
+    # Expression indexes on lower(job_type) are needed because every query filters with
+    # lower(job_type) = '...' — a plain job_type index is not used for such expressions.
+    # Composite indexes on (bin, date) cover the all_job_heights window function
+    # (PARTITION BY bin ORDER BY job_date DESC) with a single index scan.
+    extra_indexes: list[tuple[str, str]] = [
+        # lower(job_type) expression indexes
+        ("idx_dob_job_applications_job_type_lower",
+         "CREATE INDEX IF NOT EXISTS idx_dob_job_applications_job_type_lower"
+         " ON dob_job_applications (lower(job_type))"),
+        ("idx_dob_now_job_applications_job_type_lower",
+         "CREATE INDEX IF NOT EXISTS idx_dob_now_job_applications_job_type_lower"
+         " ON dob_now_job_applications (lower(job_type))"),
+        ("idx_certificates_of_occupancy_job_type_lower",
+         "CREATE INDEX IF NOT EXISTS idx_certificates_of_occupancy_job_type_lower"
+         " ON certificates_of_occupancy (lower(job_type))"),
+        # Composite indexes for all_job_heights PARTITION BY bin ORDER BY job_date DESC
+        ("idx_dob_job_applications_bin_pre_filing_date",
+         "CREATE INDEX IF NOT EXISTS idx_dob_job_applications_bin_pre_filing_date"
+         " ON dob_job_applications (bin, pre_filing_date)"),
+        ("idx_dob_now_job_applications_bin_filing_date",
+         "CREATE INDEX IF NOT EXISTS idx_dob_now_job_applications_bin_filing_date"
+         " ON dob_now_job_applications (bin, filing_date)"),
+    ]
+
     print("\nCreating indexes…")
     for table, col in indexes:
         idx_name = f"idx_{table}_{col}"
@@ -412,6 +449,12 @@ def add_indexes(conn: sqlite3.Connection) -> None:
             conn.execute(sql)
         except sqlite3.OperationalError as e:
             # Column may not exist in this export version — skip silently
+            print(f"  skipped {idx_name}: {e}")
+
+    for idx_name, sql in extra_indexes:
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError as e:
             print(f"  skipped {idx_name}: {e}")
 
     conn.commit()
