@@ -1,3 +1,30 @@
+### Data Sources
+
+building_footprints
+https://data.cityofnewyork.us/City-Government/BUILDING/5zhs-2jue/about_data
+
+certificates_of_occupancy
+https://data.cityofnewyork.us/Housing-Development/DOB-NOW-Certificate-of-Occupancy/pkdm-hqz6/about_data
+
+condo_units
+https://data.cityofnewyork.us/City-Government/Digital-Tax-Map-Condominiums/p8u6-a6it/about_data
+
+dob_job_applications
+https://data.cityofnewyork.us/Housing-Development/DOB-Job-Application-Filings/ic3t-wcy2/about_data
+
+dob_now_job_applications
+https://data.cityofnewyork.us/Housing-Development/DOB-NOW-Build-Job-Application-Filings/w9ak-ipjd/about_data
+
+dob_permit_issuance
+https://data.cityofnewyork.us/Housing-Development/DOB-Permit-Issuance/ipu4-2q9a/about_data
+
+dob_now_approved_permits
+https://data.cityofnewyork.us/Housing-Development/DOB-NOW-Build-Approved-Permits/rbx6-tga4/about_data
+
+tax_lots
+https://data.cityofnewyork.us/City-Government/TAX_LOT_POLYGON/i38t-6if2/about_data
+
+
 #### Building Footprints
 Outlines: https://data.cityofnewyork.us/City-Government/BUILDING/5zhs-2jue/about_data
 Centroids: https://data.cityofnewyork.us/City-Government/BUILDING_P/u9wf-3gbt/about_data
