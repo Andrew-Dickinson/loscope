@@ -392,6 +392,7 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         ("dob_now_approved_permits", "borough"),
         ("dob_now_approved_permits", "job_filing_number"),
         ("dob_now_approved_permits", "work_type"),
+        ("dob_now_approved_permits", "expired_date"),
         # legacy DOB permit issuance
         ("dob_permit_issuance", "bin"),
         ("dob_permit_issuance", "block"),
@@ -400,6 +401,7 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         ("dob_permit_issuance", "job_type"),
         ("dob_permit_issuance", "permit_type"),
         ("dob_permit_issuance", "job"),
+        ("dob_permit_issuance", "expiration_date"),
     ]
 
     print("\nCreating indexes…")
