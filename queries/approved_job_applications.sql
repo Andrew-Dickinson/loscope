@@ -12,8 +12,9 @@ nb_jobs AS (
         lot,
         house       AS house_no,
         street_name,
-        pre_filing_date AS job_date,
-        proposed_height
+        approved AS approved_date,
+        proposed_height,
+        'DOB_BIS' as application_system
     FROM dob_job_applications
     WHERE lower(job_type) = 'nb'
       AND bin IS NOT NULL AND bin != ''
@@ -33,14 +34,25 @@ nb_jobs AS (
         lot,
         house_no,
         street_name,
-        filing_date AS job_date,
-        proposed_height
+        approved_date,
+        proposed_height,
+        'DOB_NOW' as application_system
     FROM dob_now_job_applications
     WHERE lower(job_type) LIKE '%new building%'
       AND bin IS NOT NULL AND bin != ''
       AND bin NOT IN (1000000, 2000000, 3000000, 4000000, 5000000)
       AND approved_date IS NOT NULL
       AND approved_date >= '2025-03-08'
+),
+
+nb_jobs_deduped AS (
+    SELECT job_id, bin, bbl, borough, borough_number, block, lot, house_no, street_name, approved_date,
+           proposed_height, application_system
+    FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY bin ORDER BY approved_date DESC) AS rn
+        FROM nb_jobs
+    )
+    WHERE rn = 1
 ),
 
 all_job_heights AS (
@@ -80,8 +92,11 @@ resolved AS (
         j.block,
         j.lot,
         j.house_no,
-        j.street_name
-    FROM nb_jobs j
+        j.street_name,
+        j.approved_date,
+        j.job_id,
+        j.application_system
+    FROM nb_jobs_deduped j
     LEFT JOIN condo_units    cu ON cu.condo_billing_bbl = j.bbl
 )
 
@@ -98,7 +113,10 @@ SELECT
         'ground_elevation',  null,
         'height_roof',       lh.proposed_height,
         'street_addr',       concat(r.house_no, ' ', r.street_name),
-        'borough',           r.borough
+        'borough',           r.borough,
+        'job_application_system',        r.application_system,
+        'job_id',            r.job_id,
+        'job_approval_date', r.approved_date
     ) AS props
 FROM resolved r
 LEFT JOIN tax_lots     tl ON tl.bbl = r.tax_lot_bbl

@@ -11,21 +11,17 @@ WITH
 
 -- ── 1. New Building COs issued after 2021-05-01, one row per BIN ─────────────
 nb_cos AS (
-    SELECT
-        bin,
-        bbl,
-        borough,
-        borough_number,
-        block,
-        lot,
-        house_no,
-        street_name,
-        MIN(c_of_o_issuance_date) AS tco_date
-    FROM certificates_of_occupancy
-    WHERE lower(job_type) LIKE '%new%'
-      AND c_of_o_status = 'CO Issued'
-      AND c_of_o_issuance_date > '2021-05-01'
-    GROUP BY bin
+    SELECT bin, bbl, borough, borough_number, block, lot, house_no, street_name,
+           c_of_o_issuance_date AS tco_date
+    FROM (
+        SELECT *,
+               ROW_NUMBER() OVER (PARTITION BY bin ORDER BY c_of_o_issuance_date ASC) AS rn
+        FROM certificates_of_occupancy
+        WHERE lower(job_type) LIKE '%new%'
+          AND c_of_o_status = 'CO Issued'
+          AND c_of_o_issuance_date > '2021-05-01'
+    )
+    WHERE rn = 1
 ),
 
 -- ── 2. Proposed height from all job applications ──────────────────────────────
