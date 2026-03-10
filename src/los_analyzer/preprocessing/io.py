@@ -17,7 +17,6 @@ def save_tile(tile, out_dir):
         "x_offset": tile.x_offset,
         "y_offset": tile.y_offset,
         "raster_file": f"{tile.tile_id}.tif",
-        "obstruction_ids": tile.obstruction_ids,
     }
     json_path.write_text(json.dumps(metadata, indent=2))
 
@@ -38,5 +37,4 @@ def load_tile(tile_id, in_dir):
         x_offset=metadata["x_offset"],
         y_offset=metadata["y_offset"],
         raster=raster,
-        obstruction_ids=metadata["obstruction_ids"],
     )

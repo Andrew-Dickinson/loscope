@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -11,7 +11,6 @@ class TileData:
     x_offset: int   # SW corner X (NYS usft)
     y_offset: int   # SW corner Y (NYS usft)
     raster: np.ndarray  # uint16 (500, 500), axes: [easting_local, northing_local]
-    obstruction_ids: list = field(default_factory=list)
 
 
 def split_tiles(height_grid, file_id, origin):
@@ -29,6 +28,5 @@ def split_tiles(height_grid, file_id, origin):
                 x_offset=x_off,
                 y_offset=y_off,
                 raster=raster,
-                obstruction_ids=[],
             ))
     return tiles
