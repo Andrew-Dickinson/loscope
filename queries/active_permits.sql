@@ -130,7 +130,7 @@ resolved AS (
         j.house_no,
         j.street_name,
         j.job_id,
-        j.application_system,
+        j.application_system
     FROM nb_jobs_deduped j
     LEFT JOIN condo_units    cu ON cu.condo_billing_bbl = j.bbl
 )
