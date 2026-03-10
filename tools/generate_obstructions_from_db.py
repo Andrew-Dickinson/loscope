@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import uuid
 import warnings
@@ -38,7 +39,21 @@ from los_analyzer.obstructions.io import save_obstruction
 from los_analyzer.obstructions.model import Obstruction
 
 
-def _max_ground_elevation_from_dem(poly_nys, dem_cache: Path) -> float | None:
+def _build_dem_fetcher(cache_dir: Path):
+    """Return a CachingTileFetcher backed by S3, or None if not configured.
+
+    Reads LOS_DEM_S3_BUCKET and LOS_DEM_S3_PREFIX from the environment.
+    """
+    bucket = os.environ.get("LOS_DEM_S3_BUCKET")
+    prefix = os.environ.get("LOS_DEM_S3_PREFIX")
+    if not bucket or not prefix:
+        return None
+    from los_analyzer.tiles.fetch import CachingTileFetcher
+    from los_analyzer.tiles.s3_backend import S3TileBackend
+    return CachingTileFetcher(S3TileBackend(bucket, prefix), cache_dir)
+
+
+def _max_ground_elevation_from_dem(poly_nys, dem_cache: Path, fetcher=None) -> float | None:
     """Return max ground elevation (feet) inside poly_nys using local DEM tiles.
 
     poly_nys must already be projected to NYS EPSG:6539. Returns None when no
@@ -47,6 +62,11 @@ def _max_ground_elevation_from_dem(poly_nys, dem_cache: Path) -> float | None:
     tile_ids = _intersecting_tile_ids(poly_nys)
     if not tile_ids:
         return None
+
+    if fetcher is not None:
+        missing = [t for t in tile_ids if not fetcher.is_cached(t)]
+        if missing:
+            fetcher.ensure_tiles(missing)
 
     max_inches: int | None = None
 
@@ -79,7 +99,7 @@ def _max_ground_elevation_from_dem(poly_nys, dem_cache: Path) -> float | None:
     return max_inches / 12.0 if max_inches is not None else None
 
 
-def process_query(sql_path: Path, db_path: Path, out_dir: Path, dem_cache: Path) -> int:
+def process_query(sql_path: Path, db_path: Path, out_dir: Path, dem_cache: Path, fetcher=None) -> int:
     """Run one SQL query and write one tif+json pair per result row.
 
     Returns the number of obstruction files written.
@@ -130,7 +150,7 @@ def process_query(sql_path: Path, db_path: Path, out_dir: Path, dem_cache: Path)
         props = json.loads(row["props"])
 
         if ground_elevation is None:
-            ground_elevation = _max_ground_elevation_from_dem(poly_nys, dem_cache)
+            ground_elevation = _max_ground_elevation_from_dem(poly_nys, dem_cache, fetcher)
             if ground_elevation is None:
                 skipped += 1
                 continue
@@ -202,9 +222,17 @@ def main() -> None:
     dem_cache = Path(args.dem_cache)
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    dem_cache.mkdir(parents=True, exist_ok=True)
+
+    fetcher = _build_dem_fetcher(dem_cache)
+    if fetcher is None:
+        print(
+            "S3 not configured (LOS_DEM_S3_BUCKET / LOS_DEM_S3_PREFIX not set)"
+            " — using local DEM tiles only."
+        )
 
     print(f"Processing {sql_path.name} ...")
-    count = process_query(sql_path, db_path, out_dir, dem_cache)
+    count = process_query(sql_path, db_path, out_dir, dem_cache, fetcher)
     print(f"Done. {count} obstruction(s) written.")
 
 
