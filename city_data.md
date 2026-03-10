@@ -38,6 +38,16 @@ python tools/build_database.py \
     --db               nyc_dob.db
 ```
 
+### Generate Obstructions
+```
+for q in queries/*.sql; do 
+    python tools/generate_obstructions_from_db.py "$q" \
+        --db /mnt/dob_db/nyc_dob.db \
+        --out-dir "/mnt/obstructions/$q" \
+        --dem-cache /mnt/dem/preprocessed/
+done
+```
+
 #### Building Footprints
 Outlines: https://data.cityofnewyork.us/City-Government/BUILDING/5zhs-2jue/about_data
 Centroids: https://data.cityofnewyork.us/City-Government/BUILDING_P/u9wf-3gbt/about_data
