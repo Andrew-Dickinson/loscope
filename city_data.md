@@ -25,6 +25,7 @@ tax_lots
 https://data.cityofnewyork.us/City-Government/TAX_LOT_POLYGON/i38t-6if2/about_data
 
 ### Ingestion command
+```
 python tools/build_database.py \
     --footprints       csv/BUILDING_5zhs-2jue.csv \
     --co-issuance      csv/DOB-NOW-Certificate-of-Occupancy_pkdm-hqz6.csv \
@@ -35,6 +36,7 @@ python tools/build_database.py \
     --dob-now-permits  csv/DOB-NOW-Build-Approved-Permits_rbx6-tga4.csv \
     --tax-lots         csv/TAX_LOT_POLYGON_i38t-6if2.csv \
     --db               nyc_dob.db
+```
 
 #### Building Footprints
 Outlines: https://data.cityofnewyork.us/City-Government/BUILDING/5zhs-2jue/about_data
