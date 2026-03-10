@@ -48,35 +48,9 @@ nb_jobs AS (
         proposed_height,
         'DOB_NOW' as application_system
     FROM dob_now_job_applications
-    WHERE lower(job_type) LIKE '%new building%'
+    WHERE lower(job_type) IN ('new building', 'alt-co - new building with existing elements to remain')
       AND bin IS NOT NULL AND bin != ''
       AND bin NOT IN (1000000, 2000000, 3000000, 4000000, 5000000)
-),
-
-all_job_heights AS (
-    SELECT bin, proposed_height, pre_filing_date AS job_date
-    FROM dob_job_applications
-    WHERE bin IS NOT NULL AND bin != '' AND bin NOT in (1000000, 2000000, 3000000, 4000000, 5000000)
-      AND proposed_height IS NOT NULL AND proposed_height != 0
-
-    UNION ALL
-
-    SELECT bin, proposed_height, filing_date AS job_date
-    FROM dob_now_job_applications
-    WHERE bin IS NOT NULL AND bin != '' AND bin NOT in (1000000, 2000000, 3000000, 4000000, 5000000)
-      AND proposed_height IS NOT NULL AND proposed_height != 0
-),
-
-latest_height AS (
-    SELECT bin, proposed_height
-    FROM (
-        SELECT
-            bin,
-            proposed_height,
-            ROW_NUMBER() OVER (PARTITION BY bin ORDER BY job_date DESC) AS rn
-        FROM all_job_heights
-    )
-    WHERE rn = 1
 ),
 
 active_permit_jobs AS (
@@ -133,6 +107,33 @@ resolved AS (
         j.application_system
     FROM nb_jobs_deduped j
     LEFT JOIN condo_units    cu ON cu.condo_billing_bbl = j.bbl
+),
+
+-- ── 8. Latest proposed height — restricted to bins we actually need ───────────
+all_job_heights AS (
+    SELECT bin, proposed_height, pre_filing_date AS job_date
+    FROM dob_job_applications
+    WHERE bin IN (SELECT bin FROM nb_jobs_deduped)
+      AND proposed_height IS NOT NULL AND proposed_height != 0
+
+    UNION ALL
+
+    SELECT bin, proposed_height, filing_date AS job_date
+    FROM dob_now_job_applications
+    WHERE bin IN (SELECT bin FROM nb_jobs_deduped)
+      AND proposed_height IS NOT NULL AND proposed_height != 0
+),
+
+latest_height AS (
+    SELECT bin, proposed_height
+    FROM (
+        SELECT
+            bin,
+            proposed_height,
+            ROW_NUMBER() OVER (PARTITION BY bin ORDER BY job_date DESC) AS rn
+        FROM all_job_heights
+    )
+    WHERE rn = 1
 )
 
 SELECT

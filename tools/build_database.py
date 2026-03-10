@@ -439,6 +439,24 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         ("idx_dob_now_job_applications_bin_filing_date",
          "CREATE INDEX IF NOT EXISTS idx_dob_now_job_applications_bin_filing_date"
          " ON dob_now_job_applications (bin, filing_date)"),
+        # Partial indexes for all_job_heights: only rows with a valid proposed_height,
+        # covering (bin, date) for the window function.
+        ("idx_dob_job_applications_height_bin_date",
+         "CREATE INDEX IF NOT EXISTS idx_dob_job_applications_height_bin_date"
+         " ON dob_job_applications (bin, pre_filing_date)"
+         " WHERE proposed_height IS NOT NULL AND proposed_height != 0"),
+        ("idx_dob_now_job_applications_height_bin_date",
+         "CREATE INDEX IF NOT EXISTS idx_dob_now_job_applications_height_bin_date"
+         " ON dob_now_job_applications (bin, filing_date)"
+         " WHERE proposed_height IS NOT NULL AND proposed_height != 0"),
+        # Composite index for new_construction_co.sql: job_type IN (...) + status + date range
+        ("idx_certificates_of_occupancy_job_type_status_date",
+         "CREATE INDEX IF NOT EXISTS idx_certificates_of_occupancy_job_type_status_date"
+         " ON certificates_of_occupancy (lower(job_type), c_of_o_status, c_of_o_issuance_date)"),
+        # Composite index for active_permits.sql: job_type equality + expiration range
+        ("idx_dob_permit_issuance_job_type_expiration",
+         "CREATE INDEX IF NOT EXISTS idx_dob_permit_issuance_job_type_expiration"
+         " ON dob_permit_issuance (lower(job_type), expiration_date)"),
     ]
 
     print("\nCreating indexes…")
@@ -495,9 +513,6 @@ def main() -> None:
         for path, table in arg_map
         if path is not None
     ]
-
-    if not sources:
-        parser.error("No CSV inputs provided — nothing to do.")
 
     db_path = Path(args.db)
     db_path.parent.mkdir(parents=True, exist_ok=True)

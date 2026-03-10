@@ -89,6 +89,9 @@ def process_query(sql_path: Path, db_path: Path, out_dir: Path, dem_cache: Path)
     sql = sql_path.read_text()
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA query_only=ON")
+    con.execute("PRAGMA cache_size=-65536")   # 64 MB page cache
+    con.execute("PRAGMA temp_store=MEMORY")
 
     with tqdm(desc="Running query", unit=" ops", bar_format="{desc}: {elapsed} [{n}{unit}]") as pbar:
         def _progress():

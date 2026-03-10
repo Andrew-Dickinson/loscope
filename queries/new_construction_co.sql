@@ -17,45 +17,17 @@ nb_cos AS (
         SELECT *,
                ROW_NUMBER() OVER (PARTITION BY bin ORDER BY c_of_o_issuance_date ASC) AS rn
         FROM certificates_of_occupancy
-        WHERE lower(job_type) LIKE '%new%'
+        WHERE lower(job_type) IN (
+                  'new building',
+                  'co - new building with existing elements to remain'
+              )
           AND c_of_o_status = 'CO Issued'
           AND c_of_o_issuance_date > '2021-05-01'
     )
     WHERE rn = 1
 ),
 
--- ── 2. Proposed height from all job applications ──────────────────────────────
-all_job_heights AS (
-    SELECT bin, proposed_height, pre_filing_date AS job_date
-    FROM dob_job_applications
-    WHERE bin IS NOT NULL AND bin != '' AND bin NOT in (1000000, 2000000, 3000000, 4000000, 5000000)
-      AND proposed_height IS NOT NULL AND proposed_height != 0
-
-    UNION ALL
-
-    SELECT bin, proposed_height, filing_date AS job_date
-    FROM dob_now_job_applications
-    WHERE bin IS NOT NULL AND bin != '' AND bin NOT in (1000000, 2000000, 3000000, 4000000, 5000000)
-      AND proposed_height IS NOT NULL AND proposed_height != 0
-),
-
--- ── 3. Proposed height from most recent filing per BIN ───────────────────────────────────
-latest_height AS (
-    SELECT bin, proposed_height
-    FROM (
-        SELECT
-            bin,
-            proposed_height,
-            ROW_NUMBER() OVER (PARTITION BY bin ORDER BY job_date DESC) AS rn
-        FROM all_job_heights
-    )
-    WHERE rn = 1
-),
-
--- ── 4. Resolve condo BBLs ─────────────────────────────────────────────────────
--- If the CO's BBL is a condo billing BBL, replace it with the base BBL(s).
--- One billing BBL mapping to N base BBLs produces N output rows.
--- Non-condo BBLs pass through unchanged via the LEFT JOIN + COALESCE.
+-- ── 2. Resolve condo BBLs ─────────────────────────────────────────────────────
 resolved AS (
     SELECT
         co.bin,
@@ -70,6 +42,33 @@ resolved AS (
         co.tco_date
     FROM nb_cos co
     LEFT JOIN condo_units cu ON cu.condo_billing_bbl = co.bbl
+),
+
+-- ── 3. Latest proposed height — restricted to bins we actually need ───────────
+all_job_heights AS (
+    SELECT bin, proposed_height, pre_filing_date AS job_date
+    FROM dob_job_applications
+    WHERE bin IN (SELECT bin FROM resolved)
+      AND proposed_height IS NOT NULL AND proposed_height != 0
+
+    UNION ALL
+
+    SELECT bin, proposed_height, filing_date AS job_date
+    FROM dob_now_job_applications
+    WHERE bin IN (SELECT bin FROM resolved)
+      AND proposed_height IS NOT NULL AND proposed_height != 0
+),
+
+latest_height AS (
+    SELECT bin, proposed_height
+    FROM (
+        SELECT
+            bin,
+            proposed_height,
+            ROW_NUMBER() OVER (PARTITION BY bin ORDER BY job_date DESC) AS rn
+        FROM all_job_heights
+    )
+    WHERE rn = 1
 )
 
 -- ── Final join ───────────────────────────────────────────────────────────────
