@@ -27,7 +27,7 @@ https://data.cityofnewyork.us/City-Government/TAX_LOT_POLYGON/i38t-6if2/about_da
 ### Ingestion command
 ```
 python tools/build_database.py \
-    --footprints       csv/BUILDING_5zhs-2jue.csv \
+    --footprints       csv/building-footprints_5zhs-2jue.csv \
     --co-issuance      csv/DOB-NOW-Certificate-of-Occupancy_pkdm-hqz6.csv \
     --condos           csv/Digital-Tax-Map-Condominiums_p8u6-a6it.csv \
     --dob-jobs         csv/DOB-Job-Application-Filings_ic3t-wcy2.csv \
