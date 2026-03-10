@@ -70,7 +70,7 @@ def test_attributes_contain_required_keys(obs):
     assert attrs["BIN"] == "5175075"
     assert attrs["BBL"] == "5022230011"
     assert attrs["construction_year"] == 2021
-    assert attrs["geometry_source"] == "Other (Manual)"
+    assert attrs["geom_source"] == "Other (Manual)"
     assert attrs["ground_elevation"] == 32.0
     assert attrs["height_roof"] == 12.0
     assert attrs["last_status_type"] == "Constructed"

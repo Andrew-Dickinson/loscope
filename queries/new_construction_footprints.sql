@@ -10,7 +10,7 @@ SELECT
         'bbl', base_bbl,
         'ground_elevation', ground_elevation,
         'height_roof', height_roof,
-        'geometry_source', geometry_source,
+        'geom_source', geom_source,
         'construction_year', CAST(construction_year AS INTEGER),
         'last_status_type', last_status_type
     ) AS props

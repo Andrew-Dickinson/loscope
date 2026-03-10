@@ -131,7 +131,7 @@ def parse_building_row(row: dict) -> Obstruction | None:
         "BIN": _str("BIN"),
         "BBL": _str("BASE_BBL"),
         "construction_year": _int_or_none("Construction Year"),
-        "geometry_source": _str("Geometry Source"),
+        "geom_source": _str("Geometry Source"),
         "ground_elevation": ground_elev,
         "height_roof": height_roof,
         "last_status_type": _str("LAST_STATUS_TYPE"),

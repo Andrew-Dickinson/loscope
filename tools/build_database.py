@@ -54,6 +54,8 @@ _FMT_MDY_TIME  = '%m/%d/%Y %I:%M:%S %p'  # "06/05/2025 06:00:26 PM"
 _FMT_MDY_HMS   = '%m/%d/%Y %H:%M:%S'     # "05/11/2022 00:00:00" (24-hour, DOBRunDate)
 _FMT_mdy_TIME  = '%m/%d/%y %I:%M:%S %p'  # "09/02/25 1:24:22 PM" (CO, 2-digit year)
 _FMT_FOOTPRINT = '%Y %b %d %I:%M:%S %p'  # "2025 Aug 22 07:17:38 PM"
+_FMT_DOB_NOW_JOB = '%Y-%m-%dT%H:%M:%S.%f'  # "2019-10-24T00:00:00.000"
+_FMT_ISO_8601 = '%Y-%m-%dT%H:%M:%S.%fT'  # "2019-10-24T00:00:00.000"
 
 # ── Transformation helpers ───────────────────────────────────────────────────
 
@@ -193,7 +195,7 @@ def _transform_co(chunk: pd.DataFrame) -> pd.DataFrame:
     chunk = _strip_commas(chunk, ['block', 'lot'])
     chunk = _transform_dates(chunk, {
         'c_of_o_issuance_date': _FMT_mdy_TIME,
-        'submitted_date':       _FMT_MDY,
+        'submitted_date':       _FMT_DOB_NOW_JOB,
     })
     chunk = _transform_numerics(chunk, ['number_of_dwelling_units', 'c_of_o_sequence'])
     chunk = _add_borough_number(chunk)
@@ -222,7 +224,7 @@ def _transform_dob_jobs(chunk: pd.DataFrame) -> pd.DataFrame:
 
 def _transform_dob_now_jobs(chunk: pd.DataFrame) -> pd.DataFrame:
     chunk = _strip_commas(chunk, ['block', 'lot'])
-    chunk = _transform_dates(chunk, {c: _FMT_MDY_TIME for c in [
+    chunk = _transform_dates(chunk, {c: _FMT_DOB_NOW_JOB for c in [
         'filing_date', 'current_status_date', 'first_permit_date',
         'approved_date', 'signoff_date',
     ]})
@@ -238,7 +240,7 @@ def _transform_dob_now_jobs(chunk: pd.DataFrame) -> pd.DataFrame:
 
 
 def _transform_footprints(chunk: pd.DataFrame) -> pd.DataFrame:
-    chunk = _transform_dates(chunk, {'last_edited_date': _FMT_FOOTPRINT})
+    chunk = _transform_dates(chunk, {'last_edited_date': _FMT_ISO_8601})
     chunk = _transform_numerics(chunk, [
         'construction_year', 'objectid', 'shape_area',
         'height_roof', 'ground_elevation', 'length',
@@ -262,7 +264,7 @@ def _transform_condos(chunk: pd.DataFrame) -> pd.DataFrame:
 def _transform_dob_now_permits(chunk: pd.DataFrame) -> pd.DataFrame:
     """DOB_NOW__Build_–_Approved_Permits"""
     chunk = _strip_commas(chunk, ['block', 'lot'])
-    chunk = _transform_dates(chunk, {c: _FMT_FOOTPRINT for c in [
+    chunk = _transform_dates(chunk, {c: _FMT_DOB_NOW_JOB for c in [
         'approved_date', 'issued_date', 'expired_date',
     ]})
     chunk = _transform_numerics(chunk, ['estimated_job_costs'])
@@ -379,7 +381,7 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         # footprints — BIN and BBL are primary join keys
         ("building_footprints", "bin"),
         ("building_footprints", "base_bbl"),
-        ("building_footprints", "map_pluto_bbl"),
+        ("building_footprints", "mappluto_bbl"),
         # construction_year used for range filter in new_construction_footprints.sql
         ("building_footprints", "construction_year"),
         # tax lots
