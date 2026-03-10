@@ -124,7 +124,7 @@ def process_query(sql_path: Path, db_path: Path, out_dir: Path, dem_cache: Path,
     written = 0
     skipped = 0
 
-    for row in tqdm(rows, unit="row", desc=sql_path.stem):
+    for row in tqdm(rows, unit="row", desc=f"Generating obstruction files for {sql_path}"):
         geom_str = row["output_geometry"]
         if not geom_str:
             skipped += 1
