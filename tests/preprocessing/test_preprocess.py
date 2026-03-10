@@ -24,14 +24,13 @@ def test_produces_25_tiles(tiles):
     assert len(tiles) == 25
 
 
-def test_all_tiles_written_as_pairs(tiles, tmp_path_factory):
-    """When preprocessing runs, each tile should have a matching .tif and .json on disk."""
+def test_all_tiles_written_as_tifs(tiles, tmp_path_factory):
+    """When preprocessing runs, each tile should have a .tif on disk (no JSON)."""
     from los_analyzer.preprocessing.preprocess import run_preprocessing
     out = tmp_path_factory.mktemp("pairs")
     run_preprocessing(LAS_PATH, out)
-    for ext in ("tif", "json"):
-        files = list(out.glob(f"*.{ext}"))
-        assert len(files) == 25
+    assert len(list(out.glob("*.tif"))) == 25
+    assert len(list(out.glob("*.json"))) == 0
 
 
 def test_nw_tile_has_correct_offsets(tiles):

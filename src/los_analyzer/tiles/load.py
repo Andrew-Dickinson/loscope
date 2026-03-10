@@ -38,15 +38,12 @@ def load_terrain_grid(
     max_w = int(fresnel_zone.widths.max()) if H > 0 else 0
     heights = np.zeros((H, max(max_w, 1)), dtype=np.uint16)
 
-    seen_obstruction_ids: set[str] = set()
-
     for tile_id in tile_ids:
         tile = load_tile(tile_id, tile_dir)
         _blit_tile(tile, fresnel_zone, heights)
-        seen_obstruction_ids.update(tile.obstruction_ids)
 
     obs_dir = Path(obstruction_dir) if obstruction_dir is not None else None
-    matched_ids = _filter_obstruction_ids(seen_obstruction_ids, obstruction_types, obs_dir)
+    matched_ids = _filter_obstruction_ids(set(), obstruction_types, obs_dir)
 
     if obs_dir is not None:
         for obs_id in matched_ids:

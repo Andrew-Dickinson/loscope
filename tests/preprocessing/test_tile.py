@@ -82,9 +82,3 @@ def test_raster_data_matches_source_grid(tiles, sample_grid):
         expected = sample_grid[xi * TILE_SIDE_USFT:(xi + 1) * TILE_SIDE_USFT,
                                yi * TILE_SIDE_USFT:(yi + 1) * TILE_SIDE_USFT]
         np.testing.assert_array_equal(tile.raster, expected)
-
-
-def test_obstruction_ids_empty(tiles):
-    """When tiles are created in Part 1, obstruction_ids should be an empty list."""
-    for tile in tiles:
-        assert tile.obstruction_ids == []

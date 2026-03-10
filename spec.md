@@ -102,10 +102,11 @@ north-west corner of the source lidar tile
 
 An integer x, y offset representing the position of the bottom left corner (SW) of the tile (in the NYS coordinate frame)
 
-A 1 usft raster grid of points, where each point is a 16 bit unsigned integer which encodes the integer height of 
+A 1 usft raster grid of points, where each point is a 16 bit unsigned integer which encodes the integer height of
 the lidar data at that location, in inches, using the zero point of the EPSG:6360 datum.
 
-A list of UUID identifiers which point to “additional obstructions”, for now this list will be empty
+The tile is stored as a single `.tif` file named `{tile_id}.tif`. All metadata (offsets, raster file path) is derived
+directly from the tile ID at load time
 
 #### Implementation
 Borrow heavily from `src/test_scripts/las_explore.py`. Each grid point represents the maximum altitude of Lidar data recorded at that
@@ -185,6 +186,9 @@ A list of the tile identifiers created in part 1, in which any part of the fresn
 membership from the `FresnelZone` width-offset encoding: for each row `i`, the occupied eastings run from
 `x_base_offset + offsets[i]` to `x_base_offset + offsets[i] + widths[i] - 1`
 
+Detect available tiles by scanning the tile directory for `*.tif` files. The tile ID is the filename stem; offsets
+are derived from the tile ID
+
 ### Step 2.3: Load Rasterized tiles
 #### Input
 The `FresnelZone` from step 2.1 (for its `x_base_offset`, `y_base_offset`, and total extent)
@@ -211,12 +215,10 @@ The `widths` and `offsets` arrays must match those of the input `FresnelZone` ex
 and columns in the two structures refer to the same NYS coordinates without any additional alignment step.
 
 ##### Implementation
-First, fill the output object with heightmap data from the referenced tiles. As we load each tile, keep track of the ID of 
-all the additional obstructions referenced by that tile that match our filter from the input, keeping in mind that
-one obstruction may span many tiles. 
+First, fill the output object with heightmap data from the referenced tiles.
 
-Next, use our filtered list of obstruction IDs to load each one. Apply it to the output object by taking the maximum 
-height at each grid coordinate, between the existing output data and the obstruction we loaded.
+Next, load any additional obstructions matching the input filter from the obstruction directory. Apply each one to the
+output object by taking the maximum height at each grid coordinate between the existing output data and the obstruction.
 
 ### Step 2.4: Compute Intersection
 #### Input

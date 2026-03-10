@@ -180,7 +180,7 @@ def test_split_dem_json_metadata(tmp_path, tiny_dem):
         assert meta["x_offset"] % TILE_SIDE_USFT == 0
         assert meta["y_offset"] % TILE_SIDE_USFT == 0
         assert meta["raster_file"] == f"{tid}.tif"
-        assert meta["obstruction_ids"] == []
+        assert "obstruction_ids" not in meta
 
 
 def test_split_dem_tile_ids_use_canonical_extension_format(tmp_path, tiny_dem):

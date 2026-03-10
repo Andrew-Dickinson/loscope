@@ -23,9 +23,9 @@ def _make_zone(x_base, y_base, n_rows, e_offset, e_width):
 
 
 def _touch(tmp_path, *tile_ids):
-    """Create minimal JSON marker files for the given tile IDs."""
+    """Create minimal .tif marker files for the given tile IDs."""
     for tid in tile_ids:
-        (tmp_path / f"{tid}.json").write_text("{}")
+        (tmp_path / f"{tid}.tif").write_bytes(b"")
 
 
 def test_single_tile_overlap(tmp_path):
@@ -89,7 +89,7 @@ def test_empty_zone_returns_empty(tmp_path):
 
 
 def test_empty_directory_returns_empty(tmp_path):
-    """When tile_dir contains no JSON files, an empty list is returned."""
+    """When tile_dir contains no .tif files, an empty list is returned."""
     zone = _make_zone(x_base=1001000, y_base=236100, n_rows=50, e_offset=0, e_width=100)
     assert identify_tiles(zone, tmp_path) == []
 

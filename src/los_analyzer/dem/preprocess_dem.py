@@ -159,7 +159,6 @@ def split_dem(dem_path: str | Path, out_dir: str | Path) -> list[str]:
             "x_offset": e_sw,
             "y_offset": n_sw,
             "raster_file": f"{tile_id}.tif",
-            "obstruction_ids": [],
         }, indent=2))
 
         tile_ids.append(tile_id)

@@ -28,7 +28,7 @@ def _flat_tile(tile_id, x_offset, y_offset, fill=0):
     """Return a TileData with a constant height value across the full 500×500 raster."""
     raster = np.full((500, 500), fill, dtype=np.uint16)
     return TileData(tile_id=tile_id, x_offset=x_offset, y_offset=y_offset,
-                    raster=raster, obstruction_ids=[])
+                    raster=raster)
 
 
 # ---------------------------------------------------------------------------

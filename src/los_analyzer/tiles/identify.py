@@ -24,7 +24,7 @@ def identify_tiles(
 
     Args:
         fresnel_zone: The FresnelZone from Step 2.1.
-        tile_dir: Directory containing preprocessed tile .json files. Required
+        tile_dir: Directory containing preprocessed tile .tif files. Required
             when require_exists=True; ignored when require_exists=False.
         require_exists: If True (default), scan tile_dir for *.json files and
             return only those that overlap the zone. If False, compute tile IDs
@@ -59,8 +59,8 @@ def identify_tiles(
     if tile_dir is None:
         raise ValueError("tile_dir is required when require_exists=True")
     result = []
-    for json_path in sorted(Path(tile_dir).glob("*.json")):
-        tile_id = json_path.stem
+    for tif_path in sorted(Path(tile_dir).glob("*.tif")):
+        tile_id = tif_path.stem
         file_id, xi, yi = _parse_tile_id(tile_id)
         if file_id is None:
             continue
