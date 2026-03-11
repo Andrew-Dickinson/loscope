@@ -26,8 +26,8 @@ from los_analyzer.tiles.identify import identify_tiles
 from los_analyzer.tiles.intersect import compute_intersection
 from los_analyzer.tiles.load import load_terrain_grid
 
-GPS_A = (40.861448, -73.907696, 76.0)
-GPS_B = ( 40.830477, -73.941012, 80.0)
+GPS_A = ( 40.841668, -73.941836, 141)
+GPS_B = ( 40.843877, -73.893044, 69.0)
 FREQUENCY_HZ = 24_000_000_000
 ALPHA = 1.0
 
@@ -360,7 +360,9 @@ var tileLayer = L.geoJSON(tilesData, {{
     }}
     var obs = p.obstructions || [];
     if (obs.length > 0) {{
-      html += '<br><b>' + obs.length + ' obstruction(s):</b><ul style="margin:4px 0 0 0;padding-left:16px">';
+      html += '<br><b>' + obs.length + ' obstruction(s):</b>';
+      html += '<div style="max-height:260px;overflow-y:auto;margin-top:4px">';
+      html += '<ul style="margin:0;padding-left:16px">';
       obs.forEach(function(o) {{
         var typeLabel = o.type.replace(/_/g, ' ');
         html += '<li style="font-size:11px;margin-bottom:4px">';
@@ -382,7 +384,7 @@ var tileLayer = L.geoJSON(tilesData, {{
         }}
         html += '</li>';
       }});
-      html += '</ul>';
+      html += '</ul></div>';
     }}
     l.bindPopup(html);
   }}
