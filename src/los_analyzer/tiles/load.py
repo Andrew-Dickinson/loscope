@@ -43,7 +43,8 @@ def load_terrain_grid(
         _blit_tile(tile, fresnel_zone, heights)
 
     obs_dir = Path(obstruction_dir) if obstruction_dir is not None else None
-    matched_ids = _filter_obstruction_ids(set(), obstruction_types, obs_dir)
+    seed_ids = _scan_obstruction_dir(obs_dir) if obs_dir is not None else set()
+    matched_ids = _filter_obstruction_ids(seed_ids, obstruction_types, obs_dir)
 
     if obs_dir is not None:
         for obs_id in matched_ids:
@@ -92,6 +93,15 @@ def _blit_tile(tile, fresnel_zone: FresnelZone, heights: np.ndarray) -> None:
         dx_end = overlap_e_end - x_off
 
         heights[i, j_start:j_end] = tile.raster[dx_start:dx_end, dy]
+
+
+def _scan_obstruction_dir(obs_dir: Path) -> set[str]:
+    """Return all obstruction IDs present in obs_dir (stems of *.json files)."""
+    return {
+        p.stem
+        for p in obs_dir.glob("*.json")
+        if p.stem not in ("index",) and not p.stem.startswith("_")
+    }
 
 
 def _filter_obstruction_ids(

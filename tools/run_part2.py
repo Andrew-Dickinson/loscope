@@ -25,8 +25,8 @@ from los_analyzer.tiles.identify import identify_tiles
 from los_analyzer.tiles.intersect import compute_intersection
 from los_analyzer.tiles.load import load_terrain_grid
 
-GPS_A = (40.861448, -73.907696, 76.0)
-GPS_B = ( 40.830477, -73.941012, 80.0)
+GPS_A = ( 40.841668, -73.941836, 141)
+GPS_B = ( 40.843877, -73.893044, 69.0)
 FREQUENCY_HZ = 24_000_000_000
 ALPHA = 1.0
 
@@ -451,7 +451,7 @@ def export_zone_obj(zone, tile_id: str, out_dir: Path) -> None:
     print(f"  Zone OBJ saved: {out_path}  ({vi - 1:,} verts)")
 
 
-def run(tile_dir="data/preprocessed", zone_obj_dir=None):
+def run(tile_dir="data/preprocessed", zone_obj_dir=None, obs_cache="data/obstructions"):
     tile_dir = Path(tile_dir)
 
     print("=== Step 2.1: Compute Fresnel zone ===")
@@ -499,8 +499,22 @@ def run(tile_dir="data/preprocessed", zone_obj_dir=None):
     print(f"  {len(tiles)} tile(s) ready to load")
 
     print()
+    print("=== Step 2.2b: Fetch obstructions ===")
+    obs_dir = Path(obs_cache)
+    obs_dir.mkdir(parents=True, exist_ok=True)
+
+    from los_analyzer.obstructions.fetch import obs_fetcher_from_env
+    obs_fetcher = obs_fetcher_from_env(obs_dir)
+    if obs_fetcher is not None:
+        print(f"  Fetching obstructions for {len(all_needed)} tile(s) from S3 ...")
+        fetched_ids = obs_fetcher.ensure_for_tiles(all_needed)
+        print(f"  {len(fetched_ids)} obstruction(s) available in cache")
+    else:
+        print("  LOS_OBS_S3_BUCKET / LOS_OBS_S3_PREFIX not set — using local obstructions only")
+
+    print()
     print("=== Step 2.3: Load rasterized tiles ===")
-    terrain = load_terrain_grid(zone, tiles, tile_dir, obstruction_types="*")
+    terrain = load_terrain_grid(zone, tiles, tile_dir, obstruction_types="*", obstruction_dir=obs_dir)
     valid_mask = (np.arange(terrain.heights.shape[1])[None, :] < zone.widths[:, None])
     n_cells = int(zone.widths.sum())
     n_nonzero = int((terrain.heights[valid_mask] > 0).sum())
@@ -551,5 +565,11 @@ if __name__ == "__main__":
         metavar="DIR",
         help="If set, export per-tile Fresnel zone OBJ files to this directory",
     )
+    parser.add_argument(
+        "--obs-cache",
+        default="data/obstructions",
+        metavar="DIR",
+        help="Local cache directory for obstruction tif+json pairs (default: data/obstructions)",
+    )
     args = parser.parse_args()
-    run(args.tile_dir, zone_obj_dir=args.zone_obj_dir)
+    run(args.tile_dir, zone_obj_dir=args.zone_obj_dir, obs_cache=args.obs_cache)
