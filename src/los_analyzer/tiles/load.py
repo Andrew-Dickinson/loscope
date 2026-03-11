@@ -35,8 +35,8 @@ def load_terrain_grid(
     """
     tile_dir = Path(tile_dir)
     H = int(fresnel_zone.widths.shape[0])
-    max_w = int(fresnel_zone.widths.max()) if H > 0 else 0
-    heights = np.zeros((H, max(max_w, 1)), dtype=np.uint16)
+    max_w = fresnel_zone.top.shape[1] if H > 0 else 1
+    heights = np.zeros((H, max_w), dtype=np.uint16)
 
     for tile_id in tile_ids:
         tile = load_tile(tile_id, tile_dir)
