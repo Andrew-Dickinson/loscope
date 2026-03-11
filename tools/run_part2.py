@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import tifffile
 from PIL import Image
 from pyproj import Transformer
 
@@ -25,8 +26,8 @@ from los_analyzer.tiles.identify import identify_tiles
 from los_analyzer.tiles.intersect import compute_intersection
 from los_analyzer.tiles.load import load_terrain_grid
 
-GPS_A = ( 40.841668, -73.941836, 141)
-GPS_B = ( 40.843877, -73.893044, 69.0)
+GPS_A = (40.861448, -73.907696, 76.0)
+GPS_B = ( 40.830477, -73.941012, 80.0)
 FREQUENCY_HZ = 24_000_000_000
 ALPHA = 1.0
 
@@ -166,6 +167,19 @@ def _tile_obstruction_overlay(
     return data_url, bounds
 
 
+def _obs_raster_b64(tif_path: Path) -> str | None:
+    """Load an obstruction tiff and return a grayscale PNG scaled by its max value."""
+    arr = tifffile.imread(str(tif_path)).astype(np.float32)
+    max_val = arr.max()
+    if max_val == 0:
+        return None
+    scaled = np.clip(arr / max_val * 255, 0, 255).astype(np.uint8)
+    img_arr = scaled.T[::-1, :]  # transpose to (H, W), flip so row 0 = north
+    buf = io.BytesIO()
+    Image.fromarray(img_arr, mode="L").save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def generate_tile_map(
     tile_ids: list[str],
     nys_a: tuple[float, float, float],
@@ -174,6 +188,8 @@ def generate_tile_map(
     frequency_hz: float = FREQUENCY_HZ,
     alpha: float = ALPHA,
     obstruction=None,
+    tile_obs_info: dict | None = None,
+    obs_rasters: dict | None = None,
 ) -> None:
     """Write an interactive Leaflet HTML map of selected tiles to output_path."""
     # Build per-tile obstruction overlays first so we know which tiles are obstructed
@@ -203,7 +219,11 @@ def generate_tile_map(
         ]
         tile_features.append({
             "type": "Feature",
-            "properties": {"id": tile_id, "hasObstruction": tile_id in obstructed_tile_ids},
+            "properties": {
+                "id": tile_id,
+                "hasObstruction": tile_id in obstructed_tile_ids,
+                "obstructions": (tile_obs_info or {}).get(tile_id, []),
+            },
             "geometry": {"type": "Polygon", "coordinates": [ring]},
         })
 
@@ -237,6 +257,7 @@ def generate_tile_map(
     tiles_js = json.dumps({"type": "FeatureCollection", "features": tile_features})
     los_js = json.dumps({"type": "FeatureCollection", "features": los_features})
     tile_overlays_js = json.dumps(tile_overlays)
+    obs_rasters_js = json.dumps(obs_rasters or {})
 
     # Fallback center (midpoint of LOS line in lat/lon) if no tiles are present.
     cx = (a_ll[1] + b_ll[1]) / 2
@@ -252,10 +273,43 @@ def generate_tile_map(
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   html, body, #map {{ height: 100%; margin: 0; padding: 0; }}
+  #obs-modal {{
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.72); z-index: 9999;
+    align-items: center; justify-content: center;
+  }}
+  #obs-modal.open {{ display: flex; }}
+  #obs-modal-box {{
+    background: #fff; border-radius: 6px; padding: 16px;
+    max-width: 90vw; max-height: 90vh; overflow: auto;
+  }}
+  #obs-modal-header {{
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px; gap: 16px;
+  }}
+  #obs-modal-title {{ font-family: monospace; font-size: 12px; color: #555; }}
+  #obs-modal-close {{
+    border: none; background: none; font-size: 22px;
+    line-height: 1; cursor: pointer; color: #888; padding: 0;
+  }}
+  #obs-modal-img {{
+    display: block; image-rendering: pixelated;
+    max-width: 80vw; max-height: 70vh;
+    border: 1px solid #ddd;
+  }}
 </style>
 </head>
 <body>
 <div id="map"></div>
+<div id="obs-modal" onclick="if(event.target===this)closeObsModal()">
+  <div id="obs-modal-box">
+    <div id="obs-modal-header">
+      <code id="obs-modal-title"></code>
+      <button id="obs-modal-close" onclick="closeObsModal()">&times;</button>
+    </div>
+    <img id="obs-modal-img" src="" alt="obstruction raster"/>
+  </div>
+</div>
 <script>
 var map = L.map('map', {{maxZoom: 22}});
 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
@@ -268,6 +322,19 @@ var tilesData = {tiles_js};
 var losData = {los_js};
 var ellipseData = {ellipse_js};
 var tileOverlays = {tile_overlays_js};
+var obsRasters = {obs_rasters_js};
+
+function showObsRaster(id) {{
+  var b64 = obsRasters[id];
+  if (!b64) return;
+  document.getElementById('obs-modal-title').textContent = id;
+  document.getElementById('obs-modal-img').src = 'data:image/png;base64,' + b64;
+  document.getElementById('obs-modal').classList.add('open');
+}}
+function closeObsModal() {{
+  document.getElementById('obs-modal').classList.remove('open');
+  document.getElementById('obs-modal-img').src = '';
+}}
 
 tileOverlays.forEach(function(o) {{
   L.imageOverlay(o.url, o.bounds, {{opacity: 0.85, zIndex: 200}}).addTo(map);
@@ -286,10 +353,38 @@ var tileLayer = L.geoJSON(tilesData, {{
       : {{ color: '#3388ff', weight: 1, fillOpacity: 0.05, fillColor: '#3388ff' }};
   }},
   onEachFeature: function(f, l) {{
-    var label = f.properties.hasObstruction
-      ? '<code>' + f.properties.id + '</code> <span style="color:#e63030;font-weight:bold">obstructed</span>'
-      : '<code>' + f.properties.id + '</code>';
-    l.bindPopup(label);
+    var p = f.properties;
+    var html = '<code>' + p.id + '</code>';
+    if (p.hasObstruction) {{
+      html += ' <span style="color:#e63030;font-weight:bold">obstructed</span>';
+    }}
+    var obs = p.obstructions || [];
+    if (obs.length > 0) {{
+      html += '<br><b>' + obs.length + ' obstruction(s):</b><ul style="margin:4px 0 0 0;padding-left:16px">';
+      obs.forEach(function(o) {{
+        var typeLabel = o.type.replace(/_/g, ' ');
+        html += '<li style="font-size:11px;margin-bottom:4px">';
+        html += '<b>' + typeLabel + '</b>';
+        html += ' <span style="color:#888;font-size:10px">' + o.id + '</span>';
+        if (obsRasters[o.id]) {{
+          html += ' <a href="#" style="font-size:10px" onclick="showObsRaster(\\'' + o.id + '\\');return false">view raster</a>';
+        }}
+        var a = o.attributes || {{}};
+        var keys = Object.keys(a);
+        if (keys.length > 0) {{
+          html += '<table style="margin:2px 0 0 8px;border-collapse:collapse;font-size:11px">';
+          keys.forEach(function(k) {{
+            var v = a[k];
+            if (v === null || v === '' || v === undefined) return;
+            html += '<tr><td style="color:#666;padding-right:6px">' + k + '</td><td>' + v + '</td></tr>';
+          }});
+          html += '</table>';
+        }}
+        html += '</li>';
+      }});
+      html += '</ul>';
+    }}
+    l.bindPopup(html);
   }}
 }}).addTo(map);
 
@@ -537,9 +632,33 @@ def run(tile_dir="data/preprocessed", zone_obj_dir=None, obs_cache="data/obstruc
     print(f"  Mean obstruction level : {mean_val:.4f}")
     print(f"  Max  obstruction level : {max_val:.4f}")
 
+    # Build per-tile obstruction metadata and raster images for the HTML map popup.
+    tile_obs_info: dict[str, list[dict]] = {}
+    obs_rasters: dict[str, str] = {}
+    for obs_id in terrain.matched_obstruction_ids:
+        json_path = obs_dir / f"{obs_id}.json"
+        try:
+            meta = json.loads(json_path.read_text())
+        except (FileNotFoundError, ValueError):
+            continue
+        entry = {
+            "id": obs_id,
+            "type": meta.get("obstruction_type", "unknown"),
+            "attributes": meta.get("attributes", {}),
+        }
+        for tid in meta.get("tile_ids", []):
+            tile_obs_info.setdefault(tid, []).append(entry)
+        tif_path = obs_dir / meta.get("raster_file", f"{obs_id}.tif")
+        b64 = _obs_raster_b64(tif_path)
+        if b64 is not None:
+            obs_rasters[obs_id] = b64
+
     print()
     print("=== Visualization ===")
-    generate_tile_map(tiles, nys_a, nys_b, Path("data/tile_map.html"), obstruction=obstruction)
+    generate_tile_map(
+        tiles, nys_a, nys_b, Path("data/tile_map.html"),
+        obstruction=obstruction, tile_obs_info=tile_obs_info, obs_rasters=obs_rasters,
+    )
 
     if zone_obj_dir is not None:
         print()
