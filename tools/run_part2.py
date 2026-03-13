@@ -180,6 +180,41 @@ def _obs_raster_b64(tif_path: Path) -> str | None:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def export_heightmap(tile_id: str, tile_dir: Path, out_dir: Path) -> bool:
+    """Export a normalized 8-bit grayscale PNG heightmap for a tile.
+
+    Raster axes are [easting, northing] (uint16, values in inches).
+    The PNG is saved with row 0 = north so Three.js (flipY=true default)
+    maps UV.v=1 → north and UV.v=0 → south, consistent with a PlaneGeometry
+    rotated -PI/2 around X.
+
+    A companion JSON is written with min_height_in and max_height_in so the
+    browser can compute the correct displacement scale.
+    Returns True if the tile was found and exported successfully.
+    """
+    tif_path = tile_dir / f"{tile_id}.tif"
+    if not tif_path.exists():
+        return False
+
+    raster = tifffile.imread(str(tif_path))  # uint16, shape (500, 500), [easting, northing]
+    min_h = int(raster.min())
+    max_h = int(raster.max())
+    if max_h == 0:
+        return False
+
+    # Transpose to [northing, easting], flip so row 0 = north (highest northing).
+    raster_img = raster.T[::-1, :]  # shape (500, 500)
+    rng = max(max_h - min_h, 1)
+    scaled = ((raster_img.astype(np.float32) - min_h) / rng * 255).clip(0, 255).astype(np.uint8)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(scaled, mode="L").save(out_dir / f"{tile_id}.png")
+    (out_dir / f"{tile_id}.json").write_text(
+        json.dumps({"min_height_in": min_h, "max_height_in": max_h})
+    )
+    return True
+
+
 def generate_tile_map(
     tile_ids: list[str],
     nys_a: tuple[float, float, float],
@@ -190,8 +225,22 @@ def generate_tile_map(
     obstruction=None,
     tile_obs_info: dict | None = None,
     obs_rasters: dict | None = None,
+    tile_heightmaps: dict | None = None,
 ) -> None:
-    """Write an interactive Leaflet HTML map of selected tiles to output_path."""
+    """Write an interactive split-view Leaflet + Three.js HTML map to output_path.
+
+    Left panel (~60%): Leaflet 2D tile map with obstruction overlays.
+    Right panel (~40%): Three.js 3D view opened by clicking any tile.
+      - Terrain rendered as PlaneGeometry with displacement map from heightmap PNG.
+      - Fresnel zone OBJ (obj-zone/{tile_id}_zone.obj) loaded as translucent mesh.
+      - Obstruction OBJs (obj/{tile_id}_{obs_id}.obj) loaded as pickable colored meshes.
+      - OrbitControls for mouse/touch spin and zoom.
+      - Pointer-click raycasting shows obstruction metadata in overlay label.
+
+    tile_heightmaps: dict mapping tile_id to
+        {"url": "data:image/png;base64,...", "min_height_in": int, "max_height_in": int}
+    Heightmap data is embedded directly in the HTML so it works from file:// without a server.
+    """
     # Build per-tile obstruction overlays first so we know which tiles are obstructed
     # before constructing tile features (needed for styling).
     obstructed_tile_ids: set[str] = set()
@@ -258,6 +307,7 @@ def generate_tile_map(
     los_js = json.dumps({"type": "FeatureCollection", "features": los_features})
     tile_overlays_js = json.dumps(tile_overlays)
     obs_rasters_js = json.dumps(obs_rasters or {})
+    tile_heightmaps_js = json.dumps(tile_heightmaps or {})
 
     # Fallback center (midpoint of LOS line in lat/lon) if no tiles are present.
     cx = (a_ll[1] + b_ll[1]) / 2
@@ -268,11 +318,60 @@ def generate_tile_map(
 <html>
 <head>
 <meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>LOS Tile Map</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="importmap">{{
+  "imports": {{
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169/examples/jsm/"
+  }}
+}}</script>
 <style>
-  html, body, #map {{ height: 100%; margin: 0; padding: 0; }}
+  * {{ box-sizing: border-box; }}
+  html, body {{ height: 100%; margin: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden; }}
+  #main {{ display: flex; flex: 1; min-height: 0; }}
+  #map {{ flex: 0 0 60%; height: 100%; }}
+  #panel-3d {{
+    flex: 0 0 40%; height: 100%; position: relative;
+    background: #0e1117; display: flex; flex-direction: column;
+    border-left: 2px solid #222;
+  }}
+  #panel-3d-header {{
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; background: #181c24; flex-shrink: 0;
+    border-bottom: 1px solid #333;
+  }}
+  #panel-3d-title {{ color: #aaa; font-family: monospace; font-size: 12px; }}
+  #panel-3d-close {{
+    border: none; background: none; color: #666; font-size: 18px;
+    cursor: pointer; line-height: 1; padding: 0 4px;
+  }}
+  #panel-3d-close:hover {{ color: #ccc; }}
+  #panel-3d-body {{ flex: 1; position: relative; min-height: 0; }}
+  #placeholder-3d {{
+    position: absolute; inset: 0; display: flex;
+    align-items: center; justify-content: center;
+    color: #444; font-family: sans-serif; font-size: 13px;
+    text-align: center; padding: 20px;
+  }}
+  #canvas-3d {{ display: none; width: 100%; height: 100%; }}
+  #label-3d {{
+    display: none; position: absolute; bottom: 10px; left: 50%;
+    transform: translateX(-50%); background: rgba(0,0,0,0.75);
+    color: #fff; font-family: monospace; font-size: 11px;
+    padding: 4px 10px; border-radius: 4px; white-space: nowrap;
+    max-width: 90%; overflow: hidden; text-overflow: ellipsis;
+    pointer-events: none;
+  }}
+  #loading-3d {{
+    display: none; position: absolute; inset: 0;
+    align-items: center; justify-content: center;
+    background: rgba(14,17,23,0.7);
+    color: #888; font-family: sans-serif; font-size: 12px;
+  }}
+  #loading-3d.active {{ display: flex; }}
   #obs-modal {{
     display: none; position: fixed; inset: 0;
     background: rgba(0,0,0,0.72); z-index: 9999;
@@ -297,10 +396,51 @@ def generate_tile_map(
     max-width: 80vw; max-height: 70vh;
     border: 1px solid #ddd;
   }}
+  #scene-legend {{
+    flex-shrink: 0; max-height: 35%; overflow-y: auto;
+    background: #0a0d13; border-top: 1px solid #2a2a3a; padding: 8px 10px;
+  }}
+  #scene-legend-title {{
+    color: #555; font-family: monospace; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;
+  }}
+  .legend-item {{
+    display: flex; align-items: center; gap: 8px; padding: 3px 0;
+    font-family: monospace; font-size: 11px; color: #bbb;
+  }}
+  .legend-swatch {{
+    width: 11px; height: 11px; border-radius: 2px; flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.15);
+  }}
+  .legend-label {{ flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }}
+  .legend-toggle {{ cursor: pointer; accent-color: #cc44ff; flex-shrink: 0; }}
+  @media (max-width: 700px) {{
+    #main {{ flex-direction: column; }}
+    #map {{ flex: 0 0 50%; }}
+    #panel-3d {{ flex: 0 0 50%; border-left: none; border-top: 2px solid #222; }}
+  }}
 </style>
 </head>
 <body>
-<div id="map"></div>
+<div id="main">
+  <div id="map"></div>
+  <div id="panel-3d">
+    <div id="panel-3d-header">
+      <span id="panel-3d-title">3D View</span>
+      <button id="panel-3d-close" onclick="close3DPanel()" title="Close">&times;</button>
+    </div>
+    <div id="panel-3d-body">
+      <div id="placeholder-3d">Click a tile on the map<br>to open the 3D view</div>
+      <canvas id="canvas-3d"></canvas>
+      <div id="label-3d"></div>
+      <div id="loading-3d"><span id="loading-3d-text">Loading...</span></div>
+    </div>
+    <div id="scene-legend" style="display:none">
+      <div id="scene-legend-title">Scene objects</div>
+      <div id="scene-legend-list"></div>
+    </div>
+  </div>
+</div>
 <div id="obs-modal" onclick="if(event.target===this)closeObsModal()">
   <div id="obs-modal-box">
     <div id="obs-modal-header">
@@ -310,19 +450,15 @@ def generate_tile_map(
     <img id="obs-modal-img" src="" alt="obstruction raster"/>
   </div>
 </div>
-<script>
-var map = L.map('map', {{maxZoom: 22}});
-L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  maxNativeZoom: 19,
-  maxZoom: 22
-}}).addTo(map);
 
+<!-- Leaflet map (non-module) -->
+<script>
 var tilesData = {tiles_js};
 var losData = {los_js};
 var ellipseData = {ellipse_js};
 var tileOverlays = {tile_overlays_js};
 var obsRasters = {obs_rasters_js};
+var tileHeightmaps = {tile_heightmaps_js};
 
 function showObsRaster(id) {{
   var b64 = obsRasters[id];
@@ -335,6 +471,19 @@ function closeObsModal() {{
   document.getElementById('obs-modal').classList.remove('open');
   document.getElementById('obs-modal-img').src = '';
 }}
+function close3DPanel() {{
+  document.getElementById('panel-3d').style.display = 'none';
+  document.getElementById('map').style.flex = '1';
+  setTimeout(function() {{ if (window._leafletMap) window._leafletMap.invalidateSize(); }}, 50);
+}}
+
+var map = L.map('map', {{maxZoom: 22}});
+window._leafletMap = map;
+L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  maxNativeZoom: 19,
+  maxZoom: 22
+}}).addTo(map);
 
 tileOverlays.forEach(function(o) {{
   L.imageOverlay(o.url, o.bounds, {{opacity: 0.85, zIndex: 200}}).addTo(map);
@@ -361,7 +510,7 @@ var tileLayer = L.geoJSON(tilesData, {{
     var obs = p.obstructions || [];
     if (obs.length > 0) {{
       html += '<br><b>' + obs.length + ' obstruction(s):</b>';
-      html += '<div style="max-height:260px;overflow-y:auto;margin-top:4px">';
+      html += '<div style="max-height:220px;overflow-y:auto;margin-top:4px">';
       html += '<ul style="margin:0;padding-left:16px">';
       obs.forEach(function(o) {{
         var typeLabel = o.type.replace(/_/g, ' ');
@@ -387,6 +536,9 @@ var tileLayer = L.geoJSON(tilesData, {{
       html += '</ul></div>';
     }}
     l.bindPopup(html);
+    l.on('click', function() {{
+      if (window.show3DTile) window.show3DTile(p.id);
+    }});
   }}
 }}).addTo(map);
 
@@ -407,6 +559,325 @@ if (losBounds.isValid()) {{
 }} else {{
   map.setView([{cx:.6f}, {cy:.6f}], 15);
 }}
+</script>
+
+<!-- Three.js 3D panel (ES module) -->
+<script type="module">
+import * as THREE from 'three';
+import {{ OBJLoader }} from 'three/addons/loaders/OBJLoader.js';
+import {{ OrbitControls }} from 'three/addons/controls/OrbitControls.js';
+
+let renderer = null;
+let scene = null;
+let camera = null;
+let controls = null;
+let animFrameId = null;
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const pickableMeshes = [];
+const meshMeta = new Map();
+const sceneObjects = [];  // {{ label, color, obj }} — drives the DOM legend
+
+function getPanel()  {{ return document.getElementById('panel-3d-body'); }}
+function getCanvas() {{ return document.getElementById('canvas-3d'); }}
+
+function setLoading(text) {{
+  const el = document.getElementById('loading-3d');
+  const tx = document.getElementById('loading-3d-text');
+  if (text) {{ tx.textContent = text; el.classList.add('active'); }}
+  else       {{ el.classList.remove('active'); }}
+}}
+
+function setLabel(text) {{
+  const el = document.getElementById('label-3d');
+  el.textContent = text;
+  el.style.display = text ? 'block' : 'none';
+}}
+
+function initRenderer() {{
+  const canvas = getCanvas();
+  renderer = new THREE.WebGLRenderer({{ canvas, antialias: true }});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+
+  camera = new THREE.PerspectiveCamera(50, 1, 0.5, 200000);
+
+  controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 10;
+  controls.maxDistance = 5000;
+  controls.maxPolarAngle = Math.PI * 0.9;
+
+  canvas.addEventListener('pointerdown', onCanvasPointerDown);
+  window.addEventListener('resize', onWindowResize);
+
+  function animate() {{
+    animFrameId = requestAnimationFrame(animate);
+    controls.update();
+    if (scene && camera) renderer.render(scene, camera);
+  }}
+  animate();
+}}
+
+function onWindowResize() {{
+  if (!renderer || !camera) return;
+  const panel = getPanel();
+  const w = panel.clientWidth, h = panel.clientHeight;
+  if (w === 0 || h === 0) return;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h, false);
+}}
+
+function disposeScene() {{
+  if (!scene) return;
+  scene.traverse(obj => {{
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {{
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach(m => {{
+        if (m.map) m.map.dispose();
+        if (m.displacementMap) m.displacementMap.dispose();
+        m.dispose();
+      }});
+    }}
+  }});
+  scene = null;
+}}
+
+function loadOBJ(url) {{
+  return new Promise((resolve, reject) => {{
+    new OBJLoader().load(url, resolve, undefined, reject);
+  }});
+}}
+
+// OBJ coordinate system: X=local easting (0-499 ft), Y=local northing (0-499 ft), Z=elevation (ft).
+// Three.js world: X=easting, Y=elevation (up), Z=-northing (Z increases southward).
+// Transform: rotation.x = -PI/2, position = (-250, 0, 250) centers the tile at world origin.
+function applyObjTransform(obj) {{
+  obj.rotation.x = -Math.PI / 2;
+  obj.position.set(-250, 0, 250);
+}}
+
+const OBS_COLORS = [0xff6633, 0xffaa00, 0xff3388, 0xaa44ff, 0x44ccff];
+
+async function loadTile(tileId) {{
+  document.getElementById('panel-3d').style.display = '';
+  document.getElementById('map').style.flex = '';
+  document.getElementById('placeholder-3d').style.display = 'none';
+
+  const canvas = getCanvas();
+  canvas.style.display = 'block';
+
+  if (!renderer) initRenderer();
+
+  disposeScene();
+  pickableMeshes.length = 0;
+  meshMeta.clear();
+  sceneObjects.length = 0;
+  setLabel('');
+  document.getElementById('scene-legend').style.display = 'none';
+
+  document.getElementById('panel-3d-title').textContent = tileId;
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0e1117);
+  scene.fog = new THREE.FogExp2(0x0e1117, 0.0003);
+
+  // Fit canvas to panel before loading
+  onWindowResize();
+
+  // 1. Heightmap data is embedded in the HTML — no fetch needed.
+  setLoading('Loading terrain...');
+  const hmData = (window.tileHeightmaps || {{}})[tileId];
+  const minH = hmData ? hmData.min_height_in : 0;
+  const maxH = hmData ? hmData.max_height_in : 600;
+  const minFt = minH / 12;
+  const maxFt = maxH / 12;
+  const heightRange = Math.max(maxFt - minFt, 1);
+
+  // 2. Build terrain mesh with per-vertex displacement so normals reflect
+  //    actual slope and lighting responds to terrain shape.
+  //
+  //    PlaneGeometry vertex layout (after rotateX(-PI/2)):
+  //      index = row * 500 + col, row 0 = north (world Z = -250),
+  //      row 499 = south (world Z = +249). col 0 = west, col 499 = east.
+  //    PNG layout: row 0 = north, col 0 = west — matches exactly.
+  let terrain = null;
+  if (hmData) {{
+    // Decode PNG via a canvas so we can read pixel values.
+    const img = await new Promise((res, rej) => {{
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = rej;
+      i.src = hmData.url;
+    }});
+    const cvs = document.createElement('canvas');
+    cvs.width = 500; cvs.height = 500;
+    const ctx = cvs.getContext('2d');
+    ctx.drawImage(img, 0, 0, 500, 500);
+    const pixels = ctx.getImageData(0, 0, 500, 500).data;  // RGBA, row 0 = top of image = north
+
+    const geo = new THREE.PlaneGeometry(500, 500, 499, 499);
+    geo.rotateX(-Math.PI / 2);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {{
+      const col = i % 500;
+      const row = Math.floor(i / 500);  // row 0 = north = PNG row 0
+      const t = pixels[(row * 500 + col) * 4] / 255;  // red channel = grey value
+      pos.setY(i, minFt + t * heightRange);
+    }}
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();  // normals now follow actual slope → lighting works
+
+    const mat = new THREE.MeshStandardMaterial({{
+      color: 0xffffff,
+      roughness: 0.85,
+      metalness: 0.0,
+    }});
+    terrain = new THREE.Mesh(geo, mat);
+    scene.add(terrain);
+    sceneObjects.push({{ label: 'Terrain', color: '#ffffff', obj: terrain }});
+  }} else {{
+    const geo = new THREE.PlaneGeometry(500, 500, 1, 1);
+    geo.rotateX(-Math.PI / 2);
+    terrain = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({{ color: 0x3a5a2a, roughness: 1 }}));
+    scene.add(terrain);
+    sceneObjects.push({{ label: 'Terrain', color: '#3a5a2a', obj: terrain }});
+  }}
+
+  const ambient = new THREE.AmbientLight(0x334466, 0.5);
+  scene.add(ambient);
+  const sun = new THREE.DirectionalLight(0xfff8e8, 4.5);
+  sun.position.set(-220, heightRange * 1.5 + 80, 180);
+  scene.add(sun);
+  const fill = new THREE.DirectionalLight(0x6080b0, 0.4);
+  fill.position.set(220, heightRange * 0.5, -180);
+  scene.add(fill);
+
+  // Position camera to look at tile from the SE at an oblique angle.
+  const midFt = (minFt + maxFt) / 2;
+  const camDist = Math.max(heightRange * 3, 300);
+  controls.target.set(0, midFt, 0);
+  camera.position.set(camDist * 0.6, midFt + camDist * 0.8, camDist * 0.9);
+  camera.lookAt(0, midFt, 0);
+  controls.update();
+
+  // 3. Fresnel zone OBJ — exact geometry already generated by export_zone_obj().
+  //    OBJ coordinate system: X=local easting, Y=local northing, Z=elevation (ft).
+  //    applyObjTransform maps this to Three.js world (X=east, Y=elev up, Z=-north+250).
+  setLoading('Loading Fresnel zone...');
+  try {{
+    const zoneObj = await loadOBJ(`obj-zone/${{tileId}}_zone.obj`);
+    applyObjTransform(zoneObj);
+    zoneObj.traverse(child => {{
+      if (!child.isMesh) return;
+      child.material = new THREE.MeshStandardMaterial({{
+        color: 0xcc44ff,
+        transparent: true, opacity: 0.5,
+        depthWrite: false, side: THREE.DoubleSide,
+        roughness: 0.4,
+      }});
+    }});
+    scene.add(zoneObj);
+    sceneObjects.push({{ label: 'Fresnel Zone', color: '#cc44ff', obj: zoneObj }});
+  }} catch(e) {{ /* zone OBJ not available for this tile */ }}
+
+  // 4. Load obstruction OBJs
+  const tileFeature = (window.tilesData || {{}}).features?.find(f => f.properties.id === tileId);
+  const obsList = tileFeature?.properties?.obstructions || [];
+  let colorIdx = 0;
+
+  for (const obs of obsList) {{
+    const shortId = obs.id.slice(0, 8);
+    setLoading(`Loading obstruction ${{shortId}}...`);
+    try {{
+      const obsObj = await loadOBJ(`obj/${{tileId}}_${{obs.id}}.obj`);
+      applyObjTransform(obsObj);
+      const color = OBS_COLORS[colorIdx++ % OBS_COLORS.length];
+      obsObj.traverse(child => {{
+        if (!child.isMesh) return;
+        child.material = new THREE.MeshStandardMaterial({{
+          color,
+          roughness: 0.65,
+          metalness: 0.05,
+        }});
+        pickableMeshes.push(child);
+        meshMeta.set(child, obs);
+      }});
+      scene.add(obsObj);
+      const hexColor = '#' + color.toString(16).padStart(6, '0');
+      const typeLabel = obs.type.replace(/_/g, ' ');
+      sceneObjects.push({{ label: `${{typeLabel}} · ${{obs.id.slice(0, 8)}}`, color: hexColor, obj: obsObj }});
+    }} catch(e) {{ /* OBJ not available */ }}
+  }}
+
+  setLoading('');
+  buildLegend();
+  onWindowResize();
+  setTimeout(onWindowResize, 100); // re-check after layout settles
+}}
+
+function buildLegend() {{
+  const legend = document.getElementById('scene-legend');
+  const list   = document.getElementById('scene-legend-list');
+  list.innerHTML = '';
+  if (sceneObjects.length === 0) {{ legend.style.display = 'none'; return; }}
+  legend.style.display = '';
+  sceneObjects.forEach((item, idx) => {{
+    const row = document.createElement('div');
+    row.className = 'legend-item';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.className = 'legend-toggle';
+    cb.checked = true; cb.id = `lcb-${{idx}}`;
+    cb.addEventListener('change', () => {{ item.obj.visible = cb.checked; }});
+
+    const swatch = document.createElement('span');
+    swatch.className = 'legend-swatch';
+    swatch.style.background = item.color;
+
+    const lbl = document.createElement('label');
+    lbl.className = 'legend-label';
+    lbl.htmlFor = `lcb-${{idx}}`;
+    lbl.textContent = item.label;
+
+    row.appendChild(cb);
+    row.appendChild(swatch);
+    row.appendChild(lbl);
+    list.appendChild(row);
+  }});
+}}
+
+function onCanvasPointerDown(event) {{
+  // Simple single-tap pick (ignore drag start)
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const cvs = getCanvas();
+  const onUp = (e) => {{
+    cvs.removeEventListener('pointerup', onUp);
+    if (Math.abs(e.clientX - startX) > 5 || Math.abs(e.clientY - startY) > 5) return;
+    const rect = cvs.getBoundingClientRect();
+    pointer.x =  ((e.clientX - rect.left)  / rect.width)  * 2 - 1;
+    pointer.y = -((e.clientY - rect.top)   / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(pickableMeshes);
+    if (hits.length > 0) {{
+      const meta = meshMeta.get(hits[0].object);
+      if (meta) {{
+        const typeLabel = meta.type.replace(/_/g, ' ');
+        setLabel(`${{typeLabel}} — ${{meta.id}}`);
+      }}
+    }} else {{
+      setLabel('');
+    }}
+  }};
+  cvs.addEventListener('pointerup', onUp);
+}}
+
+// Expose to Leaflet non-module script
+window.show3DTile = (tileId) => loadTile(tileId).catch(console.error);
 </script>
 </body>
 </html>"""
@@ -656,10 +1127,40 @@ def run(tile_dir="data/preprocessed", zone_obj_dir=None, obs_cache="data/obstruc
             obs_rasters[obs_id] = b64
 
     print()
+    print("=== Heightmap export ===")
+    heightmap_dir = Path("data/heightmaps")
+    tile_heightmaps: dict[str, dict] = {}
+    n_exported = 0
+    for tid in tiles:
+        if export_heightmap(tid, tile_dir, heightmap_dir):
+            n_exported += 1
+    print(f"  Exported {n_exported} heightmap(s) to {heightmap_dir}/")
+
+    # Load each PNG back as a data URI so it can be embedded directly in the HTML.
+    # This lets tile_map.html work when opened via file:// without a local server.
+    for tid in tiles:
+        png_path = heightmap_dir / f"{tid}.png"
+        meta_path = heightmap_dir / f"{tid}.json"
+        if not png_path.exists() or not meta_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text())
+            b64 = base64.b64encode(png_path.read_bytes()).decode("ascii")
+            tile_heightmaps[tid] = {
+                "url": "data:image/png;base64," + b64,
+                "min_height_in": meta["min_height_in"],
+                "max_height_in": meta["max_height_in"],
+            }
+        except (ValueError, KeyError):
+            pass
+    print(f"  Embedded {len(tile_heightmaps)} heightmap(s) in HTML")
+
+    print()
     print("=== Visualization ===")
     generate_tile_map(
         tiles, nys_a, nys_b, Path("data/tile_map.html"),
         obstruction=obstruction, tile_obs_info=tile_obs_info, obs_rasters=obs_rasters,
+        tile_heightmaps=tile_heightmaps,
     )
 
     if zone_obj_dir is not None:
