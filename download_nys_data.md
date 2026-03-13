@@ -28,3 +28,13 @@ Use iftop to monitor the bandwidth to make sure the download is proceeding effic
 ```
 sudo iftop
 ```
+
+
+### Orthos
+
+Orthos are available at `ftp://ftp.gis.ny.gov//ortho/nysdop10/new_york_city/spcs/`, use a similar command
+to download them all:
+
+```commandline
+wget -r ftp://ftp.gis.ny.gov//ortho/nysdop10/new_york_city/spcs/zips
+```

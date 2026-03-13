@@ -15,6 +15,7 @@ import os
 import sys
 from pathlib import Path
 
+import imagecodecs
 import numpy as np
 import tifffile
 from PIL import Image
@@ -180,6 +181,60 @@ def _obs_raster_b64(tif_path: Path) -> str | None:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def _build_ortho_textures(tile_ids: list[str], ortho_dir: Path) -> dict[str, str]:
+    """Crop ortho JP2s to per-sub-tile JPEG data URIs for embedding in HTML.
+
+    Ortho JP2 layout:
+      - One file per LAS tile: <ortho_dir>/<file_id.zfill(6)>.jp2
+      - Covers the full 2500×2500 usft LAS tile at 5000×5000 pixels (2 px/usft)
+      - Row 0 = north (highest northing), row 4999 = south (lowest northing)
+      - Col 0 = west (lowest easting),    col 4999 = east (highest easting)
+
+    Sub-tile (xi, yi) maps to pixel region:
+      rows [4000 - yi*1000 : 5000 - yi*1000]  (yi=0 → rows 4000-4999 = south)
+      cols [xi*1000        : xi*1000 + 1000]   (xi=0 → cols 0-999 = west)
+
+    Each 1000×1000 crop is JPEG-encoded at quality 85 and returned as a
+    data URI.  JP2 files that are absent from ortho_dir are silently skipped.
+    Each JP2 is decoded once regardless of how many sub-tiles it contributes.
+    """
+    from collections import defaultdict
+
+    # Group sub-tiles by their parent LAS file_id.
+    by_file: dict[str, list[str]] = defaultdict(list)
+    for tid in tile_ids:
+        parts = tid.rsplit("_", 1)
+        if len(parts) == 2 and len(parts[1]) == 2:
+            by_file[parts[0]].append(tid)
+
+    textures: dict[str, str] = {}
+    for file_id, tids in by_file.items():
+        jp2_path = ortho_dir / f"{file_id.zfill(6)}.jp2"
+        if not jp2_path.exists():
+            continue
+        try:
+            # Decode full JP2 once; shape (5000, 5000, bands) uint8
+            img_arr = imagecodecs.jpeg2k_decode(jp2_path.read_bytes())
+        except Exception as e:
+            print(f"  Warning: could not decode ortho {jp2_path.name}: {e}")
+            continue
+
+        for tid in tids:
+            try:
+                xi = int(tid[-2])
+                yi = int(tid[-1])
+            except (ValueError, IndexError):
+                continue
+            row0 = (4 - yi) * 1000
+            col0 = xi * 1000
+            crop = img_arr[row0:row0 + 1000, col0:col0 + 1000, :3]  # RGB only
+            buf = io.BytesIO()
+            Image.fromarray(crop.astype(np.uint8), mode="RGB").save(buf, format="JPEG", quality=85)
+            textures[tid] = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    return textures
+
+
 def export_heightmap(tile_id: str, tile_dir: Path, out_dir: Path) -> bool:
     """Export a normalized 8-bit grayscale PNG heightmap for a tile.
 
@@ -226,6 +281,7 @@ def generate_tile_map(
     tile_obs_info: dict | None = None,
     obs_rasters: dict | None = None,
     tile_heightmaps: dict | None = None,
+    tile_ortho_textures: dict | None = None,
 ) -> None:
     """Write an interactive split-view Leaflet + Three.js HTML map to output_path.
 
@@ -308,6 +364,7 @@ def generate_tile_map(
     tile_overlays_js = json.dumps(tile_overlays)
     obs_rasters_js = json.dumps(obs_rasters or {})
     tile_heightmaps_js = json.dumps(tile_heightmaps or {})
+    tile_ortho_textures_js = json.dumps(tile_ortho_textures or {})
 
     # Fallback center (midpoint of LOS line in lat/lon) if no tiles are present.
     cx = (a_ll[1] + b_ll[1]) / 2
@@ -459,6 +516,7 @@ var ellipseData = {ellipse_js};
 var tileOverlays = {tile_overlays_js};
 var obsRasters = {obs_rasters_js};
 var tileHeightmaps = {tile_heightmaps_js};
+var tileOrthoTextures = {tile_ortho_textures_js};
 
 function showObsRaster(id) {{
   var b64 = obsRasters[id];
@@ -731,11 +789,22 @@ async function loadTile(tileId) {{
     pos.needsUpdate = true;
     geo.computeVertexNormals();  // normals now follow actual slope → lighting works
 
-    const mat = new THREE.MeshStandardMaterial({{
-      color: 0xffffff,
-      roughness: 0.85,
-      metalness: 0.0,
-    }});
+    // Ortho texture — load from embedded data URI if available.
+    const orthoUrl = (window.tileOrthoTextures || {{}})[tileId];
+    let orthoTex = null;
+    if (orthoUrl) {{
+      const texLoader = new THREE.TextureLoader();
+      orthoTex = await new Promise((res, rej) =>
+        texLoader.load(orthoUrl, res, undefined, rej)
+      ).catch(() => null);
+    }}
+
+    // If we have a photo texture use BasicMaterial so lighting doesn't
+    // tint/wash out the aerial photograph colors.  Without a texture keep
+    // StandardMaterial so the directional light reveals terrain contours.
+    const mat = orthoTex
+      ? new THREE.MeshBasicMaterial({{ map: orthoTex }})
+      : new THREE.MeshStandardMaterial({{ color: 0xffffff, roughness: 0.85, metalness: 0.0 }});
     terrain = new THREE.Mesh(geo, mat);
     scene.add(terrain);
     sceneObjects.push({{ label: 'Terrain', color: '#ffffff', obj: terrain }});
@@ -1156,11 +1225,26 @@ def run(tile_dir="data/preprocessed", zone_obj_dir=None, obs_cache="data/obstruc
     print(f"  Embedded {len(tile_heightmaps)} heightmap(s) in HTML")
 
     print()
+    print("=== Ortho textures ===")
+    ortho_dir = Path("data/orthos")
+    ortho_dir.mkdir(parents=True, exist_ok=True)
+    from los_analyzer.ortho.fetch import ortho_fetcher_from_env
+    ortho_fetcher = ortho_fetcher_from_env(ortho_dir)
+    if ortho_fetcher is not None:
+        print(f"  Fetching ortho JP2s for {len(tiles)} tile(s) from S3 ...")
+        available = ortho_fetcher.ensure_for_tile_ids(tiles)
+        print(f"  {len(available)} ortho file(s) available")
+    else:
+        print("  LOS_ORTHO_S3_BUCKET / LOS_ORTHO_S3_PREFIX not set — using local orthos only")
+    tile_ortho_textures = _build_ortho_textures(tiles, ortho_dir)
+    print(f"  Embedded {len(tile_ortho_textures)} ortho texture(s) in HTML")
+
+    print()
     print("=== Visualization ===")
     generate_tile_map(
         tiles, nys_a, nys_b, Path("data/tile_map.html"),
         obstruction=obstruction, tile_obs_info=tile_obs_info, obs_rasters=obs_rasters,
-        tile_heightmaps=tile_heightmaps,
+        tile_heightmaps=tile_heightmaps, tile_ortho_textures=tile_ortho_textures,
     )
 
     if zone_obj_dir is not None:
