@@ -10,3 +10,4 @@ imagecodecs
 boto3
 shapely
 pandas
+arcgis

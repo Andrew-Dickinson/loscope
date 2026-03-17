@@ -1,8 +1,5 @@
 ### Data Sources
 
-building_footprints
-https://data.cityofnewyork.us/City-Government/BUILDING/5zhs-2jue/about_data
-
 certificates_of_occupancy
 https://data.cityofnewyork.us/Housing-Development/DOB-NOW-Certificate-of-Occupancy/pkdm-hqz6/about_data
 
@@ -21,20 +18,42 @@ https://data.cityofnewyork.us/Housing-Development/DOB-Permit-Issuance/ipu4-2q9a/
 dob_now_approved_permits
 https://data.cityofnewyork.us/Housing-Development/DOB-NOW-Build-Approved-Permits/rbx6-tga4/about_data
 
+### Geographic Data
+
+building_footprints
+https://data.cityofnewyork.us/City-Government/BUILDING/5zhs-2jue/about_data
+https://nycmaps-nyc.hub.arcgis.com/datasets/nyc::building/about
+https://services6.arcgis.com/yG5s3afENB5iO9fj/arcgis/rest/services/BUILDING_view/FeatureServer/0
+
+
+```
+python tools/download_arcgis_data.py \
+    https://services6.arcgis.com/yG5s3afENB5iO9fj/arcgis/rest/services/BUILDING_view/FeatureServer/0 \
+    --out data/building-footprints/arcgis_download.csv  
+```
+
 tax_lots
 https://data.cityofnewyork.us/City-Government/TAX_LOT_POLYGON/i38t-6if2/about_data
+https://services6.arcgis.com/yG5s3afENB5iO9fj/ArcGIS/rest/services/DTM_ETL_DAILY_view/FeatureServer/0
+
+
+```
+python tools/download_arcgis_data.py \
+    https://services6.arcgis.com/yG5s3afENB5iO9fj/ArcGIS/rest/services/DTM_ETL_DAILY_view/FeatureServer/0 \
+    --out data/tax-lots/arcgis_download.csv  
+```
 
 ### Ingestion command
 ```
 python tools/build_database.py \
-    --footprints       csv/building-footprints_5zhs-2jue.csv \
+    --footprints       data/building-footprints/arcgis_download.csv   \
     --co-issuance      csv/DOB-NOW-Certificate-of-Occupancy_pkdm-hqz6.csv \
     --condos           csv/Digital-Tax-Map-Condominiums_p8u6-a6it.csv \
     --dob-jobs         csv/DOB-Job-Application-Filings_ic3t-wcy2.csv \
     --dob-now-jobs     csv/DOB-NOW-Build-Job-Application-Filings_w9ak-ipjd.csv \
     --dob-permits      csv/DOB-Permit-Issuance_ipu4-2q9a.csv \
     --dob-now-permits  csv/DOB-NOW-Build-Approved-Permits_rbx6-tga4.csv \
-    --tax-lots         csv/TAX_LOT_POLYGON_i38t-6if2.csv \
+    --tax-lots         data/tax-lots/arcgis_download.csv \
     --db               nyc_dob.db
 ```
 
