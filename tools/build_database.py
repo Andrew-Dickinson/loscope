@@ -64,18 +64,14 @@ def _to_iso_date(series: pd.Series, fmt: str) -> pd.Series:
     # Collapse any runs of whitespace (handles double-space in CO timestamps)
     s = series.str.strip().str.split().str.join(' ')
     parsed = pd.to_datetime(s, format=fmt, errors='coerce')
-    result = parsed.dt.strftime('%Y-%m-%d')
-    result[parsed.isna()] = None
-    return result
+    return parsed.dt.strftime('%Y-%m-%d').where(parsed.notna(), other=None)
 
 
 def _to_iso_date_unix_ms(series: pd.Series) -> pd.Series:
     """Convert Unix millisecond timestamps (integer strings) to ISO YYYY-MM-DD."""
     numeric = pd.to_numeric(series, errors='coerce')
     parsed = pd.to_datetime(numeric, unit='ms', errors='coerce')
-    result = parsed.dt.strftime('%Y-%m-%d')
-    result[parsed.isna()] = None
-    return result
+    return parsed.dt.strftime('%Y-%m-%d').where(parsed.notna(), other=None)
 
 
 def _to_iso_date_auto(series: pd.Series, str_fmt: str) -> pd.Series:
