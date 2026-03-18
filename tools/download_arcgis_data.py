@@ -28,27 +28,6 @@ warnings.simplefilter("ignore", InsecureRequestWarning)
 PORTAL  = "https://nyc.maps.arcgis.com"
 OUT_SR  = 6539   # NAD83(2011) / NY Long Island (US survey feet)
 
-# Map ArcGIS attribute field names (uppercased) → CSV column names
-# matching BUILDING_20260307.csv so build_database.py can ingest it as-is.
-_FIELD_MAP = {
-    "NAME":              "NAME",
-    "BIN":               "BIN",
-    "DOITT_ID":          "DOITT_ID",
-    "SHAPE_AREA":        "SHAPE_AREA",
-    "BASE_BBL":          "BASE_BBL",
-    "OBJECTID":          "OBJECTID",
-    "CONSTRUCTION_YEAR": "Construction Year",
-    "FEATURE_CODE":      "Feature Code",
-    "GEOM_SOURCE":       "Geometry Source",
-    "GROUND_ELEVATION":  "Ground Elevation",
-    "HEIGHT_ROOF":       "Height Roof",
-    "LAST_EDITED_DATE":  "LAST_EDITED_DATE",
-    "LAST_STATUS_TYPE":  "LAST_STATUS_TYPE",
-    "MAPPLUTO_BBL":      "Map Pluto BBL",
-    "SHAPE_LENGTH":      "Length",
-}
-
-
 def _iter_chunks(feature_layer, where: str, chunk_size: int):
     """Yield Feature objects in pages to avoid server result-set limits."""
     offset = 0
@@ -97,11 +76,8 @@ def download(src_url: str, out_path: Path, where: str = "1=1", chunk_size: int =
                 attrs = {k.upper(): v for k, v in feat.attributes.items()}
 
                 # Build row: geometry WKT first, then mapped attribute columns
-                row: dict[str, object] = {}
+                row: dict[str, object] = attrs.copy()
                 row["the_geom"] = Geometry(feat.geometry).WKT if feat.geometry else ""
-
-                for src_field, dst_col in _FIELD_MAP.items():
-                    row[dst_col] = attrs.get(src_field, "")
 
                 if writer is None:
                     writer = csv.DictWriter(f, fieldnames=list(row.keys()))

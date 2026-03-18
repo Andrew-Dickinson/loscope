@@ -69,6 +69,31 @@ def _to_iso_date(series: pd.Series, fmt: str) -> pd.Series:
     return result
 
 
+def _to_iso_date_unix_ms(series: pd.Series) -> pd.Series:
+    """Convert Unix millisecond timestamps (integer strings) to ISO YYYY-MM-DD."""
+    numeric = pd.to_numeric(series, errors='coerce')
+    parsed = pd.to_datetime(numeric, unit='ms', errors='coerce')
+    result = parsed.dt.strftime('%Y-%m-%d')
+    result[parsed.isna()] = None
+    return result
+
+
+def _to_iso_date_auto(series: pd.Series, str_fmt: str) -> pd.Series:
+    """Auto-detect Unix-ms vs string date and convert to ISO YYYY-MM-DD.
+
+    If the first non-null value is numeric it is treated as a Unix millisecond
+    timestamp (ArcGIS export style); otherwise str_fmt is applied.
+    """
+    first = series.dropna()
+    if not first.empty:
+        try:
+            float(str(first.iloc[0]).strip())
+            return _to_iso_date_unix_ms(series)
+        except ValueError:
+            pass
+    return _to_iso_date(series, str_fmt)
+
+
 def _to_numeric(series: pd.Series) -> pd.Series:
     """Strip $ and commas, coerce to float."""
     return pd.to_numeric(
@@ -240,17 +265,27 @@ def _transform_dob_now_jobs(chunk: pd.DataFrame) -> pd.DataFrame:
 
 
 def _transform_footprints(chunk: pd.DataFrame) -> pd.DataFrame:
-    chunk = _transform_dates(chunk, {'last_edited_date': _FMT_ISO_8601})
+    # Normalise column names that differ between CSV vintages
+    chunk = chunk.rename(columns={
+        'geometry_source': 'geom_source',
+        'map_pluto_bbl':   'mappluto_bbl',
+        'length':          'shape_length',
+    })
+    if 'last_edited_date' in chunk.columns:
+        chunk['last_edited_date'] = _to_iso_date_auto(chunk['last_edited_date'], _FMT_FOOTPRINT)
     chunk = _transform_numerics(chunk, [
         'construction_year', 'objectid', 'shape_area',
-        'height_roof', 'ground_elevation', 'length',
+        'height_roof', 'ground_elevation', 'shape_length',
     ])
     return chunk
 
 
 def _transform_tax_lots(chunk: pd.DataFrame) -> pd.DataFrame:
     chunk = _strip_commas(chunk, ['block', 'lot'])
-    chunk = _transform_numerics(chunk, ['effective_tax_year'])
+    chunk = _transform_numerics(chunk, ['effective_tax_year', 'objectid', 'shape_area', 'shape_length'])
+    for date_col in ('created_date', 'last_edited_date'):
+        if date_col in chunk.columns:
+            chunk[date_col] = _to_iso_date_auto(chunk[date_col], _FMT_MDY)
     chunk = _add_borough_name(chunk, col='boro')
     return chunk
 
