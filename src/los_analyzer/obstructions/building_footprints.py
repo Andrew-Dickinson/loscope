@@ -1,32 +1,20 @@
 """Parse NYC building footprint CSV rows into Obstruction objects.
 
-Each row represents one building polygon in WGS84 lat/lon. The geometry is
-projected to NYS State Plane - Long Island (EPSG:6539) and rasterized onto a
-1 usft grid. Heights are encoded as uint16 inches above the EPSG:6360 datum.
+Geometry is stored in NYS State Plane - Long Island (EPSG:6539) and rasterized
+onto a 1 usft grid. Heights are encoded as uint16 inches above the EPSG:6360 datum.
 """
 import csv
 import uuid
 from pathlib import Path
 
 import numpy as np
-import pyproj
 import shapely
-import shapely.ops
 from shapely import wkt
 from shapely.geometry import box as shapely_box
 
 from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT
 from los_analyzer.tiles.identify import _tile_id_from_sw_corner
 from .model import OBSTRUCTION_TYPE_BUILDING, Obstruction
-
-# Project WGS84 lon/lat (EPSG:4326) -> NYS State Plane horizontal (EPSG:6539)
-_TRANSFORMER = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:6539", always_xy=True)
-
-
-def _project_geometry(geom_wgs84):
-    """Reproject a shapely geometry from WGS84 lon/lat to NYS EPSG:6539."""
-    return shapely.ops.transform(_TRANSFORMER.transform, geom_wgs84)
-
 
 def _rasterize(poly_nys, height_inches: int) -> tuple[int, int, np.ndarray]:
     """Rasterize a shapely geometry to a 1 usft uint16 grid.
@@ -105,11 +93,10 @@ def parse_building_row(row: dict) -> Obstruction | None:
     height_inches = int(round(total_height_ft * 12))
 
     try:
-        poly_wgs84 = wkt.loads(geom_str)
+        poly_nys = wkt.loads(geom_str)
     except Exception:
         return None
 
-    poly_nys = _project_geometry(poly_wgs84)
     if poly_nys.is_empty:
         return None
 

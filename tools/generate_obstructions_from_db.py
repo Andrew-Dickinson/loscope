@@ -5,7 +5,7 @@ Rows where ground_elevation is NULL use DEM tiles to derive the maximum ground
 elevation within the polygon footprint.
 
 The SQL query must return these columns:
-    output_geometry  -- WKT polygon/multipolygon in WGS84 (EPSG:4326)
+    output_geometry  -- WKT polygon/multipolygon in NYS EPSG:6539
     ground_elevation -- absolute elevation in feet (may be NULL)
     height_roof      -- height above ground in feet
     type             -- obstruction type string (used as obstruction_type)
@@ -136,12 +136,11 @@ def process_query(sql_path: Path, db_path: Path, out_dir: Path, dem_cache: Path,
             continue
 
         try:
-            poly_wgs84 = wkt.loads(geom_str)
+            poly_nys = wkt.loads(geom_str)
         except Exception:
             skipped += 1
             continue
 
-        poly_nys = _project_geometry(poly_wgs84)
         if poly_nys.is_empty:
             skipped += 1
             continue

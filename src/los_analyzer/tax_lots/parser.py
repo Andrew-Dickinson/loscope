@@ -1,21 +1,15 @@
 """Parse NYC tax lot CSV into per-block JSON files grouped by borough.
 
-Geometry is reprojected from WGS84 (EPSG:4326) to NYS State Plane Long Island
-(EPSG:6539) so coordinates align with the raster DEM layers.
+Geometry is already in NYS State Plane Long Island (EPSG:6539).
 """
 import csv
 import json
 from collections import defaultdict
 from pathlib import Path
 
-import pyproj
 from tqdm import tqdm
-import shapely.ops
 from shapely import wkt
 from shapely.geometry import mapping
-
-# WGS84 lon/lat → NYS State Plane horizontal (EPSG:6539)
-_TRANSFORMER = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:6539", always_xy=True)
 
 BOROUGH_NAMES = {
     "1": "Manhattan",
@@ -24,10 +18,6 @@ BOROUGH_NAMES = {
     "4": "Queens",
     "5": "Staten Island",
 }
-
-
-def _project_geometry(geom_wgs84):
-    return shapely.ops.transform(_TRANSFORMER.transform, geom_wgs84)
 
 
 def _strip_commas(val: str) -> str:
@@ -50,11 +40,10 @@ def parse_row(row: dict) -> dict | None:
         return None
 
     try:
-        geom_wgs84 = wkt.loads(geom_str)
+        geom_nys = wkt.loads(geom_str)
     except Exception:
         return None
 
-    geom_nys = _project_geometry(geom_wgs84)
     if geom_nys.is_empty:
         return None
 
