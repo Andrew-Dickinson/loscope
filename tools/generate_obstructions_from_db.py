@@ -32,7 +32,6 @@ from shapely import wkt
 
 from los_analyzer.obstructions.building_footprints import (
     _intersecting_tile_ids,
-    _project_geometry,
     _rasterize,
 )
 from los_analyzer.obstructions.io import save_obstruction
