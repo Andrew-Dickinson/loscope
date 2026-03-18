@@ -16,3 +16,14 @@ https://math.stackexchange.com/questions/2505548/intersection-of-an-ellipsoid-an
 
 https://en.wikipedia.org/wiki/Sagitta_(geometry)
 https://rechneronline.de/earth-radius/
+
+
+https://github.com/CityOfNewYork/nyc-geo-metadata/blob/main/Metadata/Metadata_BuildingFootprints.md
+https://github.com/CityOfNewYork/nyc-geo-metadata/issues/78
+
+https://geodesy.noaa.gov/NCAT/
+
+https://spatialreference.org/ref/epsg/2263/
+https://spatialreference.org/ref/epsg/6539/
+https://spatialreference.org/ref/epsg/4326/
+
