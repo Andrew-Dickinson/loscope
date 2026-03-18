@@ -6,10 +6,12 @@ import shapely
 
 from .combine import cull_and_combine
 from .grid import sample_grid
+from .mast import apply_mast_offset
 from .perimeter import sample_perimeter
 
 __all__ = [
     "generate_sample_points",
+    "apply_mast_offset",
     "sample_grid",
     "sample_perimeter",
     "cull_and_combine",

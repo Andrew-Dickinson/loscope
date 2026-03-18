@@ -36,7 +36,7 @@ from shapely import wkt
 
 from los_analyzer.obstructions.building_footprints import _intersecting_tile_ids
 from los_analyzer.preprocessing.io import load_tile
-from los_analyzer.sample_points import generate_sample_points
+from los_analyzer.sample_points import apply_mast_offset, generate_sample_points
 
 
 def _build_fetcher(tile_dir: Path):
@@ -86,8 +86,10 @@ class ExtractionResult:
     heightmap_path: Path
     mask_path: Path
     sample_pts_path: Path | None = None
+    sample_pts_measurement_path: Path | None = None
     terrain_obj_path: Path | None = None
-    sample_pts_obj_path: Path | None = None
+    sample_pts_display_obj_path: Path | None = None
+    sample_pts_measurement_obj_path: Path | None = None
 
 
 def _export_heightmap_obj(heightmap: np.ndarray, out_path: Path) -> None:
@@ -223,18 +225,25 @@ def extract_building_heightmap(
     tile_dir: Path,
     out_dir: Path,
     sample_spacing: int | None = None,
+    mast_offset: float = 0.0,
     export_obj: bool = False,
 ) -> ExtractionResult:
     """Extract heightmap and mask TIFFs for the given BIN.
 
-    When *sample_spacing* is given (integer feet, >= 1), also generates a
-    ``{bin_id}_sample_points.npy`` file via :func:`generate_sample_points`.
+    When *sample_spacing* is given (integer feet, >= 1), generates sample
+    points and applies *mast_offset* to produce separate display and
+    measurement positions.  For every point that is the highest at its (X, Y),
+    the measurement position is shifted upward by *mast_offset* feet; all
+    other points have coincident display and measurement positions.
 
-    When *export_obj* is ``True``, writes ``{bin_id}_heightmap.obj`` (Minecraft-style
-    voxel terrain) and, if *sample_spacing* is also set,
-    ``{bin_id}_sample_points.obj`` (each point as a 3-inch cube).  Both OBJ files
-    share the same local coordinate origin (SW corner of the heightmap) so they
-    can be imported into the same Blender scene and align correctly.
+    Saves ``{bin_id}_sample_points.npy`` (display) and
+    ``{bin_id}_sample_points_measurement.npy`` (measurement).
+
+    When *export_obj* is ``True``, writes ``{bin_id}_heightmap.obj`` plus
+    ``{bin_id}_sample_points_display.obj`` and
+    ``{bin_id}_sample_points_measurement.obj`` (each point a 3-inch cube).
+    All OBJ files share the same local coordinate origin so they align in
+    Blender.
     """
     # 1. Fetch boundary (already in NYS EPSG:6539)
     poly_nys = _fetch_building_geometry(bin_id, db_path)
@@ -319,31 +328,41 @@ def extract_building_heightmap(
 
     # 6. Optional sample-point grid
     sample_pts_path: Path | None = None
-    pts: np.ndarray | None = None
+    sample_pts_measurement_path: Path | None = None
+    display_pts: np.ndarray | None = None
+    measurement_pts: np.ndarray | None = None
     if sample_spacing is not None:
-        pts = generate_sample_points(
+        raw_pts = generate_sample_points(
             heightmap, x_sw, y_sw, sample_spacing,
             mask=mask, polygon=poly_nys,
         )
+        display_pts, measurement_pts = apply_mast_offset(raw_pts, mast_offset)
         sample_pts_path = out_dir / f"{bin_id}_sample_points.npy"
-        np.save(str(sample_pts_path), pts)
+        sample_pts_measurement_path = out_dir / f"{bin_id}_sample_points_measurement.npy"
+        np.save(str(sample_pts_path), display_pts)
+        np.save(str(sample_pts_measurement_path), measurement_pts)
 
     # 7. Optional OBJ visualisation
     terrain_obj_path: Path | None = None
-    sample_pts_obj_path: Path | None = None
+    sample_pts_display_obj_path: Path | None = None
+    sample_pts_measurement_obj_path: Path | None = None
     if export_obj:
         terrain_obj_path = out_dir / f"{bin_id}_heightmap.obj"
         _export_heightmap_obj(heightmap, terrain_obj_path)
-        if pts is not None:
-            sample_pts_obj_path = out_dir / f"{bin_id}_sample_points.obj"
-            _export_sample_points_obj(pts, x_sw, y_sw, sample_pts_obj_path)
+        if display_pts is not None:
+            sample_pts_display_obj_path = out_dir / f"{bin_id}_sample_points_display.obj"
+            sample_pts_measurement_obj_path = out_dir / f"{bin_id}_sample_points_measurement.obj"
+            _export_sample_points_obj(display_pts, x_sw, y_sw, sample_pts_display_obj_path)
+            _export_sample_points_obj(measurement_pts, x_sw, y_sw, sample_pts_measurement_obj_path)
 
     return ExtractionResult(
         heightmap_path=heightmap_path,
         mask_path=mask_path,
         sample_pts_path=sample_pts_path,
+        sample_pts_measurement_path=sample_pts_measurement_path,
         terrain_obj_path=terrain_obj_path,
-        sample_pts_obj_path=sample_pts_obj_path,
+        sample_pts_display_obj_path=sample_pts_display_obj_path,
+        sample_pts_measurement_obj_path=sample_pts_measurement_obj_path,
     )
 
 
@@ -381,13 +400,24 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--mast-offset",
+        type=float,
+        default=0.0,
+        metavar="FEET",
+        help=(
+            "Vertical offset in feet applied to the measurement position of "
+            "the top point at each (X, Y) location (default: 0).  Display "
+            "positions are always saved at the original surface height."
+        ),
+    )
+    parser.add_argument(
         "--export-obj",
         action="store_true",
         help=(
-            "Write Minecraft-style OBJ files: {BIN}_heightmap.obj (voxel terrain) "
-            "and, when --sample-spacing is also set, {BIN}_sample_points.obj "
-            "(each sample point as a 3-inch cube).  Both share the same local "
-            "coordinate origin so they align correctly in Blender."
+            "Write Minecraft-style OBJ files: {BIN}_heightmap.obj (voxel "
+            "terrain), {BIN}_sample_points_display.obj, and "
+            "{BIN}_sample_points_measurement.obj (each point a 3-inch cube). "
+            "All share the same local coordinate origin for Blender import."
         ),
     )
     args = parser.parse_args()
@@ -402,17 +432,20 @@ def main() -> None:
     result = extract_building_heightmap(
         args.bin, db_path, tile_dir, out_dir,
         sample_spacing=args.sample_spacing,
+        mast_offset=args.mast_offset,
         export_obj=args.export_obj,
     )
     print(f"Heightmap:  {result.heightmap_path}")
     print(f"Mask:       {result.mask_path}")
     if result.sample_pts_path is not None:
         pts = np.load(str(result.sample_pts_path))
-        print(f"Sample pts: {result.sample_pts_path}  ({len(pts)} points)")
+        print(f"Display pts:     {result.sample_pts_path}  ({len(pts)} points)")
+        print(f"Measurement pts: {result.sample_pts_measurement_path}")
     if result.terrain_obj_path is not None:
         print(f"Terrain OBJ:     {result.terrain_obj_path}")
-    if result.sample_pts_obj_path is not None:
-        print(f"Sample pts OBJ:  {result.sample_pts_obj_path}")
+    if result.sample_pts_display_obj_path is not None:
+        print(f"Display OBJ:     {result.sample_pts_display_obj_path}")
+        print(f"Measurement OBJ: {result.sample_pts_measurement_obj_path}")
 
 
 if __name__ == "__main__":
