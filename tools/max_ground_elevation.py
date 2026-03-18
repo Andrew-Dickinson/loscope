@@ -28,15 +28,6 @@ import shapely.ops
 import tifffile
 from shapely import wkt
 
-# Same projection used by building_footprints.py: WGS84 → NYS State Plane (EPSG:6539)
-_TRANSFORMER = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:6539", always_xy=True)
-
-
-def _project_geometry(geom_wgs84):
-    """Reproject a shapely geometry from WGS84 lon/lat to NYS EPSG:6539."""
-    return shapely.ops.transform(_TRANSFORMER.transform, geom_wgs84)
-
-
 def _build_dem_fetcher(cache_dir: Path):
     """Return a CachingTileFetcher for DEM tiles backed by S3, or None if not configured.
 
@@ -54,7 +45,7 @@ def _build_dem_fetcher(cache_dir: Path):
 def max_ground_elevation(wkt_str: str, cache_dir: Path) -> float | None:
     """Return the maximum ground elevation (in feet) within the WKT polygon.
 
-    The input geometry must be in WGS84 (EPSG:4326).  DEM tiles are loaded from
+    The input geometry must be in EPSG:6539.  DEM tiles are loaded from
     cache_dir, fetching any missing ones from S3 when configured.
 
     Returns None if no DEM data covers the polygon.
@@ -62,8 +53,7 @@ def max_ground_elevation(wkt_str: str, cache_dir: Path) -> float | None:
     # Reuse _intersecting_tile_ids from building_footprints to find overlapping tiles
     from los_analyzer.obstructions.building_footprints import _intersecting_tile_ids
 
-    geom_wgs84 = wkt.loads(wkt_str)
-    poly_nys = _project_geometry(geom_wgs84)
+    poly_nys = wkt.loads(wkt_str)
     if poly_nys.is_empty:
         print("ERROR: geometry is empty after projection", file=sys.stderr)
         return None
@@ -141,7 +131,7 @@ def main() -> None:
     )
     parser.add_argument(
         "wkt",
-        help='WKT geometry string (POLYGON / MULTIPOLYGON in WGS84), or "-" to read from stdin',
+        help='WKT geometry string (POLYGON / MULTIPOLYGON in NYS LI SP), or "-" to read from stdin',
     )
     parser.add_argument(
         "--cache-dir",

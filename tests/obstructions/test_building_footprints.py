@@ -5,15 +5,15 @@ import pytest
 from los_analyzer.obstructions.building_footprints import parse_building_row
 from los_analyzer.obstructions.model import OBSTRUCTION_TYPE_BUILDING
 
-# A real-ish building polygon near Staten Island in WGS84 lon/lat
+# A real-ish building polygon near Staten Island in NYS EPSG:6539 (US survey feet)
 SAMPLE_ROW = {
     "the_geom": (
         "MULTIPOLYGON ((("
-        "-74.168617 40.608587, "
-        "-74.168633 40.608529, "
-        "-74.168700 40.608540, "
-        "-74.168684 40.608598, "
-        "-74.168617 40.608587"
+        "937431.66 161046.11, "
+        "937427.18 161024.98, "
+        "937408.58 161029.03, "
+        "937413.06 161050.15, "
+        "937431.66 161046.11"
         ")))"
     ),
     "BIN": "5175075",
