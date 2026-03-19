@@ -10,7 +10,11 @@ import pytest
 import tifffile
 from shapely.geometry import box as shapely_box
 
-from los_analyzer.building.heightmap import build_building_heightmap, fetch_building_geometry
+from los_analyzer.building.heightmap import (
+    build_building_heightmap,
+    fetch_building_geometry,
+    filter_heightmap_outliers,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -243,3 +247,90 @@ def test_build_building_heightmap_returns_correct_sw_corner(tmp_path):
     _, _, _, x_sw, y_sw, _ = build_building_heightmap(_BIN, db, tile_dir)
     assert x_sw == 912600
     assert y_sw == 117600
+
+
+# ---------------------------------------------------------------------------
+# filter_heightmap_outliers
+# ---------------------------------------------------------------------------
+
+def _make_uniform_heightmap(W, H, value, mask_value=255):
+    heightmap = np.full((W, H), value, dtype=np.uint16)
+    mask = np.full((W, H), mask_value, dtype=np.uint8)
+    return heightmap, mask
+
+
+def test_filter_uniform_heightmap_unchanged():
+    """A uniform heightmap has zero std dev — no pixels should be replaced."""
+    heightmap, mask = _make_uniform_heightmap(20, 20, 600)
+    result = filter_heightmap_outliers(heightmap, mask)
+    np.testing.assert_array_equal(result, heightmap)
+
+
+def test_filter_output_dtype_is_uint16():
+    """filter_heightmap_outliers should always return a uint16 array."""
+    heightmap, mask = _make_uniform_heightmap(10, 10, 500)
+    result = filter_heightmap_outliers(heightmap, mask)
+    assert result.dtype == np.uint16
+
+
+def test_filter_does_not_modify_input():
+    """filter_heightmap_outliers should return a copy and leave the input unchanged."""
+    heightmap, mask = _make_uniform_heightmap(10, 10, 500)
+    original = heightmap.copy()
+    filter_heightmap_outliers(heightmap, mask)
+    np.testing.assert_array_equal(heightmap, original)
+
+
+def test_filter_replaces_spike_with_local_median():
+    """A single spike pixel surrounded by uniform neighbours should be corrected."""
+    W, H = 15, 15
+    base = 600  # ~50 ft in inches
+    spike = 60000  # ~5000 ft — absurd spike
+
+    heightmap = np.full((W, H), base, dtype=np.uint16)
+    mask = np.full((W, H), 255, dtype=np.uint8)
+
+    cx, cy = 7, 7
+    heightmap[cx, cy] = spike
+
+    result = filter_heightmap_outliers(heightmap, mask, radius=3.0, threshold_sigma=3.0)
+
+    # Spike should have been replaced by the median of its neighbours (~base)
+    assert result[cx, cy] != spike
+    # Neighbours should be unchanged
+    assert result[cx - 1, cy] == base
+    assert result[cx + 1, cy] == base
+
+
+def test_filter_outside_mask_pixels_unchanged():
+    """Pixels outside the mask should be left untouched regardless of their value."""
+    W, H = 15, 15
+    heightmap = np.full((W, H), 600, dtype=np.uint16)
+    mask = np.zeros((W, H), dtype=np.uint8)
+    # Only the centre pixel is in the mask
+    mask[7, 7] = 255
+    heightmap[0, 0] = 60000  # spike outside mask
+
+    result = filter_heightmap_outliers(heightmap, mask, radius=3.0)
+    assert result[0, 0] == 60000
+
+
+def test_filter_non_outlier_pixels_not_replaced():
+    """With a very high sigma threshold, no pixel should be replaced."""
+    W, H = 15, 15
+    heightmap = np.zeros((W, H), dtype=np.uint16)
+    for i in range(W):
+        heightmap[i, :] = 600 + i * 2  # gentle ramp
+    mask = np.full((W, H), 255, dtype=np.uint8)
+
+    # threshold_sigma=100 means nothing will be flagged as an outlier
+    result = filter_heightmap_outliers(heightmap, mask, radius=3.0, threshold_sigma=100.0)
+    np.testing.assert_array_equal(result, heightmap)
+
+
+def test_filter_empty_mask_returns_copy():
+    """When the mask is all zeros, the function should return an unchanged copy."""
+    heightmap = np.full((10, 10), 500, dtype=np.uint16)
+    mask = np.zeros((10, 10), dtype=np.uint8)
+    result = filter_heightmap_outliers(heightmap, mask)
+    np.testing.assert_array_equal(result, heightmap)

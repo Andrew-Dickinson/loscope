@@ -20,7 +20,11 @@ from pathlib import Path
 import numpy as np
 import tifffile
 
-from los_analyzer.building.heightmap import build_building_heightmap, fetch_building_geometry
+from los_analyzer.building.heightmap import (
+    build_building_heightmap,
+    fetch_building_geometry,
+    filter_heightmap_outliers,
+)
 from los_analyzer.evaluation.rooftop import (
     ObstructionStatus,
     SamplePointEvaluation,
@@ -201,6 +205,7 @@ def run_evaluation(
     heightmap, mask, poly_nys, x_sw, y_sw, _ = build_building_heightmap(
         bin_id, db_path, tile_dir
     )
+    heightmap = filter_heightmap_outliers(heightmap, mask)
 
     # 3. Write heightmap and mask TIFFs
     out_dir.mkdir(parents=True, exist_ok=True)

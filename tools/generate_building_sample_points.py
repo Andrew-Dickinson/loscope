@@ -31,7 +31,11 @@ from pathlib import Path
 import numpy as np
 import tifffile
 
-from los_analyzer.building.heightmap import build_building_heightmap, fetch_building_geometry
+from los_analyzer.building.heightmap import (
+    build_building_heightmap,
+    fetch_building_geometry,
+    filter_heightmap_outliers,
+)
 from los_analyzer.sample_points import apply_mast_offset, generate_sample_points
 
 
@@ -233,6 +237,7 @@ def extract_building_heightmap(
     heightmap, mask, poly_nys, x_sw, y_sw, found_tiles = build_building_heightmap(
         bin_id, db_path, tile_dir
     )
+    heightmap = filter_heightmap_outliers(heightmap, mask)
 
     # 3. Write outputs
     out_dir.mkdir(parents=True, exist_ok=True)

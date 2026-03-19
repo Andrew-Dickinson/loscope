@@ -14,6 +14,17 @@ import numpy as np
 import shapely
 from shapely import wkt
 
+# Precomputed circular neighbor offsets for each supported radius (in pixels).
+# Excludes the centre pixel (self).
+def _circular_offsets(radius: float) -> list[tuple[int, int]]:
+    r = int(np.ceil(radius))
+    return [
+        (di, dj)
+        for di in range(-r, r + 1)
+        for dj in range(-r, r + 1)
+        if 0 < di ** 2 + dj ** 2 <= radius ** 2
+    ]
+
 from los_analyzer.obstructions.building_footprints import _intersecting_tile_ids
 from los_analyzer.preprocessing.io import load_tile
 
@@ -148,3 +159,84 @@ def build_building_heightmap(
     heightmap[~inside] = 0
 
     return heightmap, mask, poly_nys, x_sw, y_sw, found_tile_ids
+
+
+def filter_heightmap_outliers(
+    heightmap: np.ndarray,
+    mask: np.ndarray,
+    radius: float = 3.0,
+    threshold_sigma: float = 3.0,
+) -> np.ndarray:
+    """Replace statistical outlier height pixels with the local neighbourhood median.
+
+    For each mask-included pixel, the mean absolute height difference to all
+    other mask-included pixels within *radius* feet is computed.  Pixels whose
+    mean delta exceeds ``threshold_sigma`` × the standard deviation of those
+    per-pixel means are replaced by the median of their masked neighbours
+    (excluding the pixel itself).
+
+    Args:
+        heightmap: ``(W, H)`` uint16 raster — heights in inches.
+        mask: ``(W, H)`` uint8 raster — 255 inside footprint, 0 outside.
+        radius: Neighbourhood radius in feet (= pixels, 1 usft/pixel).
+        threshold_sigma: Multiplier on the global std dev used as the outlier
+            threshold.
+
+    Returns:
+        A new ``uint16`` array of the same shape with outliers corrected.
+        Pixels outside the mask are unchanged.
+    """
+    offsets = _circular_offsets(radius)
+    if not offsets:
+        return heightmap.copy()
+
+    W, H = heightmap.shape
+    mask_bool = mask == 255
+    heights_f = heightmap.astype(np.float64)
+
+    # --- Vectorised mean-delta computation ---
+    # Pad both arrays so that out-of-bounds neighbours are treated as absent.
+    pad = int(np.ceil(radius))
+    heights_pad = np.pad(heights_f, pad, mode="constant", constant_values=0.0)
+    mask_pad = np.pad(mask_bool.astype(np.float64), pad, mode="constant", constant_values=0.0)
+
+    sum_delta = np.zeros((W, H), dtype=np.float64)
+    count = np.zeros((W, H), dtype=np.float64)
+
+    for di, dj in offsets:
+        # Slice the padded arrays to get neighbour values aligned to the output grid.
+        r0, r1 = pad + di, pad + di + W
+        c0, c1 = pad + dj, pad + dj + H
+        neighbour_h = heights_pad[r0:r1, c0:c1]
+        neighbour_m = mask_pad[r0:r1, c0:c1]
+        sum_delta += np.abs(heights_f - neighbour_h) * neighbour_m
+        count += neighbour_m
+
+    safe_count = np.where(count > 0, count, 1.0)
+    mean_delta = np.where(count > 0, sum_delta / safe_count, 0.0)
+
+    # Global statistics over mask pixels only.
+    mask_vals = mean_delta[mask_bool]
+    if mask_vals.size == 0:
+        return heightmap.copy()
+
+    global_std = mask_vals.std()
+    if global_std == 0.0:
+        return heightmap.copy()
+
+    threshold = threshold_sigma * global_std
+
+    # --- Replace outlier pixels with neighbourhood median ---
+    result = heightmap.copy()
+    outlier_pixels = np.argwhere(mask_bool & (mean_delta > threshold))
+
+    for xi, yi in outlier_pixels:
+        neighbours = []
+        for di, dj in offsets:
+            ni, nj = xi + di, yi + dj
+            if 0 <= ni < W and 0 <= nj < H and mask_bool[ni, nj]:
+                neighbours.append(heights_f[ni, nj])
+        if neighbours:
+            result[xi, yi] = int(round(np.median(neighbours)))
+
+    return result
