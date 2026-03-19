@@ -78,3 +78,32 @@ def test_empty_degenerate_ring():
     poly = Polygon([(0, 0), (0, 0), (0, 0)])
     pts = sample_perimeter(poly, flat_hm(5, 5), 0, 0, 1)
     assert pts.shape[1] == 3
+
+
+# ── mask-aware sampling ───────────────────────────────────────────────────────
+
+def test_mask_skips_point_with_no_valid_neighbour():
+    """A perimeter point whose pixel and all neighbours are outside the mask should be dropped."""
+    hm = np.full((10, 10), 120, dtype=np.uint16)
+    mask = np.zeros((10, 10), dtype=np.uint8)
+    # Only pixel (0, 0) is inside the mask; polygon is at the far corner (8-9, 8-9),
+    # so its perimeter pixels and all their ±1 neighbours are outside the mask.
+    mask[0, 0] = 255
+    poly = Polygon([(8, 8), (9, 8), (9, 9), (8, 9)])
+    pts = sample_perimeter(poly, hm, 0, 0, 1, mask=mask)
+    assert len(pts) == 0
+
+
+def test_mask_relocates_to_neighbour():
+    """A perimeter point whose pixel is outside the mask but has a valid neighbour keeps a non-zero Z."""
+    W, H = 10, 10
+    hm = np.zeros((W, H), dtype=np.uint16)
+    hm[1, 1] = 240  # 20 ft — the valid neighbour
+    mask = np.zeros((W, H), dtype=np.uint8)
+    mask[1, 1] = 255  # only this pixel is inside
+    # Ring passes through pixel (0, 0) which is outside the mask; neighbour (1,1) is inside.
+    poly = Polygon([(0.1, 0.1), (0.9, 0.1), (0.5, 0.9)])
+    pts = sample_perimeter(poly, hm, 0, 0, 1, mask=mask)
+    # At least one point should survive (relocated to pixel (1,1)), with z=20 ft.
+    assert len(pts) >= 1
+    assert all(np.isclose(pts[:, 2], 20.0))

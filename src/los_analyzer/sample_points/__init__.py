@@ -60,5 +60,5 @@ def generate_sample_points(
         parts = [p for p in (base_pts, cliff_pts) if len(p)]
         return np.vstack(parts) if parts else np.empty((0, 3), dtype=np.float64)
 
-    perim_pts = sample_perimeter(polygon, heightmap, x_sw, y_sw, spacing)
+    perim_pts = sample_perimeter(polygon, heightmap, x_sw, y_sw, spacing, mask=mask)
     return cull_and_combine(base_pts, cliff_pts, perim_pts, spacing / 2.0)
