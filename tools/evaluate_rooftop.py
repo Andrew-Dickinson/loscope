@@ -74,16 +74,11 @@ def _export_heightmap_obj(heightmap: np.ndarray, out_path: Path) -> None:
         f.write("# Origin = SW corner of the heightmap\n\n")
         f.write("o heightmap\n\n")
 
-        f.write(f"v 0 0 {z_floor:.3f}\n")
-        f.write(f"v {W} 0 {z_floor:.3f}\n")
-        f.write(f"v {W} {H} {z_floor:.3f}\n")
-        f.write(f"v 0 {H} {z_floor:.3f}\n")
-        f.write(f"f {vi} {vi+1} {vi+2} {vi+3}\n\n")
-        vi += 4
-
         for xi in range(W):
             for yi in range(H):
                 zt = float(z[xi, yi])
+                if zt == 0.0:
+                    continue
                 x0, y0 = float(xi), float(yi)
                 x1, y1 = x0 + 1.0, y0 + 1.0
 
@@ -109,7 +104,7 @@ def _export_heightmap_obj(heightmap: np.ndarray, out_path: Path) -> None:
                         nz = z_floor - 1.0
                         zb = z_floor
 
-                    if zt > nz:
+                    if zt > nz and zb != 0.0:
                         f.write(f"v {ax} {ay} {zb:.3f}\n")
                         f.write(f"v {bx} {by} {zb:.3f}\n")
                         f.write(f"v {bx} {by} {zt:.3f}\n")
