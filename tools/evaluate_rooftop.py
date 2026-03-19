@@ -363,9 +363,17 @@ _HTML_TEMPLATE = """\
     sun.position.set(1, 3, 2);
     scene.add(sun);
 
+    // ── Sample point data (needed for vertex colours below) ──────────────────
+    const STATUS_HEX = {
+      unobstructed:        0x22cc44,
+      partially_obstructed:0xffcc00,
+      fully_obstructed:    0xff4444,
+    };
+    const POINTS = __POINTS_JSON__;
+
     // ── OBJ parser ──────────────────────────────────────────────────────────
     // OBJ vertex layout: v x_local  y_local  z_feet
-    // Three.js Y-up mapping:  threeX = x_local  threeY = z_feet  threeZ = y_local
+    // Three.js Y-up mapping:  threeX = x_local  threeY = z_feet  threeZ = -y_local
     function parseOBJ(text) {
       const pos = [], idx = [];
       for (const raw of text.split('\\n')) {
@@ -387,7 +395,52 @@ _HTML_TEMPLATE = """\
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setIndex(idx);
     geo.computeVertexNormals();
-    scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x94a3b8, side: THREE.DoubleSide })));
+
+    // ── Voronoi shader: per-display-pixel nearest sample-point status ────────
+    // The fragment shader receives each rendered screen pixel's 3-D world
+    // position and finds the nearest sample point in (easting, elevation,
+    // −northing) space, producing a true Voronoi diagram at display resolution.
+    const N_PTS = __N_PTS__;
+    let terrainMat;
+    if (N_PTS === 0) {
+      terrainMat = new THREE.MeshLambertMaterial({ color: 0x94a3b8, side: THREE.DoubleSide });
+    } else {
+      const uPos = POINTS.map(pt => new THREE.Vector3(pt.x, pt.z, -pt.y));
+      const uCol = POINTS.map(pt => {
+        const h = STATUS_HEX[pt.s] ?? 0x94a3b8;
+        return new THREE.Vector3((h >> 16 & 0xff) / 255, (h >> 8 & 0xff) / 255, (h & 0xff) / 255);
+      });
+      terrainMat = new THREE.ShaderMaterial({
+        uniforms: { uPos: { value: uPos }, uCol: { value: uCol } },
+        vertexShader: `
+          varying vec3 vWorld;
+          varying vec3 vNorm;
+          void main() {
+            vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+            vNorm  = normalize(normalMatrix * normal);
+            gl_Position = projectionMatrix * viewMatrix * vec4(position, 1.0);
+          }`,
+        fragmentShader: `
+          #define N __N_PTS__
+          uniform vec3 uPos[N];
+          uniform vec3 uCol[N];
+          varying vec3 vWorld;
+          varying vec3 vNorm;
+          void main() {
+            float bestD2 = 1e15;
+            vec3 col = vec3(0.58, 0.64, 0.72);
+            for (int i = 0; i < N; i++) {
+              vec3 d = vWorld - uPos[i];
+              float d2 = dot(d, d);
+              if (d2 < bestD2) { bestD2 = d2; col = uCol[i]; }
+            }
+            float diff = max(dot(normalize(vNorm), normalize(vec3(1.0, 3.0, 2.0))), 0.0);
+            gl_FragColor = vec4(col * (0.5 + 0.5 * diff), 1.0);
+          }`,
+        side: THREE.DoubleSide,
+      });
+    }
+    scene.add(new THREE.Mesh(geo, terrainMat));
 
     // ── Camera: fit to bounding box ─────────────────────────────────────────
     geo.computeBoundingBox();
@@ -402,20 +455,14 @@ _HTML_TEMPLATE = """\
     controls.target.copy(center);
     controls.update();
 
-    // ── Sample points (instanced, grouped by status) ─────────────────────────
-    const STATUS_COLOR = {
-      unobstructed:        0x22cc44,
-      partially_obstructed: 0xffcc00,
-      fully_obstructed:    0xff4444,
-    };
-    const POINTS = __POINTS_JSON__;
+    // ── Sample point spheres (instanced, grouped by status) ───────────────────
     const ptGeo = new THREE.SphereGeometry(0.8, 8, 6);
     const byStatus = {};
     for (const pt of POINTS) { (byStatus[pt.s] ??= []).push(pt); }
     const dummy = new THREE.Object3D();
     for (const [status, pts] of Object.entries(byStatus)) {
       const mesh = new THREE.InstancedMesh(ptGeo,
-        new THREE.MeshBasicMaterial({ color: STATUS_COLOR[status] ?? 0xffffff }),
+        new THREE.MeshBasicMaterial({ color: STATUS_HEX[status] ?? 0xffffff }),
         pts.length);
       pts.forEach((pt, i) => {
         // pt.x = east_local, pt.y = north_local, pt.z = elevation_feet
@@ -472,6 +519,7 @@ def _generate_html_viewer(
     n_clear   = sum(1 for e in evaluations if e.status == ObstructionStatus.UNOBSTRUCTED)
     n_partial = sum(1 for e in evaluations if e.status == ObstructionStatus.PARTIALLY_OBSTRUCTED)
     n_full    = sum(1 for e in evaluations if e.status == ObstructionStatus.FULLY_OBSTRUCTED)
+    n_pts     = len(evaluations)
 
     html = (
         _HTML_TEMPLATE
@@ -481,6 +529,7 @@ def _generate_html_viewer(
         .replace("__N_FULL__",      str(n_full))
         .replace("__OBJ_LITERAL__", obj_literal)
         .replace("__POINTS_JSON__", points_json)
+        .replace("__N_PTS__",       str(n_pts))
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
