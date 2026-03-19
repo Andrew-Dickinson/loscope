@@ -11,6 +11,7 @@ from enum import Enum
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 
 from los_analyzer.fresnel.fresnel_zone2 import compute_fresnel_zone
 from los_analyzer.tiles.identify import identify_tiles
@@ -77,7 +78,7 @@ def evaluate_sample_points(
     tile_dir = Path(tile_dir)
     results: list[SamplePointEvaluation] = []
 
-    for pt in measurement_pts:
+    for pt in tqdm(measurement_pts, desc="Evaluating sample points", unit="pt"):
         p_nys = (float(pt[0]), float(pt[1]), float(pt[2]))
 
         zone_1 = compute_fresnel_zone(p_nys, common_pt_nys, frequency_hz, alpha=1.0)

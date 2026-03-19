@@ -231,7 +231,6 @@ def run_evaluation(
     common_pt_nys = (float(common_e), float(common_n), float(common_z))
 
     # 6. Evaluate each measurement point
-    print(f"Evaluating {len(measurement_pts)} measurement points…")
     evaluations = evaluate_sample_points(
         measurement_pts,
         common_pt_nys,
