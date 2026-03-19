@@ -261,7 +261,7 @@ def run_evaluation(
 
     # 9. HTML viewer (always generated)
     viewer_path = out_dir / f"{bin_id}_viewer.html"
-    _generate_html_viewer(heightmap, evaluations, display_pts, x_sw, y_sw, bin_id, viewer_path)
+    _generate_html_viewer(heightmap, evaluations, display_pts, measurement_pts, x_sw, y_sw, bin_id, viewer_path)
 
     # 10. Optional OBJ export — one file per obstruction status
     terrain_obj_path: Path | None = None
@@ -363,13 +363,14 @@ _HTML_TEMPLATE = """\
     sun.position.set(1, 3, 2);
     scene.add(sun);
 
-    // ── Sample point data (needed for vertex colours below) ──────────────────
+    // ── Sample point data ────────────────────────────────────────────────────
     const STATUS_HEX = {
       unobstructed:        0x22cc44,
       partially_obstructed:0xffcc00,
       fully_obstructed:    0xff4444,
     };
-    const POINTS = __POINTS_JSON__;
+    const POINTS      = __POINTS_JSON__;       // display pts — drive Voronoi shader
+    const MEAS_PTS    = __MEAS_POINTS_JSON__;  // measurement pts — shown as spheres
 
     // ── OBJ parser ──────────────────────────────────────────────────────────
     // OBJ vertex layout: v x_local  y_local  z_feet
@@ -455,10 +456,10 @@ _HTML_TEMPLATE = """\
     controls.target.copy(center);
     controls.update();
 
-    // ── Sample point spheres (instanced, grouped by status) ───────────────────
+    // ── Measurement point spheres (instanced, grouped by status) ─────────────
     const ptGeo = new THREE.SphereGeometry(0.8, 8, 6);
     const byStatus = {};
-    for (const pt of POINTS) { (byStatus[pt.s] ??= []).push(pt); }
+    for (const pt of MEAS_PTS) { (byStatus[pt.s] ??= []).push(pt); }
     const dummy = new THREE.Object3D();
     for (const [status, pts] of Object.entries(byStatus)) {
       const mesh = new THREE.InstancedMesh(ptGeo,
@@ -491,6 +492,7 @@ def _generate_html_viewer(
     heightmap: np.ndarray,
     evaluations: list[SamplePointEvaluation],
     display_pts: np.ndarray,
+    measurement_pts: np.ndarray,
     x_sw: int,
     y_sw: int,
     bin_id: str,
@@ -504,7 +506,7 @@ def _generate_html_viewer(
     # but escape just in case and wrap in double-quotes.
     obj_literal = json.dumps(obj_content)  # properly escaped JSON string
 
-    # Build compact point list: {x, y, z} in local coords + status key "s"
+    # Display points drive the Voronoi shader colouring (x, y, z in local coords + status)
     points = [
         {
             "x": round(float(dp[0]) - x_sw, 3),
@@ -515,6 +517,18 @@ def _generate_html_viewer(
         for ev, dp in zip(evaluations, display_pts)
     ]
     points_json = json.dumps(points, separators=(",", ":"))
+
+    # Measurement points are shown as spheres (same status, different Z)
+    meas_points = [
+        {
+            "x": round(float(mp[0]) - x_sw, 3),
+            "y": round(float(mp[1]) - y_sw, 3),
+            "z": round(float(mp[2]), 3),
+            "s": ev.status.value,
+        }
+        for ev, mp in zip(evaluations, measurement_pts)
+    ]
+    meas_points_json = json.dumps(meas_points, separators=(",", ":"))
 
     n_clear   = sum(1 for e in evaluations if e.status == ObstructionStatus.UNOBSTRUCTED)
     n_partial = sum(1 for e in evaluations if e.status == ObstructionStatus.PARTIALLY_OBSTRUCTED)
@@ -528,8 +542,9 @@ def _generate_html_viewer(
         .replace("__N_PARTIAL__",   str(n_partial))
         .replace("__N_FULL__",      str(n_full))
         .replace("__OBJ_LITERAL__", obj_literal)
-        .replace("__POINTS_JSON__", points_json)
-        .replace("__N_PTS__",       str(n_pts))
+        .replace("__POINTS_JSON__",      points_json)
+        .replace("__MEAS_POINTS_JSON__", meas_points_json)
+        .replace("__N_PTS__",            str(n_pts))
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
