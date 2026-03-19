@@ -26,16 +26,12 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import sqlite3
 from pathlib import Path
 
 import numpy as np
-import shapely
 import tifffile
-from shapely import wkt
 
-from los_analyzer.obstructions.building_footprints import _intersecting_tile_ids
-from los_analyzer.preprocessing.io import load_tile
+from los_analyzer.building.heightmap import build_building_heightmap, fetch_building_geometry
 from los_analyzer.sample_points import apply_mast_offset, generate_sample_points
 
 
@@ -50,32 +46,6 @@ def _build_fetcher(tile_dir: Path):
     from los_analyzer.tiles.s3_backend import S3TileBackend
     return CachingTileFetcher(S3TileBackend(bucket, prefix), tile_dir)
 
-
-def _fetch_building_geometry(bin_id: str, db_path: Path):
-    """Return the NYS EPSG:6539 shapely geometry for the given BIN from building_footprints.
-
-    Raises ValueError when no matching row is found or the geometry is unusable.
-    """
-    con = sqlite3.connect(str(db_path))
-    con.execute("PRAGMA query_only=ON")
-    row = con.execute(
-        "SELECT the_geom FROM building_footprints WHERE bin = ? LIMIT 1",
-        (bin_id,),
-    ).fetchone()
-    con.close()
-
-    if row is None or not row[0]:
-        raise ValueError(f"BIN {bin_id!r} not found in building_footprints")
-
-    try:
-        geom = wkt.loads(row[0])
-    except Exception as exc:
-        raise ValueError(f"Could not parse geometry for BIN {bin_id!r}: {exc}") from exc
-
-    if geom.is_empty:
-        raise ValueError(f"Empty geometry for BIN {bin_id!r}")
-
-    return geom
 
 
 _CUBE_HALF = 0.125  # 3 inches = 0.25 ft; half-edge = 0.125 ft
@@ -245,81 +215,26 @@ def extract_building_heightmap(
     All OBJ files share the same local coordinate origin so they align in
     Blender.
     """
-    # 1. Fetch boundary (already in NYS EPSG:6539)
-    poly_nys = _fetch_building_geometry(bin_id, db_path)
-
-    minx, miny, maxx, maxy = poly_nys.bounds
-    x_sw = int(np.floor(minx))
-    y_sw = int(np.floor(miny))
-    x_ne = int(np.ceil(maxx))
-    y_ne = int(np.ceil(maxy))
-    W = max(x_ne - x_sw, 1)
-    H = max(y_ne - y_sw, 1)
-
-    # 2. Identify and optionally fetch required tiles
-    tile_ids = _intersecting_tile_ids(poly_nys)
-    if not tile_ids:
-        raise ValueError(f"No preprocessed tiles cover BIN {bin_id!r}")
+    # 1. Optionally prefetch tiles from S3 before the main extraction
+    from los_analyzer.obstructions.building_footprints import _intersecting_tile_ids
+    poly_for_fetch = fetch_building_geometry(bin_id, db_path)
+    tile_ids_for_fetch = _intersecting_tile_ids(poly_for_fetch)
 
     fetcher = _build_fetcher(tile_dir)
     if fetcher is not None:
-        missing = [t for t in tile_ids if not fetcher.is_cached(t)]
+        missing = [t for t in tile_ids_for_fetch if not fetcher.is_cached(t)]
         if missing:
             print(f"Fetching {len(missing)} tile(s) from S3: {missing}")
             fetcher.ensure_tiles(missing)
     else:
         print("S3 not configured — using local tiles only.")
 
-    # 3. Blit tile heights into the output grid
-    heightmap = np.zeros((W, H), dtype=np.uint16)
+    # 2. Build heightmap + mask via shared library
+    heightmap, mask, poly_nys, x_sw, y_sw, found_tiles = build_building_heightmap(
+        bin_id, db_path, tile_dir
+    )
 
-    for tile_id in tile_ids:
-        tif_path = tile_dir / f"{tile_id}.tif"
-        if not tif_path.exists():
-            print(f"  Warning: tile {tile_id} not found locally, skipping.")
-            continue
-
-        tile = load_tile(tile_id, tile_dir)
-        tile_w, tile_h = tile.raster.shape  # axes [easting_local, northing_local]
-
-        # Overlap in easting
-        e_start = max(x_sw, tile.x_offset)
-        e_end = min(x_ne, tile.x_offset + tile_w)
-        if e_start >= e_end:
-            continue
-
-        # Overlap in northing
-        n_start = max(y_sw, tile.y_offset)
-        n_end = min(y_ne, tile.y_offset + tile_h)
-        if n_start >= n_end:
-            continue
-
-        # Indices into output grid
-        out_e0 = e_start - x_sw
-        out_e1 = e_end - x_sw
-        out_n0 = n_start - y_sw
-        out_n1 = n_end - y_sw
-
-        # Indices into tile raster
-        tile_e0 = e_start - tile.x_offset
-        tile_e1 = e_end - tile.x_offset
-        tile_n0 = n_start - tile.y_offset
-        tile_n1 = n_end - tile.y_offset
-
-        heightmap[out_e0:out_e1, out_n0:out_n1] = tile.raster[tile_e0:tile_e1, tile_n0:tile_n1]
-
-    # 4. Rasterize footprint mask (pixel centres, matching _rasterize convention)
-    xs = np.arange(W, dtype=np.float64) + x_sw + 0.5
-    ys = np.arange(H, dtype=np.float64) + y_sw + 0.5
-    xx, yy = np.meshgrid(xs, ys, indexing="ij")  # shape (W, H)
-    # Buffer by half a pixel so that pixels the boundary crosses are included.
-    # Any pixel the boundary passes through has its centre ≤ 0.5 ft from the
-    # boundary, so a 0.5 ft buffer is exactly sufficient.
-    inside = shapely.contains_xy(poly_nys.buffer(0.5), xx.ravel(), yy.ravel()).reshape(W, H)
-    mask = np.where(inside, np.uint8(255), np.uint8(0))
-    heightmap[~inside] = 0
-
-    # 5. Write outputs
+    # 3. Write outputs
     out_dir.mkdir(parents=True, exist_ok=True)
     heightmap_path = out_dir / f"{bin_id}_heightmap.tif"
     mask_path = out_dir / f"{bin_id}_mask.tif"
