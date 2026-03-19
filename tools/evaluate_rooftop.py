@@ -41,8 +41,9 @@ class EvaluationResult:
     sample_pts_measurement_path: Path | None = None
     evaluation_path: Path | None = None
     terrain_obj_path: Path | None = None
-    sample_pts_display_obj_path: Path | None = None
-    sample_pts_measurement_obj_path: Path | None = None
+    # Keyed by ObstructionStatus value string, e.g. "unobstructed"
+    sample_pts_display_obj_paths: dict[str, Path] = dataclasses.field(default_factory=dict)
+    sample_pts_measurement_obj_paths: dict[str, Path] = dataclasses.field(default_factory=dict)
 
 
 def _build_fetcher(tile_dir: Path):
@@ -254,17 +255,31 @@ def run_evaluation(
     print(f"  Partially obstructed: {n_partial:4d}  ({100*n_partial/total:.1f}%)")
     print(f"  Fully obstructed:     {n_full:4d}  ({100*n_full/total:.1f}%)")
 
-    # 9. Optional OBJ export
+    # 9. Optional OBJ export — one file per obstruction status
     terrain_obj_path: Path | None = None
-    sample_pts_display_obj_path: Path | None = None
-    sample_pts_measurement_obj_path: Path | None = None
+    display_obj_paths: dict[str, Path] = {}
+    measurement_obj_paths: dict[str, Path] = {}
     if export_obj:
         terrain_obj_path = out_dir / f"{bin_id}_heightmap.obj"
         _export_heightmap_obj(heightmap, terrain_obj_path)
-        sample_pts_display_obj_path = out_dir / f"{bin_id}_sample_points_display.obj"
-        sample_pts_measurement_obj_path = out_dir / f"{bin_id}_sample_points_measurement.obj"
-        _export_sample_points_obj(display_pts, x_sw, y_sw, sample_pts_display_obj_path)
-        _export_sample_points_obj(measurement_pts, x_sw, y_sw, sample_pts_measurement_obj_path)
+
+        # Group display and measurement points by evaluation status
+        grouped_display: dict[str, list[np.ndarray]] = {}
+        grouped_measurement: dict[str, list[np.ndarray]] = {}
+        for ev, dp, mp in zip(evaluations, display_pts, measurement_pts):
+            key = ev.status.value
+            grouped_display.setdefault(key, []).append(dp)
+            grouped_measurement.setdefault(key, []).append(mp)
+
+        for key, pts_list in grouped_display.items():
+            path = out_dir / f"{bin_id}_sample_points_display_{key}.obj"
+            _export_sample_points_obj(np.array(pts_list), x_sw, y_sw, path)
+            display_obj_paths[key] = path
+
+        for key, pts_list in grouped_measurement.items():
+            path = out_dir / f"{bin_id}_sample_points_measurement_{key}.obj"
+            _export_sample_points_obj(np.array(pts_list), x_sw, y_sw, path)
+            measurement_obj_paths[key] = path
 
     return EvaluationResult(
         heightmap_path=heightmap_path,
@@ -273,8 +288,8 @@ def run_evaluation(
         sample_pts_measurement_path=sample_pts_measurement_path,
         evaluation_path=evaluation_path,
         terrain_obj_path=terrain_obj_path,
-        sample_pts_display_obj_path=sample_pts_display_obj_path,
-        sample_pts_measurement_obj_path=sample_pts_measurement_obj_path,
+        sample_pts_display_obj_paths=display_obj_paths,
+        sample_pts_measurement_obj_paths=measurement_obj_paths,
     )
 
 
@@ -401,9 +416,10 @@ def main() -> None:
         print(f"Evaluations: {result.evaluation_path}")
     if result.terrain_obj_path:
         print(f"Terrain OBJ: {result.terrain_obj_path}")
-    if result.sample_pts_display_obj_path:
-        print(f"Display OBJ: {result.sample_pts_display_obj_path}")
-        print(f"Meas. OBJ:   {result.sample_pts_measurement_obj_path}")
+    for status, path in sorted(result.sample_pts_display_obj_paths.items()):
+        print(f"Display OBJ [{status}]: {path}")
+    for status, path in sorted(result.sample_pts_measurement_obj_paths.items()):
+        print(f"Meas. OBJ   [{status}]: {path}")
 
 
 if __name__ == "__main__":
