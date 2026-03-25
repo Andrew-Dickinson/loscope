@@ -5,14 +5,14 @@ import numpy as np
 import pytest
 import tifffile
 
-from los_analyzer.dem.preprocess_dem import (
+from lib.dem.preprocess_dem import (
     DEM_ORIGIN_E,
     DEM_ORIGIN_N,
     dem_tile_sw_corners,
     extract_dem_tile,
     split_dem,
 )
-from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT
+from lib.preprocessing.tile_id import TILE_SIDE_USFT
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +217,7 @@ def test_split_dem_tile_sw_corners_match_json_offsets(tmp_path, tiny_dem):
     for tid in tile_ids:
         meta = json.loads((tmp_path / "out" / f"{tid}.json").read_text())
         # Reconstruct SW corner from tile_id using the canonical grid helpers.
-        from los_analyzer.preprocessing.tile_id import file_id_to_offset, TILE_SIDE_USFT as T
+        from lib.preprocessing.tile_id import file_id_to_offset, TILE_SIDE_USFT as T
         file_id, xi_str, yi_str = tid.rsplit("_", 1)[0], tid[-2], tid[-1]
         origin = file_id_to_offset(file_id)
         expected_x = origin[0] + int(xi_str) * T

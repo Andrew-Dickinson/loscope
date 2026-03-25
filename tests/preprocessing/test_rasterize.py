@@ -1,7 +1,7 @@
 """Tests for src.preprocessing.rasterize"""
 import numpy as np
 
-from los_analyzer.preprocessing.rasterize import fill_gaps
+from lib.preprocessing.rasterize import fill_gaps
 
 
 def _make_grids(shape=(100, 100)):

@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from los_analyzer.fresnel.fresnel_zone2 import FresnelZone
-from los_analyzer.tiles.load import TerrainGrid
+from lib.fresnel.fresnel_zone2 import FresnelZone
+from lib.tiles.load import TerrainGrid
 
 
 @dataclass

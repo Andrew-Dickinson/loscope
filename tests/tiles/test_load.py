@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-from los_analyzer.fresnel.fresnel_zone2 import FresnelZone
-from los_analyzer.preprocessing.io import save_tile
-from los_analyzer.preprocessing.tile import TileData
-from los_analyzer.tiles.load import TerrainGrid, load_terrain_grid
+from lib.fresnel.fresnel_zone2 import FresnelZone
+from lib.preprocessing.io import save_tile
+from lib.preprocessing.tile import TileData
+from lib.tiles.load import TerrainGrid, load_terrain_grid
 
 
 # ---------------------------------------------------------------------------

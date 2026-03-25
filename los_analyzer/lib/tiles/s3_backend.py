@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import tifffile
 
-from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT, file_id_to_offset
+from lib.preprocessing.tile_id import TILE_SIDE_USFT, file_id_to_offset
 
 
 def _sw_corner_from_tile_id(tile_id: str) -> tuple[int, int]:

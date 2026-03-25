@@ -60,7 +60,7 @@ def s3_fetcher_from_env(cache_dir: Path | str) -> CachingTileFetcher:
 
     Raises KeyError if either required variable is not set.
     """
-    from los_analyzer.tiles.s3_backend import S3TileBackend
+    from lib.tiles.s3_backend import S3TileBackend
 
     bucket = os.environ["LOS_S3_BUCKET"]
     prefix = os.environ["LOS_S3_PREFIX"]

@@ -21,11 +21,11 @@ import tifffile
 from PIL import Image
 from pyproj import Transformer
 
-from los_analyzer.fresnel.fresnel_zone2 import compute_fresnel_zone, translate_to_nys_plane
-from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT, file_id_to_offset
-from los_analyzer.tiles.identify import identify_tiles
-from los_analyzer.tiles.intersect import compute_intersection
-from los_analyzer.tiles.load import load_terrain_grid
+from lib.fresnel.fresnel_zone2 import compute_fresnel_zone, translate_to_nys_plane
+from lib.preprocessing.tile_id import TILE_SIDE_USFT, file_id_to_offset
+from lib.tiles.identify import identify_tiles
+from lib.tiles.intersect import compute_intersection
+from lib.tiles.load import load_terrain_grid
 
 GPS_A = ( 40.841668, -73.941836, 141)
 GPS_B = ( 40.843877, -73.893044, 69.0)
@@ -1117,7 +1117,7 @@ def run(tile_dir="data/preprocessed", zone_obj_dir=None, obs_cache="data/obstruc
 
     # If S3 is configured, fetch any tiles not already in the local cache.
     if "LOS_S3_BUCKET" in os.environ and "LOS_S3_PREFIX" in os.environ:
-        from los_analyzer.tiles.fetch import s3_fetcher_from_env
+        from lib.tiles.fetch import s3_fetcher_from_env
         fetcher = s3_fetcher_from_env(tile_dir)
         missing = [t for t in all_needed if not fetcher.is_cached(t)]
         if missing:
@@ -1140,7 +1140,7 @@ def run(tile_dir="data/preprocessed", zone_obj_dir=None, obs_cache="data/obstruc
     obs_dir = Path(obs_cache)
     obs_dir.mkdir(parents=True, exist_ok=True)
 
-    from los_analyzer.obstructions.fetch import obs_fetcher_from_env
+    from lib.obstructions.fetch import obs_fetcher_from_env
     obs_fetcher = obs_fetcher_from_env(obs_dir)
     if obs_fetcher is not None:
         print(f"  Fetching obstructions for {len(all_needed)} tile(s) from S3 ...")
@@ -1228,7 +1228,7 @@ def run(tile_dir="data/preprocessed", zone_obj_dir=None, obs_cache="data/obstruc
     print("=== Ortho textures ===")
     ortho_dir = Path("data/orthos")
     ortho_dir.mkdir(parents=True, exist_ok=True)
-    from los_analyzer.ortho.fetch import ortho_fetcher_from_env
+    from lib.ortho.fetch import ortho_fetcher_from_env
     ortho_fetcher = ortho_fetcher_from_env(ortho_dir)
     if ortho_fetcher is not None:
         print(f"  Fetching ortho JP2s for {len(tiles)} tile(s) from S3 ...")

@@ -11,3 +11,7 @@ boto3
 shapely
 pandas
 arcgis
+
+flask>=3.0
+flask-cors>=4.0
+requests

@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from los_analyzer.sample_points.combine import cull_and_combine
+from lib.sample_points.combine import cull_and_combine
 
 
 def pts(*rows):

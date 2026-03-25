@@ -18,8 +18,8 @@ import numpy as np
 import tifffile
 from tqdm import tqdm
 
-from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT
-from los_analyzer.tiles.identify import _tile_id_from_sw_corner
+from lib.preprocessing.tile_id import TILE_SIDE_USFT
+from lib.tiles.identify import _tile_id_from_sw_corner
 
 # NW (top-left) corner of the citywide DEM, in NYS state plane (easting, northing).
 # Every pixel's NW corner is at (DEM_ORIGIN_E + col, DEM_ORIGIN_N - row).

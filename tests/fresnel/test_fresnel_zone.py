@@ -3,13 +3,13 @@
 import numpy as np
 import pytest
 
-from los_analyzer.fresnel.fresnel_zone import (
+from lib.fresnel.fresnel_zone import (
     SPEED_OF_LIGHT_M_S,
     USFT_PER_METER,
     FresnelZone,
     compute_fresnel_zone,
 )
-from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT
+from lib.preprocessing.tile_id import TILE_SIDE_USFT
 
 # Synthetic link: two NYC rooftop coordinates ~500 m apart, at 100 m elevation
 POINT_A = (40.7128, -74.0060, 100.0)   # approx NYC

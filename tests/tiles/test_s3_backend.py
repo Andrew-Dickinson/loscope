@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from los_analyzer.tiles.s3_backend import S3TileBackend
+from lib.tiles.s3_backend import S3TileBackend
 
 
 # ---------------------------------------------------------------------------

@@ -2,8 +2,8 @@
 import numpy as np
 import pytest
 
-from los_analyzer.obstructions.io import load_obstruction, save_obstruction
-from los_analyzer.obstructions.model import OBSTRUCTION_TYPE_BUILDING, Obstruction
+from lib.obstructions.io import load_obstruction, save_obstruction
+from lib.obstructions.model import OBSTRUCTION_TYPE_BUILDING, Obstruction
 
 
 @pytest.fixture

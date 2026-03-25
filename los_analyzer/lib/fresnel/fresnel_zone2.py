@@ -7,7 +7,7 @@ import numpy as np
 
 from math import sqrt, ceil, floor
 
-from los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT
+from lib.preprocessing.tile_id import TILE_SIDE_USFT
 
 UINT16_MAX = 2**16 -  1
 SPEED_OF_LIGHT_M_S = 299_792_458

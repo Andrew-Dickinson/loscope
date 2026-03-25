@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from los_analyzer.fresnel.fresnel_zone2 import FresnelZone
-from los_analyzer.tiles.identify import identify_tiles
+from lib.fresnel.fresnel_zone2 import FresnelZone
+from lib.tiles.identify import identify_tiles
 
 # Tile coordinate reference (file_id="235", origin=(1000000, 235000), TILE_SIDE=500):
 #   "235_22"  xi=2, yi=2 → SW (1001000, 236000), covers E[1001000,1001500) N[236000,236500)

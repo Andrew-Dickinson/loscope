@@ -37,8 +37,8 @@ def _build_dem_fetcher(cache_dir: Path):
     prefix = os.environ.get("LOS_DEM_S3_PREFIX")
     if not bucket or not prefix:
         return None
-    from los_analyzer.tiles.fetch import CachingTileFetcher
-    from los_analyzer.tiles.s3_backend import S3TileBackend
+    from lib.tiles.fetch import CachingTileFetcher
+    from lib.tiles.s3_backend import S3TileBackend
     return CachingTileFetcher(S3TileBackend(bucket, prefix), cache_dir)
 
 
@@ -51,7 +51,7 @@ def max_ground_elevation(wkt_str: str, cache_dir: Path) -> float | None:
     Returns None if no DEM data covers the polygon.
     """
     # Reuse _intersecting_tile_ids from building_footprints to find overlapping tiles
-    from los_analyzer.obstructions.building_footprints import _intersecting_tile_ids
+    from lib.obstructions.building_footprints import _intersecting_tile_ids
 
     poly_nys = wkt.loads(wkt_str)
     if poly_nys.is_empty:

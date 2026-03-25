@@ -3,7 +3,7 @@ from math import atan, asin, tan, cos, sin, sqrt
 import numpy as np
 import pytest
 
-from los_analyzer.fresnel.fresnel_zone2 import (
+from lib.fresnel.fresnel_zone2 import (
     construct_fresnel_quadratic,
     homogenous_rotation_matrix_ellipsoid_to_nys,
     translate_to_nys_plane, AngleContext, construct_homogenous_coordinate_transformation,

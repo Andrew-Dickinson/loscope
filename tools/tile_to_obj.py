@@ -32,8 +32,8 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.los_analyzer.preprocessing.io import load_tile
-from src.los_analyzer.preprocessing.tile_id import TILE_SIDE_USFT
+from src.lib.preprocessing.io import load_tile
+from src.lib.preprocessing.tile_id import TILE_SIDE_USFT
 
 
 def export_terrain_obj(raster_inches: np.ndarray, out_path: Path) -> None:

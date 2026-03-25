@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from los_analyzer.sample_points.grid import sample_grid
+from lib.sample_points.grid import sample_grid
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────

@@ -13,10 +13,10 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from los_analyzer.fresnel.fresnel_zone2 import compute_fresnel_zone
-from los_analyzer.tiles.identify import identify_tiles
-from los_analyzer.tiles.intersect import compute_intersection
-from los_analyzer.tiles.load import load_terrain_grid
+from lib.fresnel.fresnel_zone2 import compute_fresnel_zone
+from lib.tiles.identify import identify_tiles
+from lib.tiles.intersect import compute_intersection
+from lib.tiles.load import load_terrain_grid
 
 
 class ObstructionStatus(str, Enum):

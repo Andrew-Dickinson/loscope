@@ -5,9 +5,9 @@ from pathlib import Path
 
 import numpy as np
 
-from los_analyzer.fresnel.fresnel_zone2 import FresnelZone
-from los_analyzer.obstructions.io import load_obstruction
-from los_analyzer.preprocessing.io import load_tile
+from lib.fresnel.fresnel_zone2 import FresnelZone
+from lib.obstructions.io import load_obstruction
+from lib.preprocessing.io import load_tile
 
 
 @dataclass

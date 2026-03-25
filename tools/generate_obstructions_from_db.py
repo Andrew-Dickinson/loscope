@@ -30,12 +30,12 @@ import shapely
 import tifffile
 from shapely import wkt
 
-from los_analyzer.obstructions.building_footprints import (
+from lib.obstructions.building_footprints import (
     _intersecting_tile_ids,
     _rasterize,
 )
-from los_analyzer.obstructions.io import save_obstruction
-from los_analyzer.obstructions.model import Obstruction
+from lib.obstructions.io import save_obstruction
+from lib.obstructions.model import Obstruction
 
 
 def _build_dem_fetcher(cache_dir: Path):
@@ -47,8 +47,8 @@ def _build_dem_fetcher(cache_dir: Path):
     prefix = os.environ.get("LOS_DEM_S3_PREFIX")
     if not bucket or not prefix:
         return None
-    from los_analyzer.tiles.fetch import CachingTileFetcher
-    from los_analyzer.tiles.s3_backend import S3TileBackend
+    from lib.tiles.fetch import CachingTileFetcher
+    from lib.tiles.s3_backend import S3TileBackend
     return CachingTileFetcher(S3TileBackend(bucket, prefix), cache_dir)
 
 

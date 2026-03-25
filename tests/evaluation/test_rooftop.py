@@ -6,15 +6,15 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from los_analyzer.evaluation.rooftop import (
+from lib.evaluation.rooftop import (
     ObstructionStatus,
     SamplePointEvaluation,
     _valid_max,
     evaluate_sample_points,
 )
-from los_analyzer.fresnel.fresnel_zone2 import FresnelZone
-from los_analyzer.tiles.intersect import ObstructionGrid
-from los_analyzer.tiles.load import TerrainGrid
+from lib.fresnel.fresnel_zone2 import FresnelZone
+from lib.tiles.intersect import ObstructionGrid
+from lib.tiles.load import TerrainGrid
 
 
 # ---------------------------------------------------------------------------

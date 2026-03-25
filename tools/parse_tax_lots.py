@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from tqdm import tqdm
 
-from los_analyzer.tax_lots.parser import parse_csv, write_json_files
+from lib.tax_lots.parser import parse_csv, write_json_files
 
 
 def main():

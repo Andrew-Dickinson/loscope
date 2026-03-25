@@ -15,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from tqdm import tqdm
 import csv
 
-from los_analyzer.obstructions.building_footprints import parse_building_row
-from los_analyzer.obstructions.io import save_obstruction
+from lib.obstructions.building_footprints import parse_building_row
+from lib.obstructions.io import save_obstruction
 
 
 def main():

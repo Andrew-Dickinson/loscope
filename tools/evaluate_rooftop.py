@@ -20,18 +20,18 @@ from pathlib import Path
 import numpy as np
 import tifffile
 
-from los_analyzer.building.heightmap import (
+from lib.building.heightmap import (
     build_building_heightmap,
     fetch_building_geometry,
     filter_heightmap_outliers,
 )
-from los_analyzer.evaluation.rooftop import (
+from lib.evaluation.rooftop import (
     ObstructionStatus,
     SamplePointEvaluation,
     evaluate_sample_points,
 )
-from los_analyzer.fresnel.fresnel_zone2 import translate_to_nys_plane
-from los_analyzer.sample_points import apply_mast_offset, generate_sample_points
+from lib.fresnel.fresnel_zone2 import translate_to_nys_plane
+from lib.sample_points import apply_mast_offset, generate_sample_points
 
 
 _CUBE_HALF = 0.125  # 3 inches = 0.25 ft; half-edge = 0.125 ft
@@ -58,8 +58,8 @@ def _build_fetcher(tile_dir: Path):
     prefix = os.environ.get("LOS_S3_PREFIX")
     if not bucket or not prefix:
         return None
-    from los_analyzer.tiles.fetch import CachingTileFetcher
-    from los_analyzer.tiles.s3_backend import S3TileBackend
+    from lib.tiles.fetch import CachingTileFetcher
+    from lib.tiles.s3_backend import S3TileBackend
     return CachingTileFetcher(S3TileBackend(bucket, prefix), tile_dir)
 
 
@@ -193,7 +193,7 @@ def run_evaluation(
         :class:`EvaluationResult` with paths to all written files.
     """
     # 1. Optionally prefetch tiles from S3
-    from los_analyzer.obstructions.building_footprints import _intersecting_tile_ids
+    from lib.obstructions.building_footprints import _intersecting_tile_ids
     poly_for_fetch = fetch_building_geometry(bin_id, db_path)
     tile_ids_for_fetch = _intersecting_tile_ids(poly_for_fetch)
 

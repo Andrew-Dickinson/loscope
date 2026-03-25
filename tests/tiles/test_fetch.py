@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from los_analyzer.tiles.fetch import CachingTileFetcher, TileBackend, s3_fetcher_from_env
+from lib.tiles.fetch import CachingTileFetcher, TileBackend, s3_fetcher_from_env
 
 
 # ---------------------------------------------------------------------------

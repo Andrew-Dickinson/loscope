@@ -15,7 +15,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.los_analyzer.preprocessing.preprocess import run_preprocessing
+from src.lib.preprocessing.preprocess import run_preprocessing
 
 
 def _worker(args):

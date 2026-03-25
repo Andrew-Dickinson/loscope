@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def tiles(tmp_path_factory):
-    from los_analyzer.preprocessing.preprocess import run_preprocessing
+    from lib.preprocessing.preprocess import run_preprocessing
     out = tmp_path_factory.mktemp("preprocessed")
     return run_preprocessing(LAS_PATH, out)
 
@@ -26,7 +26,7 @@ def test_produces_25_tiles(tiles):
 
 def test_all_tiles_written_as_tifs(tiles, tmp_path_factory):
     """When preprocessing runs, each tile should have a .tif on disk (no JSON)."""
-    from los_analyzer.preprocessing.preprocess import run_preprocessing
+    from lib.preprocessing.preprocess import run_preprocessing
     out = tmp_path_factory.mktemp("pairs")
     run_preprocessing(LAS_PATH, out)
     assert len(list(out.glob("*.tif"))) == 25

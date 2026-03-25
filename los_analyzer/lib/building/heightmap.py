@@ -25,8 +25,8 @@ def _circular_offsets(radius: float) -> list[tuple[int, int]]:
         if 0 < di ** 2 + dj ** 2 <= radius ** 2
     ]
 
-from los_analyzer.obstructions.building_footprints import _intersecting_tile_ids
-from los_analyzer.preprocessing.io import load_tile
+from lib.obstructions.building_footprints import _intersecting_tile_ids
+from lib.preprocessing.io import load_tile
 
 
 def fetch_building_geometry(bin_id: str, db_path: Path) -> Any:

@@ -10,7 +10,7 @@ import pytest
 import tifffile
 from shapely.geometry import box as shapely_box
 
-from los_analyzer.building.heightmap import (
+from lib.building.heightmap import (
     build_building_heightmap,
     fetch_building_geometry,
     filter_heightmap_outliers,

@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-from los_analyzer.fresnel.fresnel_zone2 import FresnelZone
-from los_analyzer.tiles.load import TerrainGrid
-from los_analyzer.tiles.intersect import ObstructionGrid, compute_intersection
+from lib.fresnel.fresnel_zone2 import FresnelZone
+from lib.tiles.load import TerrainGrid
+from lib.tiles.intersect import ObstructionGrid, compute_intersection
 
 
 # ---------------------------------------------------------------------------

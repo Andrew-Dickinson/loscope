@@ -34,7 +34,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from los_analyzer.fresnel.fresnel_zone import (
+from lib.fresnel.fresnel_zone import (
     SPEED_OF_LIGHT_M_S,
     USFT_PER_METER,
     FresnelZone,
