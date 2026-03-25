@@ -1,6 +1,8 @@
 """3D sample point generation from a building heightmap."""
 from __future__ import annotations
 
+from typing import NamedTuple, List
+
 import numpy as np
 import shapely
 
@@ -16,6 +18,51 @@ __all__ = [
     "sample_perimeter",
     "cull_and_combine",
 ]
+
+from ..building.heightmap import RooftopHeightMap
+
+
+class EncodedPoint(NamedTuple):
+    x: float
+    y: float
+    z: float
+    nys_e: float
+    nys_n: float
+    nys_z: float
+
+def point_encode(pt: np.ndarray, x_sw: float, y_sw: float) -> EncodedPoint:
+    return EncodedPoint(
+        x=round(float(pt[0]) - x_sw, 3),
+        y=round(float(pt[1]) - y_sw, 3),
+        z=round(float(pt[2]), 3),
+        nys_e=round(float(pt[0]), 3),
+        nys_n=round(float(pt[1]), 3),
+        nys_z=round(float(pt[2]), 3),
+    )
+
+class SamplePoint(NamedTuple):
+    displayPoint: EncodedPoint
+    measurementPoint: EncodedPoint
+
+def get_paired_sample_points(model: RooftopHeightMap, sample_spacing: int, mast_offset: float) -> List[SamplePoint]:
+    """
+    Given a hieghtmap representing a rooftop, generate points which are roughly evenly spaced over the rooftop based
+    on sample_spacing, with extra points at areas of large hieght change and around the perimeter. For each sample
+    point, we provide a "display" location as well as a "measurement" location which is usually offset upwards
+    by mast_offset
+    """
+    raw_pts = generate_sample_points(
+        model.heightmap, model.x_sw,  model.y_sw, sample_spacing,
+        mask=model.mask, polygon=model.poly_nys,
+    )
+    display_pts, measurement_pts = apply_mast_offset(raw_pts, mast_offset)
+    return  [
+        SamplePoint(
+            displayPoint=point_encode(dp, model.x_sw, model.y_sw),
+            measurementPoint=point_encode(mp, model.x_sw, model.y_sw),
+        )
+        for dp, mp in zip(display_pts, measurement_pts)
+    ]
 
 
 def generate_sample_points(

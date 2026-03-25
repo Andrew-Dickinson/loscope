@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import NamedTuple
 
 import numpy as np
 import shapely
@@ -63,11 +63,19 @@ def fetch_building_geometry(bin_id: str, db_path: Path) -> BaseGeometry:
     return geom
 
 
+class RooftopHeightMap(NamedTuple):
+    bin_id: str
+    x_sw: int
+    y_sw: int
+    heightmap: np.ndarray
+    mask: np.ndarray
+    poly_nys: BaseGeometry
+
 def build_building_heightmap(
     bin_id: str,
     db_path: Path,
     tile_dir: Path,
-) -> tuple[np.ndarray, np.ndarray, BaseGeometry, int, int, list[str]]:
+) -> RooftopHeightMap:
     """Build a dense heightmap and mask for the given BIN.
 
     Queries the building geometry, identifies the overlapping preprocessed
@@ -160,7 +168,14 @@ def build_building_heightmap(
     mask = np.where(inside, np.uint8(255), np.uint8(0))
     heightmap[~inside] = 0
 
-    return heightmap, mask, poly_nys, x_sw, y_sw, found_tile_ids
+    return RooftopHeightMap(
+        bin_id,
+        x_sw,
+        y_sw,
+        filter_heightmap_outliers(roof_heightmap, mask),
+        mask,
+        poly_nys
+    )
 
 
 def filter_heightmap_outliers(
