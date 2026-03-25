@@ -2,8 +2,8 @@
 import numpy as np
 import pytest
 
-from lib.obstructions.building_footprints import parse_building_row
-from lib.obstructions.model import OBSTRUCTION_TYPE_BUILDING
+from los_analyzer.lib.obstructions.building_footprints import parse_building_row
+from los_analyzer.lib.obstructions.model import OBSTRUCTION_TYPE_BUILDING
 
 # A real-ish building polygon near Staten Island in NYS EPSG:6539 (US survey feet)
 SAMPLE_ROW = {

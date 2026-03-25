@@ -10,7 +10,7 @@ import pytest
 import tifffile
 from shapely.geometry import box as shapely_box
 
-from lib.building.heightmap import (
+from los_analyzer.lib.building.heightmap import (
     build_building_heightmap,
     fetch_building_geometry,
     filter_heightmap_outliers,
@@ -98,7 +98,7 @@ def test_build_building_heightmap_no_tiles(tmp_path):
     tile_dir = tmp_path / "tiles"
     tile_dir.mkdir()
     with patch(
-        "los_analyzer.building.heightmap._intersecting_tile_ids",
+        "los_analyzer.lib.building.heightmap._intersecting_tile_ids",
         return_value=[],
     ):
         with pytest.raises(ValueError, match="No preprocessed tiles"):

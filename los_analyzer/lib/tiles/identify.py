@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lib.fresnel.fresnel_zone2 import FresnelZone
-from lib.preprocessing.tile_id import LAS_SIDE_USFT, TILE_SIDE_USFT, file_id_to_offset, make_tile_id
+from los_analyzer.lib.fresnel.fresnel_zone2 import FresnelZone
+from los_analyzer.lib.preprocessing.tile_id import LAS_SIDE_USFT, TILE_SIDE_USFT, file_id_to_offset, make_tile_id
 
 # SW corner of the canonical LAS tile grid (file_id "912117").
 _GRID_BASE_E = 912500

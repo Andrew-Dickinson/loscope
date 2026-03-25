@@ -13,6 +13,8 @@ from typing import Any
 import numpy as np
 import shapely
 from shapely import wkt
+from shapely.geometry.base import BaseGeometry
+
 
 # Precomputed circular neighbor offsets for each supported radius (in pixels).
 # Excludes the centre pixel (self).
@@ -25,11 +27,11 @@ def _circular_offsets(radius: float) -> list[tuple[int, int]]:
         if 0 < di ** 2 + dj ** 2 <= radius ** 2
     ]
 
-from lib.obstructions.building_footprints import _intersecting_tile_ids
-from lib.preprocessing.io import load_tile
+from los_analyzer.lib.obstructions.building_footprints import _intersecting_tile_ids
+from los_analyzer.lib.preprocessing.io import load_tile
 
 
-def fetch_building_geometry(bin_id: str, db_path: Path) -> Any:
+def fetch_building_geometry(bin_id: str, db_path: Path) -> BaseGeometry:
     """Return the NYS EPSG:6539 shapely geometry for the given BIN.
 
     Queries the building_footprints table in *db_path* for the row whose
@@ -65,7 +67,7 @@ def build_building_heightmap(
     bin_id: str,
     db_path: Path,
     tile_dir: Path,
-) -> tuple[np.ndarray, np.ndarray, Any, int, int, list[str]]:
+) -> tuple[np.ndarray, np.ndarray, BaseGeometry, int, int, list[str]]:
     """Build a dense heightmap and mask for the given BIN.
 
     Queries the building geometry, identifies the overlapping preprocessed

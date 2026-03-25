@@ -12,8 +12,8 @@ import shapely
 from shapely import wkt
 from shapely.geometry import box as shapely_box
 
-from lib.preprocessing.tile_id import TILE_SIDE_USFT
-from lib.tiles.identify import _tile_id_from_sw_corner
+from los_analyzer.lib.preprocessing.tile_id import TILE_SIDE_USFT
+from los_analyzer.lib.tiles.identify import _tile_id_from_sw_corner
 from .model import OBSTRUCTION_TYPE_BUILDING, Obstruction
 
 def _rasterize(poly_nys, height_inches: int) -> tuple[int, int, np.ndarray]:
