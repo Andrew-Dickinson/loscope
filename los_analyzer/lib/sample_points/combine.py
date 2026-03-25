@@ -14,8 +14,7 @@ def cull_and_combine(
     """Combine grid and perimeter points, culling nearby grid base points.
 
     Any base grid point whose XY lies within *cull_radius* feet (Euclidean) of
-    any perimeter point is removed.  Cliff points — which share an XY with a
-    base point — are **never** culled; they are always included in the output.
+    any perimeter point is removed
 
     Parameters
     ----------
@@ -32,22 +31,24 @@ def cull_and_combine(
     -------
     ``(N, 3)`` float64: perimeter + surviving base + all cliff points.
     """
+    surviving: list[np.ndarray] = []
+
     parts: list[np.ndarray] = []
-
-    if len(perim_pts):
-        parts.append(perim_pts)
-
     if len(base_pts):
-        if len(perim_pts):
-            perim_tree = cKDTree(perim_pts[:, :2])
-            dist, _ = perim_tree.query(base_pts[:, :2])
-            surviving = base_pts[dist >= cull_radius]
-        else:
-            surviving = base_pts
-        if len(surviving):
-            parts.append(surviving)
+        parts.append(base_pts)
 
     if len(cliff_pts):
         parts.append(cliff_pts)
 
-    return np.vstack(parts) if parts else np.empty((0, 3), dtype=np.float64)
+    for part in parts:
+        if len(perim_pts):
+            perim_tree = cKDTree(perim_pts)
+            dist, _ = perim_tree.query(part)
+            surviving.append(part[dist >= cull_radius])
+        else:
+            surviving.append(part)
+
+    if len(perim_pts):
+        surviving.append(perim_pts)
+
+    return np.vstack(surviving) if surviving else np.empty((0, 3), dtype=np.float64)

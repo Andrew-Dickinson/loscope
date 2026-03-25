@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from lib.sample_points.combine import cull_and_combine
+from los_analyzer.lib.sample_points.combine import cull_and_combine
 
 
 def pts(*rows):
@@ -44,13 +44,11 @@ def test_base_far_from_perim_not_culled():
     assert any(np.allclose(r, [100, 100, 10]) for r in result)
 
 
-def test_base_close_to_perim_is_culled():
-    base = pts((1, 0, 10))   # distance to perim point = 1 < spacing=5
+def test_well_above_perim_is_not_culled():
+    base = pts((1, 0, 10))
     perim = pts((0, 0, 5))
     result = cull_and_combine(base, EMPTY, perim, cull_radius=5.0)
-    # base culled; only perim point remains
-    assert len(result) == 1
-    assert np.allclose(result[0], [0, 0, 5])
+    assert len(result) == 2
 
 
 def test_base_at_exact_spacing_not_culled():
@@ -62,7 +60,7 @@ def test_base_at_exact_spacing_not_culled():
 
 
 def test_mixed_culled_and_kept():
-    base = pts((1, 0, 10), (10, 0, 10))  # first culled, second kept
+    base = pts((1, 0, 5), (10, 0, 10))  # first culled, second kept
     perim = pts((0, 0, 5))
     result = cull_and_combine(base, EMPTY, perim, cull_radius=5.0)
     xs = set(result[:, 0].tolist())
@@ -72,16 +70,16 @@ def test_mixed_culled_and_kept():
 
 # ── cliff points never culled ─────────────────────────────────────────────────
 
-def test_cliff_kept_when_base_culled():
+def test_cliff_culled_when_in_radius():
     # base at (1,0) is within spacing=5 of perim at (0,0) → base culled.
     # cliff at same XY (1,0) must NOT be culled.
     base = pts((1, 0, 5))
-    cliff = pts((1, 0, 15), (1, 0, 25))  # stacked above culled base
+    cliff = pts((1, 0, 8), (1, 0, 18))  # stacked above culled base
     perim = pts((0, 0, 5))
     result = cull_and_combine(base, cliff, perim, cull_radius=5.0)
-    cliff_rows = result[np.isclose(result[:, 0], 1.0)]
-    assert len(cliff_rows) == 2
-    assert set(cliff_rows[:, 2].tolist()) == {15.0, 25.0}
+    assert len(result) == 2 # Perimeter point + non-culled cliff point
+    assert np.allclose(result[1], [0, 0, 5])
+    assert np.allclose(result[0], [1, 0, 18])
 
 
 def test_cliff_kept_when_base_also_kept():
