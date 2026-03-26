@@ -9,7 +9,7 @@ from __future__ import annotations
 from cachetools import cached, LRUCache
 import sqlite3
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, TypedDict
 
 import numpy as np
 import shapely
@@ -64,7 +64,7 @@ def fetch_building_geometry(bin_id: str, db_path: Path) -> BaseGeometry:
     return geom
 
 
-class RooftopHeightMap(NamedTuple):
+class RooftopHeightMap(TypedDict):
     bin_id: str
     x_sw: int
     y_sw: int
@@ -170,14 +170,14 @@ def build_building_heightmap(
     mask = np.where(inside, np.uint8(255), np.uint8(0))
     heightmap[~inside] = 0
 
-    return RooftopHeightMap(
-        bin_id,
-        x_sw,
-        y_sw,
-        filter_heightmap_outliers(roof_heightmap, mask),
-        mask,
-        poly_nys
-    )
+    return {
+        "bin_id": bin_id,
+        "x_sw": x_sw,
+        "y_sw": y_sw,
+        "heightmap": filter_heightmap_outliers(heightmap, mask),
+        "mask": mask,
+        "poly_nys": poly_nys
+    }
 
 
 def filter_heightmap_outliers(
