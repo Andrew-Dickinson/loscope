@@ -2,9 +2,9 @@
 import numpy as np
 import tifffile
 
-from lib.preprocessing.io import save_tile, load_tile
-from lib.preprocessing.tile import TileData
-from lib.preprocessing.tile_id import TILE_SIDE_USFT
+from los_analyzer.lib.preprocessing.io import save_tile, load_tile
+from los_analyzer.lib.preprocessing.tile import TileData
+from los_analyzer.lib.preprocessing.tile_id import TILE_SIDE_USFT
 
 
 def _sample_tile():

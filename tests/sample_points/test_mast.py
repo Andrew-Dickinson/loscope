@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from lib.sample_points.mast import apply_mast_offset
+from los_analyzer.lib.sample_points.mast import apply_mast_offset
 
 
 def pts(*rows):

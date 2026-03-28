@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-from lib.fresnel.fresnel_zone2 import FresnelZone
-from lib.tiles.load import TerrainGrid
-from lib.tiles.intersect import ObstructionGrid, compute_intersection
+from los_analyzer.lib.fresnel.fresnel_zone2 import FresnelZone
+from los_analyzer.lib.tiles.load import TerrainGrid
+from los_analyzer.lib.tiles.intersect import IntersectionGrid, compute_intersection
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ def test_values_shape_matches_input(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_widths_offsets_copied_from_fresnel_zone(tmp_path):
-    """When computed, ObstructionGrid widths and offsets should be copied from the FresnelZone."""
+    """When computed, IntersectionGrid widths and offsets should be copied from the FresnelZone."""
     widths = [3, 2, 4]
     offsets = [10, 20, 30]
     zone = _make_zone(top_vals=[1200, 1200, 1200], bottom_vals=[600, 600, 600],

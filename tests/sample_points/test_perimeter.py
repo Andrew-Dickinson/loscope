@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 from shapely.geometry import Polygon
 
-from lib.sample_points.perimeter import sample_perimeter
+from los_analyzer.lib.sample_points.perimeter import sample_perimeter
 
 
 def flat_hm(W, H, inches=120):

@@ -6,7 +6,7 @@ import os
 import numpy as np
 import pyproj
 
-from lib.preprocessing.tile_id import TILE_SIDE_USFT
+from los_analyzer.lib.preprocessing.tile_id import TILE_SIDE_USFT
 
 SPEED_OF_LIGHT_M_S = 299_792_458
 USFT_PER_METER = 1 / 0.3048006096

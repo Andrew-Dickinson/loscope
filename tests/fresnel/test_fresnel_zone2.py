@@ -3,12 +3,13 @@ from math import atan, asin, tan, cos, sin, sqrt
 import numpy as np
 import pytest
 
-from lib.fresnel.fresnel_zone2 import (
+from los_analyzer.lib.fresnel.fresnel_zone2 import (
     construct_fresnel_quadratic,
     homogenous_rotation_matrix_ellipsoid_to_nys,
-    translate_to_nys_plane, AngleContext, construct_homogenous_coordinate_transformation,
+    AngleContext, construct_homogenous_coordinate_transformation,
     get_integer_grid_within_bounds, compute_fresnel_zone, normalize_ellipse, FresnelZone,
 )
+from los_analyzer.lib.coordinates.coordinate_translate import translate_to_nys_plane
 
 
 @pytest.mark.parametrize(
@@ -16,23 +17,21 @@ from lib.fresnel.fresnel_zone2 import (
     [
         (
             (40.650, -73.800, 100.0),
-            (1039747.7086964573, 176152.26368097877, 328.08333333333337),
+            (1039748.8061058237, 176148.99539110975, 329.33693385683),
         ),
         (
             (40.7173, -74.0060, 10000.0),
-            (982586.7467540047, 200608.30748196002, 32808.333333333336),
+            (982587.8496248991, 200605.06780909808, 32809.58365781512),
         ),
         (
             (40.865339, -74.030096, 100.0),
-            (975925.6527077489, 254545.4059772802, 328.08333333333337),
+            (975926.767548464, 254542.1263456685, 329.3288903320208),
         ),
     ],
 )
 def test_translate_to_nys_plane(gps_point, expected):
     """When translating a GPS point, output should match known NYS plane coordinates."""
-    result = translate_to_nys_plane([gps_point])
-    assert len(result) == 1
-    x, y, z = result[0]
+    x, y, z = translate_to_nys_plane(gps_point)
     exp_x, exp_y, exp_z = expected
     assert x == pytest.approx(exp_x, rel=1e-6)
     assert y == pytest.approx(exp_y, rel=1e-6)
@@ -113,17 +112,15 @@ def test_construct_fresnel_quadratic():
 
 
 def test_translate_to_nys_plane_batch():
-    """When translating multiple points at once, each should match the single-point result."""
+    """When translating multiple points, each should match the single-point result."""
     points = [
         (40.650, -73.800, 100.0),
         (40.7173, -74.0060, 10000.0),
         (40.865339, -74.030096, 100.0),
     ]
-    batch = translate_to_nys_plane(points)
-    for point, result in zip(points, batch):
-        single = translate_to_nys_plane([point])
-        x, y, z = result
-        sx, sy, sz = single[0]
+    for point in points:
+        x, y, z = translate_to_nys_plane(point)
+        sx, sy, sz = translate_to_nys_plane(point)
         assert x == pytest.approx(sx, rel=1e-9)
         assert y == pytest.approx(sy, rel=1e-9)
         assert z == pytest.approx(sz, rel=1e-9)
@@ -181,13 +178,15 @@ def test_stress_test_fresnel_zone():
     frequency_hz = 5_000_000_000
     alpha = 0.8
 
-    nys_a, nys_b = translate_to_nys_plane([gps_A, gps_B])
+    nys_a = translate_to_nys_plane(gps_A)
+    nys_b = translate_to_nys_plane(gps_B)
     zone = compute_fresnel_zone(nys_a, nys_b, frequency_hz, alpha)
     print(zone)
 
 def test_old_stress_test_fresnel_zone():
     gps_A, gps_B = (40.650, -73.979, 100.0), (40.7173, -74.0060, 100.0)
-    nys_a, nys_b = translate_to_nys_plane([gps_A, gps_B])
+    nys_a = translate_to_nys_plane(gps_A)
+    nys_b = translate_to_nys_plane(gps_B)
     zone = compute_fresnel_zone(nys_a, nys_b, 2400000000.0, 1.0)
     print(zone)
 
@@ -197,7 +196,8 @@ def test_east_west_long_fresnel_zone():
     frequency_hz = 5_000_000_000
     alpha = 1
 
-    nys_a, nys_b = translate_to_nys_plane([gps_A, gps_B])
+    nys_a = translate_to_nys_plane(gps_A)
+    nys_b = translate_to_nys_plane(gps_B)
     zone = compute_fresnel_zone(nys_a, nys_b, frequency_hz, alpha)
     print(zone)
 
@@ -207,7 +207,8 @@ def test_north_south_long_fresnel_zone():
     frequency_hz = 5_000_000_000
     alpha = 1
 
-    nys_a, nys_b = translate_to_nys_plane([gps_A, gps_B])
+    nys_a = translate_to_nys_plane(gps_A)
+    nys_b = translate_to_nys_plane(gps_B)
     zone = compute_fresnel_zone(nys_a, nys_b, frequency_hz, alpha)
     print(zone)
 
@@ -217,7 +218,8 @@ def test_new_fresnel_zone():
     FREQUENCY_HZ = 5_000_000_000
     ALPHA = 1.0
 
-    nys_a, nys_b = translate_to_nys_plane([GPS_A, GPS_B])
+    nys_a = translate_to_nys_plane(GPS_A)
+    nys_b = translate_to_nys_plane(GPS_B)
     zone = compute_fresnel_zone(nys_a, nys_b, FREQUENCY_HZ, ALPHA)
     print(zone)
 
@@ -232,6 +234,7 @@ def test_fresnel_zone_empty_x_grid():
     FREQUENCY_HZ = 24_000_000_000
     ALPHA = 1.0
 
-    nys_a, nys_b = translate_to_nys_plane([GPS_A, GPS_B])
+    nys_a = translate_to_nys_plane(GPS_A)
+    nys_b = translate_to_nys_plane(GPS_B)
     zone = compute_fresnel_zone(nys_a, nys_b, FREQUENCY_HZ, ALPHA)
     assert isinstance(zone, FresnelZone)

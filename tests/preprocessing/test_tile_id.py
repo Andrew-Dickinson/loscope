@@ -1,6 +1,6 @@
 """Tests for src.preprocessing.tile_id"""
-from lib.preprocessing.tile_id import (
-    file_id_to_offset,
+from los_analyzer.lib.preprocessing.tile_id import (
+    las_file_id_to_offset,
     make_tile_id,
     tile_sw_corner,
     LAS_SIDE_USFT,
@@ -9,8 +9,8 @@ from lib.preprocessing.tile_id import (
 
 
 def test_file_id_to_offset_235():
-    """When file_id is '235', file_id_to_offset should return (1000000, 235000)."""
-    assert file_id_to_offset("235") == (1000000, 235000)
+    """When file_id is '235', las_file_id_to_offset should return (1000000, 235000)."""
+    assert las_file_id_to_offset("235") == (1000000, 235000)
 
 
 def test_file_id_to_offset_non_multiple_of_5():
@@ -18,7 +18,7 @@ def test_file_id_to_offset_non_multiple_of_5():
     # e.g. file_id "997240" → x portion "997", y portion "240"
     # 997 % 5 != 0 → 997 * 1000 + 500 = 997500; 997500 >= 500000 so no +1000000
     # 240 % 5 == 0 → 240 * 1000 = 240000
-    x, y = file_id_to_offset("997240")
+    x, y = las_file_id_to_offset("997240")
     assert x == 997500
     assert y == 240000
 

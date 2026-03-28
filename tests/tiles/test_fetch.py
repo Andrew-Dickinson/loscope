@@ -1,136 +1,133 @@
-"""Tests for los_analyzer.tiles.fetch — CachingTileFetcher and s3_fetcher_from_env."""
+"""Tests for los_analyzer.lib.providers.tile_provider — CachingTileProvider."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
+import tifffile
 
-from lib.tiles.fetch import CachingTileFetcher, TileBackend, s3_fetcher_from_env
-
-
-# ---------------------------------------------------------------------------
-# Fake backend (no I/O, just records calls and plants expected files)
-# ---------------------------------------------------------------------------
-
-class FakeBackend:
-    def __init__(self):
-        self.calls: list[str] = []
-
-    def fetch_tile_files(self, tile_id: str, dest_dir: Path) -> None:
-        self.calls.append(tile_id)
-        (dest_dir / f"{tile_id}.tif").write_bytes(b"")
-        (dest_dir / f"{tile_id}.json").write_text("{}")
+from los_analyzer.lib.preprocessing.tile_id import TILE_SIDE_USFT
+from los_analyzer.lib.providers.read_through_cache import AssetProvider
+from los_analyzer.lib.providers.tile_provider import (
+    ASSET_TYPE_TERRAIN_TIFF,
+    CachingTileProvider,
+)
 
 
 # ---------------------------------------------------------------------------
-# Protocol conformance
+# Helpers
 # ---------------------------------------------------------------------------
 
-def test_fake_backend_satisfies_protocol():
-    assert isinstance(FakeBackend(), TileBackend)
+def _fake_upstream(writes_tif=True):
+    """Return a mock AssetProvider that optionally plants a zero-filled .tif."""
+
+    def _get_asset(asset_type, remote_path, local_path):
+        if writes_tif:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            raster = np.zeros((TILE_SIDE_USFT, TILE_SIDE_USFT), dtype=np.uint16)
+            tifffile.imwrite(str(local_path), raster)
+            return True
+        return False
+
+    upstream = MagicMock(spec=AssetProvider)
+    upstream.get_asset.side_effect = _get_asset
+    return upstream
 
 
-# ---------------------------------------------------------------------------
-# CachingTileFetcher.is_cached
-# ---------------------------------------------------------------------------
-
-def test_is_cached_false_when_both_missing(tmp_path):
-    assert not CachingTileFetcher(FakeBackend(), tmp_path).is_cached("235_00")
-
-
-def test_is_cached_false_when_only_tif_present(tmp_path):
-    (tmp_path / "235_00.tif").write_bytes(b"")
-    assert not CachingTileFetcher(FakeBackend(), tmp_path).is_cached("235_00")
-
-
-def test_is_cached_false_when_only_json_present(tmp_path):
-    (tmp_path / "235_00.json").write_text("{}")
-    assert not CachingTileFetcher(FakeBackend(), tmp_path).is_cached("235_00")
-
-
-def test_is_cached_true_when_both_present(tmp_path):
-    (tmp_path / "235_00.tif").write_bytes(b"")
-    (tmp_path / "235_00.json").write_text("{}")
-    assert CachingTileFetcher(FakeBackend(), tmp_path).is_cached("235_00")
+def _make_provider(tmp_path, upstream=None):
+    if upstream is None:
+        upstream = _fake_upstream()
+    return CachingTileProvider(upstream, tmp_path)
 
 
 # ---------------------------------------------------------------------------
-# CachingTileFetcher.ensure_tile
+# Cache hit: tif already on disk
 # ---------------------------------------------------------------------------
 
-def test_ensure_tile_calls_backend_when_not_cached(tmp_path):
-    backend = FakeBackend()
-    CachingTileFetcher(backend, tmp_path).ensure_tile("235_00")
-    assert backend.calls == ["235_00"]
+def test_tif_in_cache_not_fetched_from_upstream(tmp_path):
+    """When the .tif is already in the cache dir, the upstream provider is not called."""
+    raster = np.zeros((TILE_SIDE_USFT, TILE_SIDE_USFT), dtype=np.uint16)
+    tifffile.imwrite(str(tmp_path / "235_00.tif"), raster)
+
+    upstream = _fake_upstream()
+    provider = _make_provider(tmp_path, upstream)
+    result = provider.get_tile("235_00")
+
+    upstream.get_asset.assert_not_called()
+    assert result is not None
+    assert result.tile_id == "235_00"
 
 
-def test_ensure_tile_skips_backend_when_already_cached(tmp_path):
-    (tmp_path / "235_00.tif").write_bytes(b"")
-    (tmp_path / "235_00.json").write_text("{}")
-    backend = FakeBackend()
-    CachingTileFetcher(backend, tmp_path).ensure_tile("235_00")
-    assert backend.calls == []
+def test_returns_tile_data_with_correct_offsets(tmp_path):
+    """get_tile should return a TileData whose x/y offsets are derived from the tile_id."""
+    raster = np.zeros((TILE_SIDE_USFT, TILE_SIDE_USFT), dtype=np.uint16)
+    tifffile.imwrite(str(tmp_path / "235_04.tif"), raster)
 
+    provider = _make_provider(tmp_path, _fake_upstream(writes_tif=False))
+    result = provider.get_tile("235_04")
 
-def test_ensure_tile_creates_cache_dir_if_missing(tmp_path):
-    cache_dir = tmp_path / "nested" / "cache"
-    CachingTileFetcher(FakeBackend(), cache_dir).ensure_tile("235_00")
-    assert cache_dir.is_dir()
-
-
-def test_ensure_tile_called_twice_only_fetches_once(tmp_path):
-    backend = FakeBackend()
-    fetcher = CachingTileFetcher(backend, tmp_path)
-    fetcher.ensure_tile("235_00")
-    fetcher.ensure_tile("235_00")
-    assert backend.calls == ["235_00"]
-
-
-# ---------------------------------------------------------------------------
-# CachingTileFetcher.ensure_tiles
-# ---------------------------------------------------------------------------
-
-def test_ensure_tiles_fetches_all_missing(tmp_path):
-    backend = FakeBackend()
-    CachingTileFetcher(backend, tmp_path).ensure_tiles(["235_00", "235_01"])
-    assert sorted(backend.calls) == ["235_00", "235_01"]
-
-
-def test_ensure_tiles_skips_cached_fetches_missing(tmp_path):
-    (tmp_path / "235_00.tif").write_bytes(b"")
-    (tmp_path / "235_00.json").write_text("{}")
-    backend = FakeBackend()
-    CachingTileFetcher(backend, tmp_path).ensure_tiles(["235_00", "235_01"])
-    assert backend.calls == ["235_01"]
-
-
-def test_ensure_tiles_empty_list_is_noop(tmp_path):
-    backend = FakeBackend()
-    CachingTileFetcher(backend, tmp_path).ensure_tiles([])
-    assert backend.calls == []
+    assert result is not None
+    # tile_id "235_04" → xi=0, yi=4 → x=1000000, y=235000+4*500=237000
+    assert result.x_offset == 1000000
+    assert result.y_offset == 237000
 
 
 # ---------------------------------------------------------------------------
-# s3_fetcher_from_env
+# Cache miss: upstream is called
 # ---------------------------------------------------------------------------
 
-def test_s3_fetcher_from_env_reads_env_vars(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOS_S3_BUCKET", "my-bucket")
-    monkeypatch.setenv("LOS_S3_PREFIX", "some/prefix")
-    fetcher = s3_fetcher_from_env(tmp_path)
-    assert fetcher.backend.bucket == "my-bucket"
-    assert fetcher.backend.prefix == "some/prefix"
-    assert fetcher.cache_dir == tmp_path
+def test_tif_not_in_cache_fetches_from_upstream(tmp_path):
+    """When the .tif is absent, the upstream provider must be called."""
+    upstream = _fake_upstream(writes_tif=True)
+    provider = _make_provider(tmp_path, upstream)
+    result = provider.get_tile("235_00")
+
+    upstream.get_asset.assert_called_once()
+    call_args = upstream.get_asset.call_args
+    assert call_args[0][0] == ASSET_TYPE_TERRAIN_TIFF
+    assert "235_00.tif" in call_args[0][1]
+    assert result is not None
 
 
-def test_s3_fetcher_from_env_missing_bucket_raises(tmp_path, monkeypatch):
-    monkeypatch.delenv("LOS_S3_BUCKET", raising=False)
-    monkeypatch.setenv("LOS_S3_PREFIX", "some/prefix")
-    with pytest.raises(KeyError):
-        s3_fetcher_from_env(tmp_path)
+def test_upstream_not_called_twice_for_same_tile(tmp_path):
+    """Once the .tif is cached, a second get_tile call must not hit the upstream."""
+    upstream = _fake_upstream(writes_tif=True)
+    provider = _make_provider(tmp_path, upstream)
+
+    provider.get_tile("235_00")  # first call — fetches from upstream and caches
+    provider.get_tile("235_00")  # second call — should use cache
+
+    assert upstream.get_asset.call_count == 1
 
 
-def test_s3_fetcher_from_env_missing_prefix_raises(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOS_S3_BUCKET", "my-bucket")
-    monkeypatch.delenv("LOS_S3_PREFIX", raising=False)
-    with pytest.raises(KeyError):
-        s3_fetcher_from_env(tmp_path)
+# ---------------------------------------------------------------------------
+# Missing tile upstream returns nothing
+# ---------------------------------------------------------------------------
+
+def test_upstream_returns_none_when_tile_not_found(tmp_path):
+    """When the upstream has no file, get_tile returns None."""
+    upstream = _fake_upstream(writes_tif=False)
+    provider = _make_provider(tmp_path, upstream)
+    result = provider.get_tile("235_00")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Raster shape and dtype
+# ---------------------------------------------------------------------------
+
+def test_returned_raster_shape_and_dtype(tmp_path):
+    """The raster in the returned TileData should be (500, 500) uint16."""
+    raster = np.arange(TILE_SIDE_USFT * TILE_SIDE_USFT, dtype=np.uint16).reshape(
+        TILE_SIDE_USFT, TILE_SIDE_USFT
+    )
+    tifffile.imwrite(str(tmp_path / "235_00.tif"), raster)
+
+    provider = _make_provider(tmp_path, _fake_upstream(writes_tif=False))
+    result = provider.get_tile("235_00")
+
+    assert result is not None
+    assert result.raster.shape == (TILE_SIDE_USFT, TILE_SIDE_USFT)
+    assert result.raster.dtype == np.uint16
+    np.testing.assert_array_equal(result.raster, raster)

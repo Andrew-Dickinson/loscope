@@ -1,24 +1,28 @@
-"""Tests for src.los_analyzer.building.heightmap"""
+"""Tests for los_analyzer.lib.building.heightmap"""
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Optional
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 import tifffile
-from shapely.geometry import box as shapely_box
 
 from los_analyzer.lib.building.heightmap import (
+    RooftopHeightMap,
     build_building_heightmap,
-    fetch_building_geometry,
     filter_heightmap_outliers,
 )
+from los_analyzer.lib.preprocessing.tile import TileData
+from los_analyzer.lib.preprocessing.tile_id import TILE_SIDE_USFT
+from los_analyzer.lib.providers.dob_db_dao import DOBDBDAO
+from los_analyzer.lib.providers.tile_provider import TileProvider
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Test-only helpers
 # ---------------------------------------------------------------------------
 
 def _make_db(tmp_path: Path, bin_id: str, geom_wkt: str | None) -> Path:
@@ -33,10 +37,25 @@ def _make_db(tmp_path: Path, bin_id: str, geom_wkt: str | None) -> Path:
     return db
 
 
-def _make_tile(tmp_path: Path, tile_id: str, x_offset: int, y_offset: int, fill: int = 1000) -> None:
-    """Write a 500×500 uint16 tile TIF with a uniform fill value."""
-    raster = np.full((500, 500), fill, dtype=np.uint16)
-    tifffile.imwrite(str(tmp_path / f"{tile_id}.tif"), raster)
+class FsTileProvider(TileProvider):
+    """Read .tif from a directory; return an empty tile when file is missing."""
+
+    def __init__(self, tile_dir: Path):
+        self._tile_dir = Path(tile_dir)
+
+    def get_tile(self, tile_id: str) -> Optional[TileData]:
+        from los_analyzer.lib.preprocessing.tile_id import tile_id_to_offset
+        x_offset, y_offset = tile_id_to_offset(tile_id)
+        tif = self._tile_dir / f"{tile_id}.tif"
+        if not tif.exists():
+            return TileData(
+                tile_id=tile_id,
+                x_offset=x_offset,
+                y_offset=y_offset,
+                raster=np.zeros((TILE_SIDE_USFT, TILE_SIDE_USFT), dtype=np.uint16),
+            )
+        raster = tifffile.imread(str(tif))
+        return TileData(tile_id=tile_id, x_offset=x_offset, y_offset=y_offset, raster=raster)
 
 
 # A valid polygon centred in tile "912117_00" (x_offset=912500, y_offset=117500).
@@ -51,28 +70,30 @@ _TILE_Y = 117500
 
 
 # ---------------------------------------------------------------------------
-# fetch_building_geometry
+# DOBDBDAO.fetch_building_footprint_geometry
 # ---------------------------------------------------------------------------
 
 def test_fetch_building_geometry_not_found(tmp_path):
-    """When the BIN is not in the DB, fetch_building_geometry should raise ValueError."""
+    """When the BIN is not in the DB, fetch_building_footprint_geometry should raise ValueError."""
     db = _make_db(tmp_path, "9999999", _POLY_WKT)
+    dao = DOBDBDAO(db)
     with pytest.raises(ValueError, match="not found"):
-        fetch_building_geometry(_BIN, db)
+        dao.fetch_building_footprint_geometry(_BIN)
 
 
 def test_fetch_building_geometry_empty_geom(tmp_path):
-    """When the geometry field is empty, fetch_building_geometry should raise ValueError."""
+    """When the geometry field is empty, fetch_building_footprint_geometry should raise ValueError."""
     db = _make_db(tmp_path, _BIN, "")
-    # The row exists but the_geom is an empty string → falsy
-    with pytest.raises(ValueError, match=_BIN):
-        fetch_building_geometry(_BIN, db)
+    dao = DOBDBDAO(db)
+    with pytest.raises(ValueError):
+        dao.fetch_building_footprint_geometry(_BIN)
 
 
 def test_fetch_building_geometry_returns_polygon(tmp_path):
-    """When a valid WKT polygon is stored, fetch_building_geometry should return a shapely geometry."""
+    """When a valid WKT polygon is stored, fetch_building_footprint_geometry returns a shapely geometry."""
     db = _make_db(tmp_path, _BIN, _POLY_WKT)
-    geom = fetch_building_geometry(_BIN, db)
+    dao = DOBDBDAO(db)
+    geom = dao.fetch_building_footprint_geometry(_BIN)
     assert not geom.is_empty
     minx, miny, maxx, maxy = geom.bounds
     assert minx == pytest.approx(912600.0)
@@ -89,7 +110,7 @@ def test_build_building_heightmap_bin_not_found(tmp_path):
     tile_dir = tmp_path / "tiles"
     tile_dir.mkdir()
     with pytest.raises(ValueError):
-        build_building_heightmap(_BIN, db, tile_dir)
+        build_building_heightmap(_BIN, DOBDBDAO(db), FsTileProvider(tile_dir))
 
 
 def test_build_building_heightmap_no_tiles(tmp_path):
@@ -102,7 +123,7 @@ def test_build_building_heightmap_no_tiles(tmp_path):
         return_value=[],
     ):
         with pytest.raises(ValueError, match="No preprocessed tiles"):
-            build_building_heightmap(_BIN, db, tile_dir)
+            build_building_heightmap(_BIN, DOBDBDAO(db), FsTileProvider(tile_dir))
 
 
 # ---------------------------------------------------------------------------
@@ -115,28 +136,22 @@ def test_build_building_heightmap_blits_correct_region(tmp_path):
     tile_dir = tmp_path / "tiles"
     tile_dir.mkdir()
 
-    # Fill the tile with a known value; the building polygon covers
-    # tile pixels [100:200, 100:200] (since x_sw=912600 = tile_x+100).
     fill_value = 720  # 60 ft in inches
     raster = np.zeros((500, 500), dtype=np.uint16)
     raster[100:200, 100:200] = fill_value
     tifffile.imwrite(str(tile_dir / f"{_TILE_ID}.tif"), raster)
 
-    heightmap, mask, poly, x_sw, y_sw, tile_ids = build_building_heightmap(
-        _BIN, db, tile_dir
-    )
+    result = build_building_heightmap(_BIN, DOBDBDAO(db), FsTileProvider(tile_dir))
 
-    assert heightmap.shape == (100, 100)
-    assert x_sw == 912600
-    assert y_sw == 117600
-    # All pixels inside the mask should have the fill value
-    assert (heightmap[mask == 255] == fill_value).all()
-    assert _TILE_ID in tile_ids
+    assert isinstance(result, RooftopHeightMap)
+    assert result.heightmap.shape == (100, 100)
+    assert result.x_sw == 912600
+    assert result.y_sw == 117600
+    assert (result.heightmap[result.mask == 255] == fill_value).all()
 
 
 def test_build_building_heightmap_zeros_outside_mask(tmp_path):
     """Pixels outside the footprint mask should be zeroed out."""
-    # Use a triangular polygon so some grid pixels are outside
     triangle_wkt = (
         "POLYGON ((912600 117600, 912700 117600, 912700 117700, 912600 117600))"
     )
@@ -146,22 +161,14 @@ def test_build_building_heightmap_zeros_outside_mask(tmp_path):
     raster = np.full((500, 500), 500, dtype=np.uint16)
     tifffile.imwrite(str(tile_dir / f"{_TILE_ID}.tif"), raster)
 
-    heightmap, mask, poly, x_sw, y_sw, _ = build_building_heightmap(
-        _BIN, db, tile_dir
-    )
+    result = build_building_heightmap(_BIN, DOBDBDAO(db), FsTileProvider(tile_dir))
 
-    # Pixels outside the mask must be 0
-    outside = mask == 0
-    assert (heightmap[outside] == 0).all()
+    outside = result.mask == 0
+    assert (result.heightmap[outside] == 0).all()
 
 
 def test_build_building_heightmap_mask_uses_buffer(tmp_path):
-    """The mask rasterizer should include boundary-crossing pixels (0.5 ft buffer).
-
-    The polygon is tiny (0.3×0.3 ft) so the pixel centre at offset (0.5, 0.5)
-    is outside the polygon itself, but inside the 0.5 ft buffer — so it should
-    be included in the mask.
-    """
+    """The mask rasterizer should include boundary-crossing pixels (0.5 ft buffer)."""
     tiny_poly_wkt = (
         "POLYGON ((912600 117600, 912600.3 117600, "
         "912600.3 117600.3, 912600 117600.3, 912600 117600))"
@@ -172,18 +179,13 @@ def test_build_building_heightmap_mask_uses_buffer(tmp_path):
     raster = np.full((500, 500), 600, dtype=np.uint16)
     tifffile.imwrite(str(tile_dir / f"{_TILE_ID}.tif"), raster)
 
-    heightmap, mask, poly, x_sw, y_sw, _ = build_building_heightmap(
-        _BIN, db, tile_dir
-    )
+    result = build_building_heightmap(_BIN, DOBDBDAO(db), FsTileProvider(tile_dir))
 
-    # The single pixel whose centre is at (x_sw+0.5, y_sw+0.5) = (912600.5, 117600.5)
-    # is 0.2 ft east of the polygon east edge (912600.3), well within 0.5 ft buffer.
-    assert mask[0, 0] == 255
+    assert result.mask[0, 0] == 255
 
 
 def test_build_building_heightmap_partial_tile_overlap(tmp_path):
     """When the building spans two tiles, both tiles should be blitted."""
-    # Building straddles tiles "912117_00" (912500–913000) and "912117_10" (913000–913500)
     cross_poly_wkt = (
         "POLYGON ((912990 117600, 913010 117600, 913010 117700, 912990 117700, 912990 117600))"
     )
@@ -191,50 +193,37 @@ def test_build_building_heightmap_partial_tile_overlap(tmp_path):
     tile_dir = tmp_path / "tiles"
     tile_dir.mkdir()
 
-    # Tile "912117_00": x_offset=912500, fill pixels [490:500, 100:200] with 720
     raster_00 = np.zeros((500, 500), dtype=np.uint16)
-    raster_00[490:500, 100:200] = 720  # last 10 columns that overlap building
+    raster_00[490:500, 100:200] = 720
     tifffile.imwrite(str(tile_dir / "912117_00.tif"), raster_00)
 
-    # Tile "912117_10": x_offset=913000, fill pixels [0:10, 100:200] with 840
     raster_10 = np.zeros((500, 500), dtype=np.uint16)
-    raster_10[0:10, 100:200] = 840  # first 10 columns that overlap building
+    raster_10[0:10, 100:200] = 840
     tifffile.imwrite(str(tile_dir / "912117_10.tif"), raster_10)
 
-    heightmap, mask, poly, x_sw, y_sw, tile_ids = build_building_heightmap(
-        _BIN, db, tile_dir
-    )
+    result = build_building_heightmap(_BIN, DOBDBDAO(db), FsTileProvider(tile_dir))
 
-    assert x_sw == 912990
-    assert y_sw == 117600
+    assert result.x_sw == 912990
+    assert result.y_sw == 117600
 
-    # West half (local x 0:10) should come from tile "912117_00"
-    west_vals = heightmap[0:10, :][mask[0:10, :] == 255]
+    west_vals = result.heightmap[0:10, :][result.mask[0:10, :] == 255]
     if west_vals.size > 0:
         assert (west_vals == 720).all()
 
-    # East half (local x 10:20) should come from tile "912117_10"
-    east_vals = heightmap[10:20, :][mask[10:20, :] == 255]
+    east_vals = result.heightmap[10:20, :][result.mask[10:20, :] == 255]
     if east_vals.size > 0:
         assert (east_vals == 840).all()
 
-    assert "912117_00" in tile_ids
-    assert "912117_10" in tile_ids
-
 
 def test_build_building_heightmap_skips_missing_tile(tmp_path):
-    """When a tile file is missing on disk, the function should proceed with zeros."""
+    """When a tile file is missing on disk, the heightmap should be all zeros."""
     db = _make_db(tmp_path, _BIN, _POLY_WKT)
     tile_dir = tmp_path / "tiles"
     tile_dir.mkdir()
-    # Do NOT create the tile file
+    # Do NOT create the tile file — FsTileProvider returns zeros for missing tiles
 
-    # Should not raise; the heightmap is all zeros (tile was skipped)
-    heightmap, mask, poly, x_sw, y_sw, tile_ids = build_building_heightmap(
-        _BIN, db, tile_dir
-    )
-    assert (heightmap == 0).all()
-    assert tile_ids == []
+    result = build_building_heightmap(_BIN, DOBDBDAO(db), FsTileProvider(tile_dir))
+    assert (result.heightmap == 0).all()
 
 
 def test_build_building_heightmap_returns_correct_sw_corner(tmp_path):
@@ -242,11 +231,12 @@ def test_build_building_heightmap_returns_correct_sw_corner(tmp_path):
     db = _make_db(tmp_path, _BIN, _POLY_WKT)
     tile_dir = tmp_path / "tiles"
     tile_dir.mkdir()
-    _make_tile(tile_dir, _TILE_ID, _TILE_X, _TILE_Y)
+    raster = np.full((500, 500), 1000, dtype=np.uint16)
+    tifffile.imwrite(str(tile_dir / f"{_TILE_ID}.tif"), raster)
 
-    _, _, _, x_sw, y_sw, _ = build_building_heightmap(_BIN, db, tile_dir)
-    assert x_sw == 912600
-    assert y_sw == 117600
+    result = build_building_heightmap(_BIN, DOBDBDAO(db), FsTileProvider(tile_dir))
+    assert result.x_sw == 912600
+    assert result.y_sw == 117600
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +274,8 @@ def test_filter_does_not_modify_input():
 def test_filter_replaces_spike_with_local_median():
     """A single spike pixel surrounded by uniform neighbours should be corrected."""
     W, H = 15, 15
-    base = 600  # ~50 ft in inches
-    spike = 60000  # ~5000 ft — absurd spike
+    base = 600
+    spike = 60000
 
     heightmap = np.full((W, H), base, dtype=np.uint16)
     mask = np.full((W, H), 255, dtype=np.uint8)
@@ -295,9 +285,7 @@ def test_filter_replaces_spike_with_local_median():
 
     result = filter_heightmap_outliers(heightmap, mask, radius=3.0, threshold_sigma=3.0)
 
-    # Spike should have been replaced by the median of its neighbours (~base)
     assert result[cx, cy] != spike
-    # Neighbours should be unchanged
     assert result[cx - 1, cy] == base
     assert result[cx + 1, cy] == base
 
@@ -307,9 +295,8 @@ def test_filter_outside_mask_pixels_unchanged():
     W, H = 15, 15
     heightmap = np.full((W, H), 600, dtype=np.uint16)
     mask = np.zeros((W, H), dtype=np.uint8)
-    # Only the centre pixel is in the mask
     mask[7, 7] = 255
-    heightmap[0, 0] = 60000  # spike outside mask
+    heightmap[0, 0] = 60000
 
     result = filter_heightmap_outliers(heightmap, mask, radius=3.0)
     assert result[0, 0] == 60000
@@ -320,10 +307,9 @@ def test_filter_non_outlier_pixels_not_replaced():
     W, H = 15, 15
     heightmap = np.zeros((W, H), dtype=np.uint16)
     for i in range(W):
-        heightmap[i, :] = 600 + i * 2  # gentle ramp
+        heightmap[i, :] = 600 + i * 2
     mask = np.full((W, H), 255, dtype=np.uint8)
 
-    # threshold_sigma=100 means nothing will be flagged as an outlier
     result = filter_heightmap_outliers(heightmap, mask, radius=3.0, threshold_sigma=100.0)
     np.testing.assert_array_equal(result, heightmap)
 
