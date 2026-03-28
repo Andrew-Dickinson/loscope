@@ -12,7 +12,7 @@ from pathlib import Path
 from .io import save_tile
 from .rasterize import build_height_grid, fill_gaps
 from .tile import split_tiles
-from .tile_id import file_id_to_offset
+from .tile_id import las_file_id_to_offset
 
 
 def run_preprocessing(las_file, out_dir="data/preprocessed"):
@@ -21,7 +21,7 @@ def run_preprocessing(las_file, out_dir="data/preprocessed"):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     file_id = las_file.stem
-    origin = file_id_to_offset(file_id)
+    origin = las_file_id_to_offset(file_id)
 
     print(f"Processing {las_file.name}  origin={origin}")
     height_grid, data_count = build_height_grid(str(las_file), origin)

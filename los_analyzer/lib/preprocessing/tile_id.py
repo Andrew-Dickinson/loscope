@@ -14,7 +14,7 @@ def fname_int_to_coordinate(fname_str):
     return fname_int * 1000
 
 
-def file_id_to_offset(file_id):
+def las_file_id_to_offset(file_id):
     x_min = fname_int_to_coordinate(file_id[:-3])
     y_min = fname_int_to_coordinate(file_id[-3:])
     if x_min < 500000:
@@ -26,7 +26,7 @@ def tile_id_to_offset(tile_id):
     parts = tile_id.rsplit("_", 1)
     file_id = parts[0]
     xi, yi = int(parts[1][0]), int(parts[1][1])
-    origin = file_id_to_offset(file_id)
+    origin = las_file_id_to_offset(file_id)
     x_offset = origin[0] + xi * TILE_SIDE_USFT
     y_offset = origin[1] + yi * TILE_SIDE_USFT
 

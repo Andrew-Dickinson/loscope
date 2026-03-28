@@ -16,6 +16,10 @@ import shapely
 from shapely import wkt
 from shapely.geometry.base import BaseGeometry
 
+from los_analyzer.lib.obstructions.building_footprints import _intersecting_tile_ids
+from los_analyzer.lib.providers.dob_db_dao import DOBDBDAO
+from los_analyzer.lib.providers.tile_provider import TileProvider
+
 
 # Precomputed circular neighbor offsets for each supported radius (in pixels).
 # Excludes the centre pixel (self).
@@ -28,40 +32,6 @@ def _circular_offsets(radius: float) -> list[tuple[int, int]]:
         if 0 < di ** 2 + dj ** 2 <= radius ** 2
     ]
 
-from los_analyzer.lib.obstructions.building_footprints import _intersecting_tile_ids
-from los_analyzer.lib.preprocessing.io import load_tile
-
-
-def fetch_building_geometry(bin_id: str, db_path: Path) -> BaseGeometry:
-    """Return the NYS EPSG:6539 shapely geometry for the given BIN.
-
-    Queries the building_footprints table in *db_path* for the row whose
-    ``bin`` column equals *bin_id*.
-
-    Raises:
-        ValueError: If no matching row is found, the geometry field is empty,
-            or the WKT cannot be parsed.
-    """
-    con = sqlite3.connect(str(db_path))
-    con.execute("PRAGMA query_only=ON")
-    row = con.execute(
-        "SELECT the_geom FROM building_footprints WHERE bin = ? LIMIT 1",
-        (bin_id,),
-    ).fetchone()
-    con.close()
-
-    if row is None or not row[0]:
-        raise ValueError(f"BIN {bin_id!r} not found in building_footprints")
-
-    try:
-        geom = wkt.loads(row[0])
-    except Exception as exc:
-        raise ValueError(f"Could not parse geometry for BIN {bin_id!r}: {exc}") from exc
-
-    if geom.is_empty:
-        raise ValueError(f"Empty geometry for BIN {bin_id!r}")
-
-    return geom
 
 @dataclasses.dataclass
 class RooftopHeightMap:
@@ -74,19 +44,14 @@ class RooftopHeightMap:
 
 def build_building_heightmap(
     bin_id: str,
-    db_path: Path,
-    tile_dir: Path,
+    dob_db_dao: DOBDBDAO,
+    tile_provider: TileProvider,
 ) -> RooftopHeightMap:
     """Build a dense heightmap and mask for the given BIN.
 
     Queries the building geometry, identifies the overlapping preprocessed
     LiDAR tiles, blits their height values into a dense (W, H) grid aligned
     to the building footprint bounds, and rasterizes the footprint mask.
-
-    Args:
-        bin_id: Building Identification Number to look up.
-        db_path: Path to the SQLite database containing building_footprints.
-        tile_dir: Directory containing preprocessed LiDAR tile .tif files.
 
     Returns:
         A 6-tuple ``(heightmap, mask, polygon, x_sw, y_sw, tile_ids)`` where:
@@ -106,7 +71,7 @@ def build_building_heightmap(
             tiles intersect the footprint bounds.
     """
     # 1. Fetch boundary (already in NYS EPSG:6539)
-    poly_nys = fetch_building_geometry(bin_id, db_path)
+    poly_nys = dob_db_dao.fetch_building_footprint_geometry(bin_id)
 
     minx, miny, maxx, maxy = poly_nys.bounds
     x_sw = int(np.floor(minx))
@@ -123,15 +88,9 @@ def build_building_heightmap(
 
     # 3. Blit tile heights into the output grid
     heightmap = np.zeros((W, H), dtype=np.uint16)
-    found_tile_ids: list[str] = []
 
     for tile_id in tile_ids:
-        tif_path = tile_dir / f"{tile_id}.tif"
-        if not tif_path.exists():
-            continue
-
-        found_tile_ids.append(tile_id)
-        tile = load_tile(tile_id, tile_dir)
+        tile = tile_provider.get_tile(tile_id)
         tile_w, tile_h = tile.raster.shape  # axes [easting_local, northing_local]
 
         # Overlap in easting

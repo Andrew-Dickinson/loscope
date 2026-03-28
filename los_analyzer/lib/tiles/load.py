@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 
 from los_analyzer.lib.fresnel.fresnel_zone2 import FresnelZone
-from los_analyzer.lib.obstructions.io import load_obstruction, obstructions_for_tile_id
-from los_analyzer.lib.preprocessing.io import load_tile
+from los_analyzer.lib.obstructions.model import Obstruction
+from los_analyzer.lib.providers.obstruction_provider import ObstructionProvider
+from los_analyzer.lib.providers.tile_provider import TileProvider
 
 
 @dataclass
@@ -24,9 +24,9 @@ class TerrainGrid:
 def load_terrain_grid(
     fresnel_zone: FresnelZone,
     tile_ids: list[str],
-    tile_dir: Path,
+    tile_provider: TileProvider,
     obstruction_types: list[str] | str,
-    obstruction_dir:  Path,
+    obstruction_provider: ObstructionProvider,
 ) -> TerrainGrid:
     """Build a TerrainGrid aligned to fresnel_zone by loading tiles and additional obstructions.
 
@@ -40,21 +40,28 @@ def load_terrain_grid(
 
     obstruction_ids_by_type = defaultdict(list)
     for tile_id in tile_ids:
-        tile = load_tile(tile_id, tile_dir)
+        tile = tile_provider.get_tile(tile_id)
         _blit_tile(tile, fresnel_zone, heights)
 
-        obstructions_for_tile = obstructions_for_tile_id(tile_id, obstruction_dir)
+        obstructions_for_tile = obstruction_provider.obstruction_ids_for_tile_id(tile_id)
         for obs_type, obs_ids in obstructions_for_tile.items():
             obstruction_ids_by_type[obs_type].extend(obs_ids)
 
     allowed_types = set(obstruction_types) if obstruction_types != '*' else set(obstruction_ids_by_type.keys())
-    matched_ids = []
+    matched_ids = set()
     for obs_type, obs_ids in obstruction_ids_by_type.items():
         if obs_type in allowed_types:
-            matched_ids.extend(obs_ids)
+            matched_ids = matched_ids.union(set((obs_type, obs_id) for obs_id in obs_ids))
 
-    for obs_id in matched_ids:
-        _apply_obstruction(obs_id, fresnel_zone, heights, obstruction_dir)
+    for obs_type, obs_id in matched_ids:
+        obs = obstruction_provider.get_obstruction(obs_type, obs_id)
+        if obs is None:
+            raise FileNotFoundError(
+                f"Obstruction index refers to ID {obs_id} with type {obs_type}, "
+                f"but provider couldn't find it"
+            )
+
+        _apply_obstruction(obs, fresnel_zone, heights)
 
     return TerrainGrid(
         heights=heights,
@@ -102,13 +109,11 @@ def _blit_tile(tile, fresnel_zone: FresnelZone, heights: np.ndarray) -> None:
 
 
 def _apply_obstruction(
-    obs_id: str,
+    obs: Obstruction,
     fresnel_zone: FresnelZone,
     heights: np.ndarray,
-    obs_dir: Path,
 ) -> None:
     """Apply an additional obstruction to heights using element-wise max."""
-    obs = load_obstruction(obs_id, obs_dir)
     x_off = obs.x_offset
     y_off = obs.y_offset
     obs_w, obs_h = obs.raster.shape  # (W, H): axes [easting_local, northing_local]

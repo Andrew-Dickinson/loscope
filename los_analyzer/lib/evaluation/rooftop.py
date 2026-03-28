@@ -15,6 +15,8 @@ import numpy as np
 from tqdm import tqdm
 
 from los_analyzer.lib.fresnel.fresnel_zone2 import compute_fresnel_zone, FresnelZone
+from los_analyzer.lib.providers.obstruction_provider import ObstructionProvider
+from los_analyzer.lib.providers.tile_provider import TileProvider
 from los_analyzer.lib.tiles.identify import identify_tiles
 from los_analyzer.lib.tiles.intersect import compute_intersection, IntersectionGrid
 from los_analyzer.lib.tiles.load import load_terrain_grid
@@ -99,21 +101,19 @@ def evaluate_point(
     pt_a_nys: tuple[float, float, float],
     pt_b_nys: tuple[float, float, float],
     frequency_hz: float,
-    tile_dir: Path,
-    obstruction_dir: Path | None = None,
+    tile_provider: TileProvider,
+    obstruction_provider: ObstructionProvider,
     obstruction_types: str | list[str] = "*",
 ) -> SamplePointEvaluation:
     zone_full = compute_fresnel_zone(pt_a_nys, pt_b_nys, frequency_hz, alpha=1.0)
     zone_partial = compute_fresnel_zone(pt_a_nys, pt_b_nys, frequency_hz, alpha=0.6)
 
-    # TODO: Fix: missing tiles don't get fetched here
-    tiles = identify_tiles(zone_full, tile_dir, require_exists=True)
-
+    tiles = identify_tiles(zone_full)
     terrain_full = load_terrain_grid(
-        zone_full, tiles, tile_dir, obstruction_types, obstruction_dir
+        zone_full, tiles, tile_provider, obstruction_types, obstruction_provider
     )
     terrain_partial = load_terrain_grid(
-        zone_partial, tiles, tile_dir, obstruction_types, obstruction_dir
+        zone_partial, tiles, tile_provider, obstruction_types, obstruction_provider
     )
 
     intersection_full = compute_intersection(zone_full, terrain_full)

@@ -3,19 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from los_analyzer.lib.fresnel.fresnel_zone2 import FresnelZone
-from los_analyzer.lib.preprocessing.tile_id import LAS_SIDE_USFT, TILE_SIDE_USFT, file_id_to_offset, make_tile_id
+from los_analyzer.lib.preprocessing.tile_id import LAS_SIDE_USFT, TILE_SIDE_USFT, make_tile_id
 
 # SW corner of the canonical LAS tile grid (file_id "912117").
 _GRID_BASE_E = 912500
 _GRID_BASE_N = 117500
 
 
-def identify_tiles(
-    fresnel_zone: FresnelZone,
-    tile_dir: str | Path | None = None,
-    *,
-    require_exists: bool = True,
-) -> list[str]:
+def identify_tiles(fresnel_zone: FresnelZone) -> list[str]:
     """Return IDs of preprocessed tiles that overlap the fresnel zone.
 
     Derives tile membership from the FresnelZone width-offset encoding: for each
@@ -24,12 +19,6 @@ def identify_tiles(
 
     Args:
         fresnel_zone: The FresnelZone from Step 2.1.
-        tile_dir: Directory containing preprocessed tile .tif files. Required
-            when require_exists=True; ignored when require_exists=False.
-        require_exists: If True (default), scan tile_dir for *.json files and
-            return only those that overlap the zone. If False, compute tile IDs
-            purely from coordinates using the canonical grid, with no filesystem
-            access needed.
     """
     # Collect the set of 500-usft SW-corner (easting, northing) positions covered.
     covered: set[tuple[int, int]] = set()
@@ -48,27 +37,13 @@ def identify_tiles(
             covered.add((e_base, n_base))
             e_base += TILE_SIDE_USFT
 
-    if not require_exists:
-        result = []
-        for pos in sorted(covered):
-            tile_id = _tile_id_from_sw_corner(*pos)
-            if tile_id is not None:
-                result.append(tile_id)
-        return result
-
-    if tile_dir is None:
-        raise ValueError("tile_dir is required when require_exists=True")
     result = []
-    for tif_path in sorted(Path(tile_dir).glob("*.tif")):
-        tile_id = tif_path.stem
-        file_id, xi, yi = _parse_tile_id(tile_id)
-        if file_id is None:
-            continue
-        origin = file_id_to_offset(file_id)
-        e_base = origin[0] + xi * TILE_SIDE_USFT
-        n_base = origin[1] + yi * TILE_SIDE_USFT
-        if (e_base, n_base) in covered:
+    for pos in sorted(covered):
+        tile_id = _tile_id_from_sw_corner(*pos)
+        if tile_id is not None:
             result.append(tile_id)
+
+    # TODO: For efficiency, we may want to pre-warm the tile cache here with these ids
 
     return result
 
