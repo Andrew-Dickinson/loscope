@@ -181,12 +181,6 @@ def compute_fresnel_zone(
         y_base_offset=base_offsets[1]
     )
 
-def translate_to_nys_plane(gps_points: list[tuple[float, float, float]]) -> list[tuple[float, float, float]]:
-    nys_crs = pyproj.CRS.from_string("EPSG:6539+6360")
-    gps_crs = pyproj.CRS.from_string("EPSG:4326+5773")
-    gps_to_nys = pyproj.Transformer.from_crs(gps_crs, nys_crs, always_xy=False)
-    return [gps_to_nys.transform(*point) for point in gps_points]
-
 def homogenous_rotation_matrix_ellipsoid_to_nys(ctx: AngleContext):
     return np.array([
         [ctx.cos_phi * ctx.sin_theta * ctx.cos_rho, - ctx.cos_theta * ctx.cos_rho, ctx.sin_phi, 0],
