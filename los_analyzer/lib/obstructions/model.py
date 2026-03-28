@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+# TODO: Are these right?
 OBSTRUCTION_TYPE_BUILDING = "building_footprint_since_2021"
 
 OBSTRUCTION_TYPE_NEW_CONSTRUCTION_2021 = "completed_construction_since_2021"
