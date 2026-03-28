@@ -22,6 +22,21 @@ def file_id_to_offset(file_id):
 
     return (x_min, y_min)
 
+def tile_id_to_offset(tile_id):
+    parts = tile_id.rsplit("_", 1)
+    file_id = parts[0]
+    xi, yi = int(parts[1][0]), int(parts[1][1])
+    origin = file_id_to_offset(file_id)
+    x_offset = origin[0] + xi * TILE_SIDE_USFT
+    y_offset = origin[1] + yi * TILE_SIDE_USFT
+
+    return x_offset, y_offset
+
+def tile_id_to_bounds(tile_id):
+    x_min, y_min = tile_id_to_offset(tile_id)
+
+    return x_min, y_min, x_min + TILE_SIDE_USFT, y_min + TILE_SIDE_USFT
+
 
 def make_tile_id(file_id, xi, yi):
     return f"{file_id}_{xi}{yi}"
