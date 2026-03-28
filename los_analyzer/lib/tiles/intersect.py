@@ -37,6 +37,7 @@ def compute_intersection(
     safe_span = np.where(span == 0.0, 1.0, span)
 
     values = np.clip((terrain_h - bottom) / safe_span, 0.0, 1.0).astype(np.float32)
+    values[top <= 0] = 1 # If the top is below the ground, we count this as 100% intersection
 
     # Zero out entries beyond each row's valid width
     H, maxW = values.shape
