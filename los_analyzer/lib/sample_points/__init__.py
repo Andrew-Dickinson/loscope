@@ -53,14 +53,14 @@ def get_paired_sample_points(model: RooftopHeightMap, sample_spacing: int, mast_
     by mast_offset
     """
     raw_pts = generate_sample_points(
-        model['heightmap'], model["x_sw"],  model["y_sw"], sample_spacing,
-        mask=model["mask"], polygon=model["poly_nys"],
+        model.heightmap, model.x_sw,  model.y_sw, sample_spacing,
+        mask=model.mask, polygon=model.poly_nys,
     )
     display_pts, measurement_pts = apply_mast_offset(raw_pts, mast_offset)
     return  [
         cast(SamplePoint, {
-            "display_point": point_encode(dp, model["x_sw"], model["y_sw"]),
-            "measurement_point": point_encode(mp, model["x_sw"], model["y_sw"]),
+            "display_point": point_encode(dp, model.x_sw, model.y_sw),
+            "measurement_point": point_encode(mp, model.x_sw, model.y_sw),
         })
         for dp, mp in zip(display_pts, measurement_pts)
     ]

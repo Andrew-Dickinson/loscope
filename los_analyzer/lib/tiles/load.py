@@ -44,12 +44,12 @@ def load_terrain_grid(
         _blit_tile(tile, fresnel_zone, heights)
 
         obstructions_for_tile = obstructions_for_tile_id(tile_id, obstruction_dir)
-        for obs_type, obs_ids in obstructions_for_tile:
+        for obs_type, obs_ids in obstructions_for_tile.items():
             obstruction_ids_by_type[obs_type].extend(obs_ids)
 
     allowed_types = set(obstruction_types) if obstruction_types != '*' else set(obstruction_ids_by_type.keys())
     matched_ids = []
-    for obs_type, obs_ids in obstruction_ids_by_type:
+    for obs_type, obs_ids in obstruction_ids_by_type.items():
         if obs_type in allowed_types:
             matched_ids.extend(obs_ids)
 
