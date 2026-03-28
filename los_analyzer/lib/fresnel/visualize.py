@@ -1,4 +1,5 @@
 from io import BytesIO
+from typing import Optional
 
 import numpy as np
 
@@ -8,7 +9,7 @@ from los_analyzer.lib.preprocessing.tile_id import TILE_SIDE_USFT
 from los_analyzer.lib.tiles.rasterize import rasterize_stairstep_grid_for_tile
 
 
-def create_zone_obj(zone: FresnelZone, tile_id: str) -> BytesIO:
+def create_zone_obj(zone: FresnelZone, tile_id: str) -> Optional[BytesIO]:
     """Create a Minecraft-style Fresnel zone volume OBJ for one tile.
 
     Coordinate system:
@@ -38,6 +39,9 @@ def create_zone_obj(zone: FresnelZone, tile_id: str) -> BytesIO:
         np.ones(shape=zone.bottom.shape, dtype=bool),
         (zone.x_base_offset, zone.y_base_offset)
     )
+
+    if (in_zone == False).all():
+        return None
 
     output_buffer = EncodingBytesIO()
     f = output_buffer

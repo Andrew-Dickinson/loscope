@@ -1,4 +1,5 @@
 from io import BytesIO
+from typing import Optional
 
 from los_analyzer.lib.io.encoding_bytes_io import EncodingBytesIO
 from los_analyzer.lib.obstructions.model import Obstruction
@@ -8,7 +9,7 @@ from los_analyzer.lib.preprocessing.tile_id import tile_id_to_offset, TILE_SIDE_
 def create_obstruction_obj(
     obstruction: Obstruction,
     tile_id: str,
-) -> BytesIO:
+) -> Optional[BytesIO]:
     """Create OBJ for a given obstruction"""
 
     tile_x_offset, tile_y_offset = tile_id_to_offset(tile_id)
@@ -32,6 +33,9 @@ def create_obstruction_obj(
     xi_hi = min(W, TILE_SIDE_USFT - local_x)
     yi_lo = max(0, -local_y)
     yi_hi = min(H, TILE_SIDE_USFT - local_y)
+
+    if xi_hi <= xi_lo or yi_hi <= yi_lo:
+        return None
 
     vi = 1
     for xi in range(xi_lo, xi_hi):
