@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
 from los_analyzer.lib.fresnel.fresnel_zone2 import FresnelZone
-from los_analyzer.lib.obstructions.io import load_obstruction
+from los_analyzer.lib.obstructions.io import load_obstruction, obstructions_for_tile_id
 from los_analyzer.lib.preprocessing.io import load_tile
 
 
@@ -23,9 +24,9 @@ class TerrainGrid:
 def load_terrain_grid(
     fresnel_zone: FresnelZone,
     tile_ids: list[str],
-    tile_dir: str | Path,
+    tile_dir: Path,
     obstruction_types: list[str] | str,
-    obstruction_dir: str | Path | None = None,
+    obstruction_dir:  Path,
 ) -> TerrainGrid:
     """Build a TerrainGrid aligned to fresnel_zone by loading tiles and additional obstructions.
 
@@ -33,22 +34,27 @@ def load_terrain_grid(
     those whose type string is in the list are included.  obstruction_dir is the directory
     containing obstruction tif+json pairs; if None, obstruction loading is skipped.
     """
-    tile_dir = Path(tile_dir)
     H = int(fresnel_zone.widths.shape[0])
     max_w = fresnel_zone.top.shape[1] if H > 0 else 1
     heights = np.zeros((H, max_w), dtype=np.uint16)
 
+    obstruction_ids_by_type = defaultdict(list)
     for tile_id in tile_ids:
         tile = load_tile(tile_id, tile_dir)
         _blit_tile(tile, fresnel_zone, heights)
 
-    obs_dir = Path(obstruction_dir) if obstruction_dir is not None else None
-    seed_ids = _scan_obstruction_dir(obs_dir) if obs_dir is not None else set()
-    matched_ids = _filter_obstruction_ids(seed_ids, obstruction_types, obs_dir)
+        obstructions_for_tile = obstructions_for_tile_id(tile_id, obstruction_dir)
+        for obs_type, obs_ids in obstructions_for_tile:
+            obstruction_ids_by_type[obs_type].extend(obs_ids)
 
-    if obs_dir is not None:
-        for obs_id in matched_ids:
-            _apply_obstruction(obs_id, fresnel_zone, heights, obs_dir)
+    allowed_types = set(obstruction_types) if obstruction_types != '*' else set(obstruction_ids_by_type.keys())
+    matched_ids = []
+    for obs_type, obs_ids in obstruction_ids_by_type:
+        if obs_type in allowed_types:
+            matched_ids.extend(obs_ids)
+
+    for obs_id in matched_ids:
+        _apply_obstruction(obs_id, fresnel_zone, heights, obstruction_dir)
 
     return TerrainGrid(
         heights=heights,
@@ -93,44 +99,6 @@ def _blit_tile(tile, fresnel_zone: FresnelZone, heights: np.ndarray) -> None:
         dx_end = overlap_e_end - x_off
 
         heights[i, j_start:j_end] = tile.raster[dx_start:dx_end, dy]
-
-
-def _scan_obstruction_dir(obs_dir: Path) -> set[str]:
-    """Return all obstruction IDs present in obs_dir (stems of *.json files)."""
-    return {
-        p.stem
-        for p in obs_dir.glob("*.json")
-        if p.stem not in ("index",) and not p.stem.startswith("_")
-    }
-
-
-def _filter_obstruction_ids(
-    obstruction_ids: set[str],
-    obstruction_types: list[str] | str,
-    obs_dir: Path | None = None,
-) -> list[str]:
-    """Return sorted obstruction IDs matching the type filter.
-
-    When obstruction_types='*' all IDs are returned.  Otherwise each obstruction's
-    JSON metadata is read to check its type against the allowed list.  If obs_dir is
-    None, type checking is skipped and all IDs are returned.
-    """
-    if not obstruction_ids:
-        return []
-    if obstruction_types == "*" or obs_dir is None:
-        return sorted(obstruction_ids)
-    import json
-    allowed = set(obstruction_types)
-    matched = []
-    for obs_id in sorted(obstruction_ids):
-        json_path = obs_dir / f"{obs_id}.json"
-        try:
-            meta = json.loads(json_path.read_text())
-            if meta.get("obstruction_type") in allowed:
-                matched.append(obs_id)
-        except (FileNotFoundError, ValueError):
-            pass
-    return matched
 
 
 def _apply_obstruction(

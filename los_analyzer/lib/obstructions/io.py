@@ -1,5 +1,7 @@
 import json
+from collections import defaultdict
 from pathlib import Path
+from typing import List, Dict
 
 import numpy as np
 import tifffile
@@ -49,3 +51,17 @@ def load_obstruction(obstruction_id: str, obs_dir: str | Path) -> Obstruction:
         y_offset=meta["y_offset"],
         raster=raster,
     )
+
+
+def obstructions_for_tile_id(tile_id: str, obs_dir: Path) -> Dict[str, List[str]]:
+    # TODO: We need to pull these indexes from S3 if they don't already exist
+    obstructions_by_type = defaultdict(list)
+    index_dir = obs_dir / "_index"
+    for index_path in sorted(index_dir.glob("*.json")):
+        obs_type = index_path.name.removesuffix(".json")
+        index = json.loads(index_path.read_text())
+        tile_obstructions = index.get(tile_id)
+        if tile_obstructions:
+            obstructions_by_type[obs_type].extend(tile_obstructions)
+
+    return dict(obstructions_by_type)
