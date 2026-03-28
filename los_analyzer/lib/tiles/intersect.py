@@ -4,12 +4,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lib.fresnel.fresnel_zone2 import FresnelZone
-from lib.tiles.load import TerrainGrid
+from los_analyzer.lib.fresnel.fresnel_zone2 import FresnelZone
+from los_analyzer.lib.tiles.load import TerrainGrid
 
 
 @dataclass
-class ObstructionGrid:
+class IntersectionGrid:
     values: np.ndarray    # float32, shape (H, maxW); row i has widths[i] valid entries
     widths: np.ndarray    # uint32, shape (H,); copied from FresnelZone
     offsets: np.ndarray   # uint32, shape (H,); copied from FresnelZone
@@ -20,7 +20,7 @@ class ObstructionGrid:
 def compute_intersection(
     fresnel_zone: FresnelZone,
     terrain: TerrainGrid,
-) -> ObstructionGrid:
+) -> IntersectionGrid:
     """Compute the per-cell obstruction level from a FresnelZone and a TerrainGrid.
 
     For each valid cell: (terrain - bottom) / (top - bottom), clipped to [0, 1].
@@ -46,7 +46,7 @@ def compute_intersection(
         if w < maxW:
             values[i, w:] = 0.0
 
-    return ObstructionGrid(
+    return IntersectionGrid(
         values=values,
         widths=fresnel_zone.widths.copy(),
         offsets=fresnel_zone.offsets.copy(),
