@@ -133,3 +133,57 @@ def test_comma_formatted_numbers_parse_correctly():
     assert obs is not None
     nonzero = obs.raster[obs.raster > 0]
     assert (nonzero == (1032 + 12) * 12).all()
+
+
+def test_invalid_wkt_returns_none():
+    """When the_geom is not valid WKT, parse_building_row should return None."""
+    row = {**SAMPLE_ROW, "the_geom": "INVALID WKT!!!"}
+    assert parse_building_row(row) is None
+
+
+def test_empty_geometry_returns_none():
+    """When the_geom is an empty WKT geometry, parse_building_row should return None."""
+    row = {**SAMPLE_ROW, "the_geom": "MULTIPOLYGON EMPTY"}
+    assert parse_building_row(row) is None
+
+
+def test_process_csv_writes_tif_and_json(tmp_path):
+    """process_csv should write one .tif and one .json per valid building row."""
+    import csv as csv_mod
+    from los_analyzer.lib.obstructions.building_footprints import process_csv
+
+    csv_path = tmp_path / "buildings.csv"
+    out_dir = tmp_path / "out"
+    fields = list(SAMPLE_ROW.keys())
+    with open(csv_path, "w", newline="") as f:
+        writer = csv_mod.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerow(SAMPLE_ROW)
+
+    ids = process_csv(csv_path, out_dir)
+
+    assert len(ids) == 1
+    assert len(list(out_dir.glob("*.tif"))) == 1
+    assert len(list(out_dir.glob("*.json"))) == 1
+
+
+def test_process_csv_skips_invalid_rows(tmp_path):
+    """process_csv should skip rows with missing height data and warn."""
+    import csv as csv_mod
+    import warnings
+    from los_analyzer.lib.obstructions.building_footprints import process_csv
+
+    bad_row = {k: v for k, v in SAMPLE_ROW.items() if k != "Ground Elevation"}
+    csv_path = tmp_path / "buildings.csv"
+    fields = list(SAMPLE_ROW.keys())
+    with open(csv_path, "w", newline="") as f:
+        writer = csv_mod.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerow(bad_row)
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        ids = process_csv(csv_path, tmp_path / "out")
+
+    assert ids == []
+    assert any("Skipped" in str(warning.message) for warning in w)

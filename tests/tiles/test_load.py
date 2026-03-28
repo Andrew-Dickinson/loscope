@@ -8,12 +8,13 @@ import pytest
 import tifffile
 
 from los_analyzer.lib.fresnel.fresnel_zone2 import FresnelZone
+from los_analyzer.lib.obstructions.model import Obstruction
 from los_analyzer.lib.preprocessing.io import save_tile
 from los_analyzer.lib.preprocessing.tile import TileData
 from los_analyzer.lib.preprocessing.tile_id import tile_id_to_offset
 from los_analyzer.lib.providers.obstruction_provider import ObstructionProvider
 from los_analyzer.lib.providers.tile_provider import TileProvider
-from los_analyzer.lib.tiles.load import TerrainGrid, load_terrain_grid
+from los_analyzer.lib.tiles.load import TerrainGrid, _apply_obstruction, load_terrain_grid
 
 
 # ---------------------------------------------------------------------------
@@ -203,3 +204,117 @@ def test_matched_obstruction_ids_empty_when_no_tiles(tmp_path):
     zone = _make_zone(x_base=1001000, y_base=236000, n_rows=5, e_offset=0, e_width=10)
     result = _load(zone, [], tmp_path, ["Existing Building Footprint"])
     assert not result.matched_obstruction_ids
+
+
+# ---------------------------------------------------------------------------
+# _apply_obstruction — height merging
+# ---------------------------------------------------------------------------
+
+def _make_obstruction(x_offset, y_offset, W, H, value):
+    raster = np.full((W, H), value, dtype=np.uint16)
+    return Obstruction(
+        obstruction_id="test-obs",
+        obstruction_type="test",
+        attributes={},
+        x_offset=x_offset,
+        y_offset=y_offset,
+        raster=raster,
+        tile_ids=[],
+    )
+
+
+def test_apply_obstruction_raises_terrain_to_obstruction_height():
+    """When obstruction is taller than existing heights, heights are raised."""
+    zone = _make_zone(x_base=1001000, y_base=236000, n_rows=5, e_offset=0, e_width=10)
+    heights = np.full((5, 10), 100, dtype=np.uint16)
+    obs = _make_obstruction(1001000, 236000, W=10, H=5, value=500)
+    _apply_obstruction(obs, zone, heights)
+    assert (heights == 500).all()
+
+
+def test_apply_obstruction_does_not_lower_heights():
+    """When terrain is already higher than the obstruction, heights are not reduced."""
+    zone = _make_zone(x_base=1001000, y_base=236000, n_rows=5, e_offset=0, e_width=10)
+    heights = np.full((5, 10), 600, dtype=np.uint16)
+    obs = _make_obstruction(1001000, 236000, W=10, H=5, value=200)
+    _apply_obstruction(obs, zone, heights)
+    assert (heights == 600).all()
+
+
+def test_apply_obstruction_outside_zone_unchanged():
+    """An obstruction that doesn't overlap the zone should not change heights."""
+    zone = _make_zone(x_base=1001000, y_base=236000, n_rows=5, e_offset=0, e_width=10)
+    heights = np.zeros((5, 10), dtype=np.uint16)
+    obs = _make_obstruction(1010000, 250000, W=100, H=100, value=999)
+    _apply_obstruction(obs, zone, heights)
+    assert (heights == 0).all()
+
+
+def test_apply_obstruction_partial_overlap_only_overlapping_cells_raised():
+    """Only the overlapping region of the obstruction should affect heights."""
+    zone = _make_zone(x_base=1001000, y_base=236000, n_rows=5, e_offset=0, e_width=20)
+    heights = np.zeros((5, 20), dtype=np.uint16)
+    # Obstruction covers x=[1001010, 1001020), only cols 10..19 in the zone
+    obs = _make_obstruction(1001010, 236000, W=10, H=5, value=300)
+    _apply_obstruction(obs, zone, heights)
+    assert (heights[:, :10] == 0).all()
+    assert (heights[:, 10:20] == 300).all()
+
+
+# ---------------------------------------------------------------------------
+# load_terrain_grid with real obstruction provider
+# ---------------------------------------------------------------------------
+
+class _SingleObstructionProvider(ObstructionProvider):
+    """Returns a single obstruction for a specific tile_id."""
+
+    def __init__(self, tile_id, obs_type, obs_id, obstruction):
+        self._tile_id = tile_id
+        self._obs_type = obs_type
+        self._obs_id = obs_id
+        self._obs = obstruction
+
+    def obstruction_ids_for_tile_id(self, tile_id):
+        if tile_id == self._tile_id:
+            return {self._obs_type: [self._obs_id]}
+        return {}
+
+    def get_obstruction(self, obs_type, obs_id):
+        if obs_type == self._obs_type and obs_id == self._obs_id:
+            return self._obs
+        return None
+
+
+def test_load_terrain_grid_applies_obstruction(tmp_path):
+    """When a tile has an associated obstruction, its heights are merged into TerrainGrid."""
+    zone = _make_zone(x_base=1001000, y_base=236000, n_rows=5, e_offset=0, e_width=10)
+    save_tile(_flat_tile("235_22", x_offset=1001000, y_offset=236000, fill=100), tmp_path)
+
+    # Obstruction taller than tile everywhere
+    obs = _make_obstruction(1001000, 236000, W=10, H=5, value=500)
+    obs_provider = _SingleObstructionProvider("235_22", "building", "obs-1", obs)
+
+    result = load_terrain_grid(
+        zone, ["235_22"],
+        FsTileProvider(tmp_path),
+        "*",
+        obs_provider,
+    )
+    assert (result.heights[:5, :10] == 500).all()
+
+
+def test_load_terrain_grid_obstruction_type_filter(tmp_path):
+    """When obstruction type is not in the allowed list, it should be ignored."""
+    zone = _make_zone(x_base=1001000, y_base=236000, n_rows=5, e_offset=0, e_width=10)
+    save_tile(_flat_tile("235_22", x_offset=1001000, y_offset=236000, fill=100), tmp_path)
+
+    obs = _make_obstruction(1001000, 236000, W=10, H=5, value=500)
+    obs_provider = _SingleObstructionProvider("235_22", "building", "obs-1", obs)
+
+    result = load_terrain_grid(
+        zone, ["235_22"],
+        FsTileProvider(tmp_path),
+        ["other_type"],   # "building" not included → obstruction ignored
+        obs_provider,
+    )
+    assert (result.heights[:5, :10] == 100).all()  # tile height unchanged
