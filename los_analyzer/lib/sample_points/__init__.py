@@ -1,9 +1,7 @@
 """3D sample point generation from a building heightmap."""
 from __future__ import annotations
 
-from cachetools import cached, LRUCache
-from cachetools.keys import hashkey
-from typing import NamedTuple, List, cast
+from typing import List, cast
 
 import numpy as np
 import shapely
@@ -47,10 +45,6 @@ class SamplePoint(TypedDict):
     display_point: EncodedPoint
     measurement_point: EncodedPoint
 
-@cached(
-    cache=LRUCache(128),
-    key=lambda model, sample_spacing, mast_offset: hashkey(model['bin_id'], sample_spacing, mast_offset)
-)
 def get_paired_sample_points(model: RooftopHeightMap, sample_spacing: int, mast_offset: float) -> List[SamplePoint]:
     """
     Given a hieghtmap representing a rooftop, generate points which are roughly evenly spaced over the rooftop based

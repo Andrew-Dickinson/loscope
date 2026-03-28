@@ -6,7 +6,6 @@ dense grid aligned to the building footprint bounds.
 """
 from __future__ import annotations
 
-from cachetools import cached, LRUCache
 import sqlite3
 from pathlib import Path
 from typing import NamedTuple, TypedDict
@@ -72,7 +71,6 @@ class RooftopHeightMap(TypedDict):
     mask: np.ndarray
     poly_nys: BaseGeometry
 
-@cached(cache=LRUCache(128))
 def build_building_heightmap(
     bin_id: str,
     db_path: Path,
