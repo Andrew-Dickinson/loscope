@@ -9,28 +9,36 @@ from __future__ import annotations
 import dataclasses
 from enum import Enum
 from pathlib import Path
+from typing import List
 
 import numpy as np
 from tqdm import tqdm
 
-from lib.fresnel.fresnel_zone2 import compute_fresnel_zone
-from lib.tiles.identify import identify_tiles
-from lib.tiles.intersect import compute_intersection
-from lib.tiles.load import load_terrain_grid
+from los_analyzer.lib.fresnel.fresnel_zone2 import compute_fresnel_zone, FresnelZone
+from los_analyzer.lib.tiles.identify import identify_tiles
+from los_analyzer.lib.tiles.intersect import compute_intersection, IntersectionGrid
+from los_analyzer.lib.tiles.load import load_terrain_grid
 
 
 class ObstructionStatus(str, Enum):
     UNOBSTRUCTED = "unobstructed"
     PARTIALLY_OBSTRUCTED = "partially_obstructed"  # alpha=1.0 blocked, alpha=0.6 clear
-    FULLY_OBSTRUCTED = "fully_obstructed"  # alpha=0.6 blocked
+    OBSTRUCTED = "obstructed"  # alpha=0.6 blocked
 
 
 @dataclasses.dataclass
 class SamplePointEvaluation:
-    point: np.ndarray  # (3,) float64 [easting, northing, z_feet]
+    point_a_nys: tuple[float, float, float]  # (3,) float64 [easting, northing, z_feet]
+    point_b_nys: tuple[float, float, float]  # (3,) float64 [easting, northing, z_feet]
     status: ObstructionStatus
-    max_obstruction_alpha1: float  # max obstruction value in zone with alpha=1.0
-    max_obstruction_alpha06: float  # max obstruction value in zone with alpha=0.6
+    max_obstruction_full: float  # max obstruction value in zone with alpha=1.0
+    max_obstruction_partial: float  # max obstruction value in zone with alpha=0.6
+    tile_ids: List[str]
+    frequency_hz: float
+    zone_full: FresnelZone
+    zone_partial: FresnelZone
+    intersection_full: IntersectionGrid
+    intersection_partial: IntersectionGrid
 
 
 def _valid_max(obs) -> float:
@@ -80,40 +88,57 @@ def evaluate_sample_points(
 
     for pt in tqdm(measurement_pts, desc="Evaluating sample points", unit="pt"):
         p_nys = (float(pt[0]), float(pt[1]), float(pt[2]))
-
-        zone_1 = compute_fresnel_zone(p_nys, common_pt_nys, frequency_hz, alpha=1.0)
-        zone_06 = compute_fresnel_zone(p_nys, common_pt_nys, frequency_hz, alpha=0.6)
-
-        tiles_1 = identify_tiles(zone_1, tile_dir, require_exists=True)
-        tiles_06 = identify_tiles(zone_06, tile_dir, require_exists=True)
-
-        terrain_1 = load_terrain_grid(
-            zone_1, tiles_1, tile_dir, obstruction_types, obstruction_dir
-        )
-        terrain_06 = load_terrain_grid(
-            zone_06, tiles_06, tile_dir, obstruction_types, obstruction_dir
-        )
-
-        obs_1 = compute_intersection(zone_1, terrain_1)
-        obs_06 = compute_intersection(zone_06, terrain_06)
-
-        max_1 = _valid_max(obs_1)
-        max_06 = _valid_max(obs_06)
-
-        if max_1 == 0.0:
-            status = ObstructionStatus.UNOBSTRUCTED
-        elif max_06 == 0.0:
-            status = ObstructionStatus.PARTIALLY_OBSTRUCTED
-        else:
-            status = ObstructionStatus.FULLY_OBSTRUCTED
-
         results.append(
-            SamplePointEvaluation(
-                point=np.array(pt, dtype=np.float64),
-                status=status,
-                max_obstruction_alpha1=max_1,
-                max_obstruction_alpha06=max_06,
-            )
+            evaluate_point(p_nys, common_pt_nys, frequency_hz, tile_dir, obstruction_dir, obstruction_types)
         )
 
     return results
+
+
+def evaluate_point(
+    pt_a_nys: tuple[float, float, float],
+    pt_b_nys: tuple[float, float, float],
+    frequency_hz: float,
+    tile_dir: Path,
+    obstruction_dir: Path | None = None,
+    obstruction_types: str | list[str] = "*",
+) -> SamplePointEvaluation:
+    zone_full = compute_fresnel_zone(pt_a_nys, pt_b_nys, frequency_hz, alpha=1.0)
+    zone_partial = compute_fresnel_zone(pt_a_nys, pt_b_nys, frequency_hz, alpha=0.6)
+
+    # TODO: Fix: missing tiles don't get fetched here
+    tiles = identify_tiles(zone_full, tile_dir, require_exists=True)
+
+    terrain_full = load_terrain_grid(
+        zone_full, tiles, tile_dir, obstruction_types, obstruction_dir
+    )
+    terrain_partial = load_terrain_grid(
+        zone_partial, tiles, tile_dir, obstruction_types, obstruction_dir
+    )
+
+    intersection_full = compute_intersection(zone_full, terrain_full)
+    intersection_partial = compute_intersection(zone_partial, terrain_partial)
+
+    max_full = _valid_max(intersection_full)
+    max_partial = _valid_max(intersection_partial)
+
+    if max_full == 0.0:
+        status = ObstructionStatus.UNOBSTRUCTED
+    elif max_partial == 0.0:
+        status = ObstructionStatus.PARTIALLY_OBSTRUCTED
+    else:
+        status = ObstructionStatus.OBSTRUCTED
+
+    return  SamplePointEvaluation(
+        point_a_nys=pt_a_nys,
+        point_b_nys=pt_b_nys,
+        status=status,
+        max_obstruction_full=max_full,
+        max_obstruction_partial=max_partial,
+        tile_ids=tiles,
+        zone_full=zone_full,
+        zone_partial=zone_partial,
+        frequency_hz=frequency_hz,
+        intersection_full=intersection_full,
+        intersection_partial=intersection_partial,
+    )
