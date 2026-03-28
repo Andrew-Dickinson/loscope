@@ -1,5 +1,6 @@
 from io import BytesIO
 
+from los_analyzer.lib.io.encoding_bytes_io import EncodingBytesIO
 from los_analyzer.lib.obstructions.model import Obstruction
 from los_analyzer.lib.preprocessing.tile_id import tile_id_to_offset, TILE_SIDE_USFT
 
@@ -14,10 +15,6 @@ def create_obstruction_obj(
 
     local_x = obstruction.x_offset - tile_x_offset
     local_y = obstruction.y_offset - tile_y_offset
-
-    class EncodingBytesIO(BytesIO):
-        def write(self, string: str):
-            super().write(string.encode())
 
     output_buffer = EncodingBytesIO()
     f = output_buffer

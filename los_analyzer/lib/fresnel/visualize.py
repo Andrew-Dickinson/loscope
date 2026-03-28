@@ -3,6 +3,7 @@ from io import BytesIO
 import numpy as np
 
 from los_analyzer.lib.fresnel.fresnel_zone2 import FresnelZone
+from los_analyzer.lib.io.encoding_bytes_io import EncodingBytesIO
 from los_analyzer.lib.preprocessing.tile_id import TILE_SIDE_USFT
 from los_analyzer.lib.tiles.rasterize import rasterize_stairstep_grid_for_tile
 
@@ -37,10 +38,6 @@ def create_zone_obj(zone: FresnelZone, tile_id: str) -> BytesIO:
         np.ones(shape=zone.bottom.shape, dtype=bool),
         (zone.x_base_offset, zone.y_base_offset)
     )
-
-    class EncodingBytesIO(BytesIO):
-        def write(self, string: str):
-            super().write(string.encode())
 
     output_buffer = EncodingBytesIO()
     f = output_buffer
