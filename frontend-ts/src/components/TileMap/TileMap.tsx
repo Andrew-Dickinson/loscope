@@ -6,7 +6,7 @@
  *
  * Driven directly by AnalysisOverview — no job polling.
  */
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, GeoJSON, ImageOverlay, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import type { Layer, PathOptions, CircleMarkerOptions } from 'leaflet'
@@ -108,6 +108,13 @@ function FitBounds({ endpoints }: { endpoints: [[number, number, number], [numbe
   return null
 }
 
+// Expose map instance to parent via ref
+function MapRef({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }) {
+  const map = useMap()
+  useEffect(() => { mapRef.current = map }, [map, mapRef])
+  return null
+}
+
 // Invalidate Leaflet map size when the 3D panel opens/closes
 function MapResizer({ panelOpen }: { panelOpen: boolean }) {
   const map = useMap()
@@ -120,6 +127,7 @@ function MapResizer({ panelOpen }: { panelOpen: boolean }) {
 export default function TileMap({ overview, analysisId }: TileMapProps) {
   const [activeTileId, setActiveTileId] = useState<string | null>(null)
   const [panelOpen, setPanelOpen]       = useState(false)
+  const mapRef = useRef<L.Map | null>(null)
 
   const tilesGeoJson   = buildTilesGeoJson(overview.tiles)
   const losGeoJson     = buildLosGeoJson(overview.endpoints)
@@ -128,7 +136,13 @@ export default function TileMap({ overview, analysisId }: TileMapProps) {
   const handleTileClick = useCallback((tileId: string) => {
     setActiveTileId(tileId)
     setPanelOpen(true)
-  }, [])
+    const tile = overview.tiles.find(t => t.id === tileId)
+    if (tile) {
+      const [[lon_sw, lat_sw], [lon_ne, lat_ne]] = tile.bounds
+      // Delay slightly so the map has time to resize to 60% before fitting
+      setTimeout(() => mapRef.current?.fitBounds([[lat_sw, lon_sw], [lat_ne, lon_ne]], { padding: [40, 40] }), 80)
+    }
+  }, [overview.tiles])
 
   const tileStyle = useCallback((feature: Feature<Geometry, GeoJsonProperties> | undefined): PathOptions =>
     feature?.properties?.['intersection_detected'] ? TILE_STYLE_OBS : TILE_STYLE_CLEAR
@@ -137,9 +151,6 @@ export default function TileMap({ overview, analysisId }: TileMapProps) {
   const onEachTile = useCallback((feature: Feature<Geometry, GeoJsonProperties>, layer: Layer) => {
     const p = feature.properties ?? {}
     layer.on('click', () => handleTileClick(p['id'] as string))
-    let html = `<code>${p['id']}</code>`
-    if (p['intersection_detected']) html += ' <span style="color:#e63030;font-weight:bold">obstructed</span>'
-    if ('bindPopup' in layer) (layer as L.Path).bindPopup(html)
   }, [handleTileClick])
 
   // Approximate initial center; FitBounds will correct it
@@ -158,6 +169,7 @@ export default function TileMap({ overview, analysisId }: TileMapProps) {
           maxZoom={22}
           style={{ height: '100%', width: '100%' }}
         >
+          <MapRef mapRef={mapRef} />
           <MapResizer panelOpen={panelOpen} />
           <FitBounds endpoints={overview.endpoints} />
           <TileLayer
