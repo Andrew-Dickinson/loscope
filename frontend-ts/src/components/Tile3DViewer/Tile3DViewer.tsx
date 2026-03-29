@@ -117,10 +117,11 @@ function useTileData(tileId: string | null, analysisId: string | null): TileData
 interface TerrainMeshProps {
   heightmap: HeightmapInfo
   orthoUrl: string
+  showOrtho: boolean
   onReady: (info: TerrainInfo) => void
 }
 
-function TerrainMesh({ heightmap, orthoUrl, onReady }: TerrainMeshProps) {
+function TerrainMesh({ heightmap, orthoUrl, showOrtho, onReady }: TerrainMeshProps) {
   const { data, width, height } = heightmap
 
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null)
@@ -164,7 +165,7 @@ function TerrainMesh({ heightmap, orthoUrl, onReady }: TerrainMeshProps) {
 
   if (!geometry) return null
 
-  const mat = texture
+  const mat = (texture && showOrtho)
     ? new THREE.MeshBasicMaterial({ map: texture })
     : new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0 })
 
@@ -253,10 +254,11 @@ interface SceneProps {
   tileData: TileData
   orthoUrl: string
   obstructions: ObsEntry[]
+  visibility: Record<string, boolean>
   onObsClick: (key: string) => void
 }
 
-function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, onObsClick }: SceneProps) {
+function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibility, onObsClick }: SceneProps) {
   const [terrainInfo, setTerrainInfo] = useState<TerrainInfo | null>(null)
   const heightRange = terrainInfo?.heightRange ?? 1
   const midFt = terrainInfo ? (terrainInfo.minFt + terrainInfo.maxFt) / 2 : 0
@@ -275,22 +277,29 @@ function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, onObsClic
         color={0x6080b0}
       />
 
-      <TerrainMesh
-        heightmap={tileData.heightmap}
-        orthoUrl={orthoUrl}
-        onReady={setTerrainInfo}
-      />
-
-      {tileData.zoneAvailable && <ZoneObj analysisId={analysisId} tileId={tileId} />}
-      {obstructions.map(({ type, id }, i) => (
-        <ObsObj
-          key={`${type}/${id}`}
-          type={type}
-          obsId={id}
-          tileId={tileId}
-          color={OBS_COLORS[i % OBS_COLORS.length]}
-          onHit={onObsClick}
+      {visibility['terrain'] !== false && (
+        <TerrainMesh
+          heightmap={tileData.heightmap}
+          orthoUrl={orthoUrl}
+          showOrtho={visibility['ortho'] !== false}
+          onReady={setTerrainInfo}
         />
+      )}
+
+      {tileData.zoneAvailable && visibility['zone'] !== false && (
+        <ZoneObj analysisId={analysisId} tileId={tileId} />
+      )}
+      {obstructions.map(({ type, id }, i) => (
+        visibility[`${type}/${id}`] !== false && (
+          <ObsObj
+            key={`${type}/${id}`}
+            type={type}
+            obsId={id}
+            tileId={tileId}
+            color={OBS_COLORS[i % OBS_COLORS.length]}
+            onHit={onObsClick}
+          />
+        )
       ))}
 
       <OrbitControls
@@ -306,9 +315,17 @@ function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, onObsClic
 }
 
 // ── Legend ────────────────────────────────────────────────────────────────────
-function Legend({ tileData, obstructions }: { tileData: TileData; obstructions: ObsEntry[] }) {
+function Legend({
+  tileData, obstructions, visibility, onToggle,
+}: {
+  tileData: TileData
+  obstructions: ObsEntry[]
+  visibility: Record<string, boolean>
+  onToggle: (key: string) => void
+}) {
   const items = [
-    { key: 'terrain', color: '#ffffff', label: 'Terrain' },
+    { key: 'terrain', color: '#ffffff', label: 'Terrain Geometry' },
+    { key: 'ortho', color: '#4a90d9', label: 'Terrain Textures' },
     ...(tileData.zoneAvailable ? [{ key: 'zone', color: '#cc44ff', label: 'Fresnel Zone' }] : []),
     ...obstructions.map(({ type, id }, i) => ({
       key: `${type}/${id}`,
@@ -321,10 +338,16 @@ function Legend({ tileData, obstructions }: { tileData: TileData; obstructions: 
     <div style={styles.legend}>
       <div style={styles.legendTitle}>Scene objects</div>
       {items.map(item => (
-        <div key={item.key} style={styles.legendItem}>
+        <label key={item.key} style={styles.legendItem}>
+          <input
+            type="checkbox"
+            checked={visibility[item.key] !== false}
+            onChange={() => onToggle(item.key)}
+            style={styles.checkbox}
+          />
           <span style={{ ...styles.swatch, background: item.color }} />
           <span style={styles.legendLabel}>{item.label}</span>
-        </div>
+        </label>
       ))}
     </div>
   )
@@ -339,6 +362,13 @@ interface Tile3DViewerProps {
 export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) {
   const tileData = useTileData(tileId, analysisId)
   const [activeObs, setActiveObs] = useState<string | null>(null)
+  const [visibility, setVisibility] = useState<Record<string, boolean>>({})
+
+  // Reset visibility when tile changes
+  useEffect(() => { setVisibility({}) }, [tileId, analysisId])
+
+  const toggleVisibility = (key: string) =>
+    setVisibility(v => ({ ...v, [key]: v[key] === false ? true : false }))
 
   if (!tileId || !analysisId) {
     return <div style={styles.placeholder}>Click a tile on the map to open the 3D view</div>
@@ -378,6 +408,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
             tileData={tileData}
             orthoUrl={orthoUrl}
             obstructions={obstructions}
+            visibility={visibility}
             onObsClick={setActiveObs}
           />
         </Canvas>
@@ -391,7 +422,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
         </div>
       )}
 
-      <Legend tileData={tileData} obstructions={obstructions} />
+      <Legend tileData={tileData} obstructions={obstructions} visibility={visibility} onToggle={toggleVisibility} />
     </div>
   )
 }
@@ -429,6 +460,13 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 8,
     padding: '3px 0',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  checkbox: {
+    accentColor: '#388bfd',
+    cursor: 'pointer',
+    flexShrink: 0,
   },
   swatch: {
     width: 11,
