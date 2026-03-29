@@ -59,6 +59,7 @@ def intersection_image_for_tile(
     rgba[:, :, 3]  = np.where(rasterized_intersection > 0, 200, 0).astype(np.uint8)
 
     rgba = rgba[::-1]
+    rgba = np.repeat(np.repeat(rgba, 2, axis=0), 2, axis=1)
     return Image.fromarray(rgba, "RGBA")
 
 
