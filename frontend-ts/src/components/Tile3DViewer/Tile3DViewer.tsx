@@ -18,7 +18,7 @@
  *   TIFF row = easting axis, TIFF col = northing axis
  *   rasters[0][easting * width + northing] = height in inches
  */
-import { useRef, useMemo, useEffect, useState } from 'react'
+import { useRef, useMemo, useEffect, useState, useCallback } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
@@ -119,9 +119,11 @@ interface TerrainMeshProps {
   orthoUrl: string
   showOrtho: boolean
   onReady: (info: TerrainInfo) => void
+  onLoaded: () => void
+  onOrthoLoaded: () => void
 }
 
-function TerrainMesh({ heightmap, orthoUrl, showOrtho, onReady }: TerrainMeshProps) {
+function TerrainMesh({ heightmap, orthoUrl, showOrtho, onReady, onLoaded, onOrthoLoaded }: TerrainMeshProps) {
   const { data, width, height } = heightmap
 
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null)
@@ -129,6 +131,10 @@ function TerrainMesh({ heightmap, orthoUrl, showOrtho, onReady }: TerrainMeshPro
 
   const onReadyRef = useRef(onReady)
   onReadyRef.current = onReady
+  const onLoadedRef = useRef(onLoaded)
+  onLoadedRef.current = onLoaded
+  const onOrthoLoadedRef = useRef(onOrthoLoaded)
+  onOrthoLoadedRef.current = onOrthoLoaded
 
   useEffect(() => {
     // width = northing count (TIFF cols), height = easting count (TIFF rows)
@@ -154,12 +160,13 @@ function TerrainMesh({ heightmap, orthoUrl, showOrtho, onReady }: TerrainMeshPro
     geo.computeVertexNormals()
     setGeometry(geo)
     onReadyRef.current({ minFt, maxFt, heightRange: Math.max(maxFt - minFt, 1) })
+    onLoadedRef.current()
   }, [data, width, height])
 
   useEffect(() => {
     if (!orthoUrl) return
     const loader = new THREE.TextureLoader()
-    loader.load(orthoUrl, tex => setTexture(tex), undefined, () => {})
+    loader.load(orthoUrl, tex => { setTexture(tex); onOrthoLoadedRef.current() }, undefined, () => {})
     return () => {}
   }, [orthoUrl])
 
@@ -185,8 +192,10 @@ function useObjLoader(url: string): THREE.Group | null {
 }
 
 // ── Zone OBJ ──────────────────────────────────────────────────────────────────
-function ZoneObj({ analysisId, tileId }: { analysisId: string; tileId: string }) {
+function ZoneObj({ analysisId, tileId, onLoaded, visible }: { analysisId: string; tileId: string; onLoaded: () => void; visible: boolean }) {
   const obj = useObjLoader(`/api/tileView/fresnelSliceObj/${analysisId}/${tileId}`)
+  const onLoadedRef = useRef(onLoaded)
+  onLoadedRef.current = onLoaded
   useEffect(() => {
     if (!obj) return
     obj.traverse(child => {
@@ -197,17 +206,20 @@ function ZoneObj({ analysisId, tileId }: { analysisId: string; tileId: string })
         })
       }
     })
+    onLoadedRef.current()
   }, [obj])
   if (!obj) return null
-  return <primitive object={obj} rotation={OBJ_ROTATION} position={OBJ_POSITION} />
+  return <primitive object={obj} rotation={OBJ_ROTATION} position={OBJ_POSITION} visible={visible} />
 }
 
 // ── Obstruction OBJ ───────────────────────────────────────────────────────────
-function ObsObj({ type, obsId, tileId, color, onHit }: {
-  type: string; obsId: string; tileId: string; color: number; onHit: (key: string) => void
+function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, visible }: {
+  type: string; obsId: string; tileId: string; color: number; onHit: (key: string) => void; onLoaded: () => void; visible: boolean
 }) {
   const obj = useObjLoader(`/api/tileview/terrain/obstructionObj/${type}/${obsId}/${tileId}`)
   const key = `${type}/${obsId}`
+  const onLoadedRef = useRef(onLoaded)
+  onLoadedRef.current = onLoaded
   useEffect(() => {
     if (!obj) return
     obj.traverse(child => {
@@ -217,6 +229,7 @@ function ObsObj({ type, obsId, tileId, color, onHit }: {
         })
       }
     })
+    onLoadedRef.current()
   }, [obj, color])
   if (!obj) return null
   return (
@@ -224,6 +237,7 @@ function ObsObj({ type, obsId, tileId, color, onHit }: {
       object={obj}
       rotation={OBJ_ROTATION}
       position={OBJ_POSITION}
+      visible={visible}
       onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onHit(key) }}
     />
   )
@@ -256,9 +270,10 @@ interface SceneProps {
   obstructions: ObsEntry[]
   visibility: Record<string, boolean>
   onObsClick: (key: string) => void
+  onItemLoaded: (key: string) => void
 }
 
-function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibility, onObsClick }: SceneProps) {
+function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibility, onObsClick, onItemLoaded }: SceneProps) {
   const [terrainInfo, setTerrainInfo] = useState<TerrainInfo | null>(null)
   const heightRange = terrainInfo?.heightRange ?? 1
   const midFt = terrainInfo ? (terrainInfo.minFt + terrainInfo.maxFt) / 2 : 0
@@ -283,23 +298,25 @@ function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibilit
           orthoUrl={orthoUrl}
           showOrtho={visibility['ortho'] !== false}
           onReady={setTerrainInfo}
+          onLoaded={() => onItemLoaded('terrain')}
+          onOrthoLoaded={() => onItemLoaded('ortho')}
         />
       )}
 
-      {tileData.zoneAvailable && visibility['zone'] !== false && (
-        <ZoneObj analysisId={analysisId} tileId={tileId} />
+      {tileData.zoneAvailable && (
+        <ZoneObj analysisId={analysisId} tileId={tileId} onLoaded={() => onItemLoaded('zone')} visible={visibility['zone'] !== false} />
       )}
       {obstructions.map(({ type, id }, i) => (
-        visibility[`${type}/${id}`] !== false && (
-          <ObsObj
-            key={`${type}/${id}`}
-            type={type}
-            obsId={id}
-            tileId={tileId}
-            color={OBS_COLORS[i % OBS_COLORS.length]}
-            onHit={onObsClick}
-          />
-        )
+        <ObsObj
+          key={`${type}/${id}`}
+          type={type}
+          obsId={id}
+          tileId={tileId}
+          color={OBS_COLORS[i % OBS_COLORS.length]}
+          onHit={onObsClick}
+          onLoaded={() => onItemLoaded(`${type}/${id}`)}
+          visible={visibility[`${type}/${id}`] !== false}
+        />
       ))}
 
       <OrbitControls
@@ -315,12 +332,26 @@ function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibilit
 }
 
 // ── Legend ────────────────────────────────────────────────────────────────────
+function LegendSwatch({ color, loaded }: { color: string; loaded: boolean }) {
+  if (!loaded) {
+    return (
+      <span style={{
+        display: 'inline-block', width: 11, height: 11, borderRadius: '50%', flexShrink: 0,
+        border: '1.5px solid rgba(255,255,255,0.12)', borderTopColor: '#8b949e',
+        animation: 'tile3d-spin 0.7s linear infinite',
+      }} />
+    )
+  }
+  return <span style={{ ...styles.swatch, background: color }} />
+}
+
 function Legend({
-  tileData, obstructions, visibility, onToggle,
+  tileData, obstructions, visibility, loadedKeys, onToggle,
 }: {
   tileData: TileData
   obstructions: ObsEntry[]
   visibility: Record<string, boolean>
+  loadedKeys: Record<string, true>
   onToggle: (key: string) => void
 }) {
   const items = [
@@ -336,6 +367,7 @@ function Legend({
 
   return (
     <div style={styles.legend}>
+      <style>{`@keyframes tile3d-spin { to { transform: rotate(360deg); } }`}</style>
       <div style={styles.legendTitle}>Scene objects</div>
       {items.map(item => (
         <label key={item.key} style={styles.legendItem}>
@@ -345,7 +377,7 @@ function Legend({
             onChange={() => onToggle(item.key)}
             style={styles.checkbox}
           />
-          <span style={{ ...styles.swatch, background: item.color }} />
+          <LegendSwatch color={item.color} loaded={!!loadedKeys[item.key]} />
           <span style={styles.legendLabel}>{item.label}</span>
         </label>
       ))}
@@ -363,9 +395,14 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
   const tileData = useTileData(tileId, analysisId)
   const [activeObs, setActiveObs] = useState<string | null>(null)
   const [visibility, setVisibility] = useState<Record<string, boolean>>({})
+  const [loadedKeys, setLoadedKeys] = useState<Record<string, true>>({})
 
-  // Reset visibility when tile changes
-  useEffect(() => { setVisibility({}) }, [tileId, analysisId])
+  // Reset visibility and loaded state when tile changes
+  useEffect(() => { setVisibility({}); setLoadedKeys({}) }, [tileId, analysisId])
+
+  const handleItemLoaded = useCallback((key: string) =>
+    setLoadedKeys(prev => prev[key] ? prev : { ...prev, [key]: true })
+  , [])
 
   const toggleVisibility = (key: string) =>
     setVisibility(v => ({ ...v, [key]: v[key] === false ? true : false }))
@@ -410,6 +447,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
             obstructions={obstructions}
             visibility={visibility}
             onObsClick={setActiveObs}
+            onItemLoaded={handleItemLoaded}
           />
         </Canvas>
       </div>
@@ -422,7 +460,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
         </div>
       )}
 
-      <Legend tileData={tileData} obstructions={obstructions} visibility={visibility} onToggle={toggleVisibility} />
+      <Legend tileData={tileData} obstructions={obstructions} visibility={visibility} loadedKeys={loadedKeys} onToggle={toggleVisibility} />
     </div>
   )
 }
