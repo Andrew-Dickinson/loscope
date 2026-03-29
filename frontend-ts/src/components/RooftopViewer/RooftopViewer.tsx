@@ -42,9 +42,9 @@ interface RooftopViewerProps {
 }
 
 const STATUS_COLOR: Record<string, number> = {
-  unobstructed:         0x22cc44,
-  partially_obstructed: 0xffcc00,
-  obstructed:           0xff4444,
+  unobstructed:         0x00cc88,  // teal-green  (deuteranopia: blue-teal, distinct from orange)
+  partially_obstructed: 0xffcc00,  // yellow      (unchanged — already deuteranopia-safe)
+  obstructed:           0xff1a00,  // red         (deuteranopia: amber, distinct from teal)
 }
 const PENDING_COLOR = 0x94a3b8
 
@@ -464,9 +464,9 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
 
       <div style={styles.legend}>
         <div style={styles.legendTitle}>LOS Status</div>
-        <LegendRow color="#22cc44" label={`Unobstructed (${n_clear})`} />
+        <LegendRow color="#00cc88" label={`Unobstructed (${n_clear})`} />
         <LegendRow color="#ffcc00" label={`Partial (${n_partial})`} />
-        <LegendRow color="#ff4444" label={`Obstructed (${n_full})`} />
+        <LegendRow color="#ff1a00" label={`Obstructed (${n_full})`} />
         {pending > 0 && <LegendRow color="#94a3b8" label={`Pending (${pending})`} />}
       </div>
     </div>

@@ -48,9 +48,9 @@ in vec3 vNorm;
 out vec4 fragColor;
 
 vec3 statusColor(float s) {
-  if (s < 0.5) return vec3(0.133, 0.800, 0.267);  // unobstructed  #22cc44
-  if (s < 1.5) return vec3(1.000, 0.800, 0.000);  // partial       #ffcc00
-  if (s < 2.5) return vec3(1.000, 0.267, 0.267);  // obstructed    #ff4444
+  if (s < 0.5) return vec3(0.000, 0.800, 0.533);  // unobstructed  #00cc88  teal-green
+  if (s < 1.5) return vec3(1.000, 0.800, 0.000);  // partial       #ffcc00  yellow
+  if (s < 2.5) return vec3(1.000, 0.102, 0.000);  // obstructed    #ff1a00  red
   return       vec3(0.580, 0.640, 0.720);          // pending       grey
 }
 
