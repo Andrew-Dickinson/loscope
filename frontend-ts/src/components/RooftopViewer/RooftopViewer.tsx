@@ -132,14 +132,35 @@ interface SphereGroupProps {
 
 function SphereGroup({ idxs, samplePoints, color, dummy, hoverable, onPointClick }: SphereGroupProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null)
-  const geo = useMemo(() => new THREE.SphereGeometry(0.8, 8, 6), [])
+  const ringRef = useRef<THREE.InstancedMesh>(null)
+  const geo = useMemo(() => new THREE.SphereGeometry(0.8, 16, 12), [])
+  const ringGeo = useMemo(() => new THREE.RingGeometry(0.80, 0.90, 48), [])
   const mat = useMemo(() => new THREE.MeshBasicMaterial({ color }), [color])
+  const ringMat = useMemo(() => new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    transparent: true,
+    depthWrite: false,
+    vertexShader: `
+      void main() {
+        vec3 center = vec3(instanceMatrix[3]);
+        float scale = length(vec3(instanceMatrix[0]));
+        vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+        vec3 up    = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+        gl_Position = projectionMatrix * viewMatrix * vec4(center + right * position.x * scale + up * position.y * scale, 1.0);
+      }
+    `,
+    fragmentShader: `
+      out vec4 fragColor;
+      void main() { fragColor = vec4(1.0, 1.0, 1.0, 1.0); }
+    `,
+  }), [])
   const [hoveredId, setHoveredId] = useState<number | null>(null)
   const prevHoveredId = useRef<number | null>(null)
 
   // Set all instance matrices at normal scale
   useEffect(() => {
     const mesh = meshRef.current
+    const ring = ringRef.current
     if (!mesh) return
     idxs.forEach((ptIdx, i) => {
       const mp = samplePoints[ptIdx].measurement_point
@@ -147,13 +168,16 @@ function SphereGroup({ idxs, samplePoints, color, dummy, hoverable, onPointClick
       dummy.scale.set(1, 1, 1)
       dummy.updateMatrix()
       mesh.setMatrixAt(i, dummy.matrix)
+      if (ring) ring.setMatrixAt(i, dummy.matrix)
     })
     mesh.instanceMatrix.needsUpdate = true
+    if (ring) ring.instanceMatrix.needsUpdate = true
   }, [idxs, samplePoints, dummy])
 
   // Scale hovered instance up, restore previous
   useEffect(() => {
     const mesh = meshRef.current
+    const ring = ringRef.current
     if (!mesh) return
     const applyScale = (instanceIdx: number, scale: number) => {
       const mp = samplePoints[idxs[instanceIdx]].measurement_point
@@ -161,37 +185,42 @@ function SphereGroup({ idxs, samplePoints, color, dummy, hoverable, onPointClick
       dummy.scale.set(scale, scale, scale)
       dummy.updateMatrix()
       mesh.setMatrixAt(instanceIdx, dummy.matrix)
+      if (ring) ring.setMatrixAt(instanceIdx, dummy.matrix)
       dummy.scale.set(1, 1, 1)
     }
     if (prevHoveredId.current !== null) applyScale(prevHoveredId.current, 1)
     if (hoveredId !== null) applyScale(hoveredId, 1.8)
     prevHoveredId.current = hoveredId
     mesh.instanceMatrix.needsUpdate = true
+    if (ring) ring.instanceMatrix.needsUpdate = true
   }, [hoveredId, idxs, samplePoints, dummy])
 
   // Reset cursor if unmounted while hovering
   useEffect(() => () => { document.body.style.cursor = 'default' }, [])
 
   return (
-    <instancedMesh
-      ref={meshRef}
-      args={[geo, mat, idxs.length]}
-      onClick={(e: ThreeEvent<MouseEvent>) => {
-        e.stopPropagation()
-        if (e.instanceId !== undefined) onPointClick(idxs[e.instanceId])
-      }}
-      onPointerOver={hoverable ? (e: ThreeEvent<PointerEvent>) => {
-        e.stopPropagation()
-        if (e.instanceId !== undefined) {
-          setHoveredId(e.instanceId)
-          document.body.style.cursor = 'pointer'
-        }
-      } : undefined}
-      onPointerOut={hoverable ? () => {
-        setHoveredId(null)
-        document.body.style.cursor = 'default'
-      } : undefined}
-    />
+    <>
+      <instancedMesh
+        ref={meshRef}
+        args={[geo, mat, idxs.length]}
+        onClick={(e: ThreeEvent<MouseEvent>) => {
+          e.stopPropagation()
+          if (e.instanceId !== undefined) onPointClick(idxs[e.instanceId])
+        }}
+        onPointerOver={hoverable ? (e: ThreeEvent<PointerEvent>) => {
+          e.stopPropagation()
+          if (e.instanceId !== undefined) {
+            setHoveredId(e.instanceId)
+            document.body.style.cursor = 'pointer'
+          }
+        } : undefined}
+        onPointerOut={hoverable ? () => {
+          setHoveredId(null)
+          document.body.style.cursor = 'default'
+        } : undefined}
+      />
+      <instancedMesh ref={ringRef} args={[ringGeo, ringMat, idxs.length]} renderOrder={1} />
+    </>
   )
 }
 
