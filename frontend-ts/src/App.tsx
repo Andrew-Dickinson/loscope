@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import type { ReactNode } from 'react'
 import InputForm from './components/InputForm/InputForm'
 import type { RooftopSubmitValues } from './components/InputForm/InputForm'
@@ -92,6 +92,10 @@ export default function App() {
   // Map state
   const [activeMap, setActiveMap] = useState<ActiveMap | null>(null)
 
+  // Abort ref — set to true to stop the analysis loop between requests
+  const abortRef = useRef(false)
+  const [analyzing, setAnalyzing] = useState(false)
+
   const handleSubmit = useCallback(async (values: RooftopSubmitValues) => {
     // Reset
     setBinId(null); setSamplePoints([]); setAnalyses([]); setActiveMap(null); setNysB(null)
@@ -128,9 +132,13 @@ export default function App() {
         ;[indices[i], indices[j]] = [indices[j], indices[i]]
       }
 
+      abortRef.current = false
+      setAnalyzing(true)
       await runConcurrent(indices, async (ptIdx) => {
+        if (abortRef.current) return
         try {
           const result = await analyzePoint(points[ptIdx], nysBPoint, values.frequency_ghz)
+          if (abortRef.current) return
           setAnalyses(prev => { const next = [...prev]; next[ptIdx] = result; return next })
         } catch {
           // Leave analysis[ptIdx] as null on error; counting as done anyway
@@ -141,6 +149,7 @@ export default function App() {
           progress: Math.round(done / total * 100),
         })
       })
+      setAnalyzing(false)
 
       setLoading(null)
     } catch (err) {
@@ -173,7 +182,10 @@ export default function App() {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <LoadingToast loading={loading} />
+      <LoadingToast
+        loading={loading}
+        onAbort={analyzing ? () => { abortRef.current = true; setAnalyzing(false); setLoading(null) } : undefined}
+      />
 
       {appState === 'input' && (
         <InputForm onSubmit={handleSubmit} />

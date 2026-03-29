@@ -6,12 +6,13 @@ export interface LoadingState {
 
 interface LoadingToastProps {
   loading: LoadingState | null
+  onAbort?: () => void
 }
 
 /**
  * Non-intrusive loading indicator — fixed top-center bar.
  */
-export default function LoadingToast({ loading }: LoadingToastProps) {
+export default function LoadingToast({ loading, onAbort }: LoadingToastProps) {
   if (!loading) return null
 
   const { message, progress, isError = false } = loading
@@ -67,6 +68,19 @@ export default function LoadingToast({ loading }: LoadingToastProps) {
         </span>
         {progress != null && progress > 0 && !isError && (
           <span style={{ color: '#484f58', flexShrink: 0 }}>{Math.round(progress)}%</span>
+        )}
+        {onAbort && !isError && (
+          <button onClick={onAbort} style={{
+            flexShrink: 0,
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 4,
+            color: '#8b949e',
+            fontSize: 11,
+            fontFamily: 'monospace',
+            padding: '2px 7px',
+            cursor: 'pointer',
+          }}>stop</button>
         )}
       </div>
       <style>{`
