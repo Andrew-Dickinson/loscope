@@ -28,10 +28,10 @@ interface FormFieldValues {
 
 const DEFAULT_VALUES: FormFieldValues = {
   bin_id: '1058335',
-  lat: '40.81524634046376',
-  lon: '-73.93906468570518',
-  alt_m: '25.75844816863537',
-  frequency_ghz: '24',
+  lat: '40.815328384719656',
+  lon: '-73.95031852433306',
+  alt_m: '88.5',
+  frequency_ghz: '5',
   mast_offset_ft: '4',
   sample_spacing: '9',
 }
