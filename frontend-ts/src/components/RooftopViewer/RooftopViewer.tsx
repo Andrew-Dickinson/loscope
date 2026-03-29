@@ -304,6 +304,7 @@ interface SphereOutlineProps {
 function SphereOutline({ meshRefs, samplePoints, analyses, hoveredSphereRef }: SphereOutlineProps) {
   const { gl, scene, camera, size } = useThree()
   const sphereDataBuf = useRef(new Float32Array(MAX_SPHERES * 4))
+  const sphereZBuf    = useRef(new Float32Array(MAX_SPHERES))
   const projVec       = useRef(new THREE.Vector3())
   const edgeVec       = useRef(new THREE.Vector3())
   const camRight      = useRef(new THREE.Vector3())
@@ -347,6 +348,7 @@ function SphereOutline({ meshRefs, samplePoints, analyses, hoveredSphereRef }: S
         sphereMask:  { value: null as THREE.Texture | null },
         resolution:  { value: new THREE.Vector2() },
         uSphereData: { value: new Float32Array(MAX_SPHERES * 4) },
+        uSphereZ:    { value: new Float32Array(MAX_SPHERES) },
         uNumSpheres: { value: 0 },
         uTime:       { value: 0 },
       },
@@ -359,6 +361,7 @@ function SphereOutline({ meshRefs, samplePoints, analyses, hoveredSphereRef }: S
         uniform sampler2D sphereMask;
         uniform vec2  resolution;
         uniform vec4  uSphereData[${MAX_SPHERES}];
+        uniform float uSphereZ[${MAX_SPHERES}];
         uniform int   uNumSpheres;
         uniform float uTime;
         in  vec2 vUv;
@@ -425,11 +428,25 @@ function SphereOutline({ meshRefs, samplePoints, analyses, hoveredSphereRef }: S
           vec4 result = mix(color, vec4(1.0), outlineA);
 
           // ── symbols: ✓ unobstructed · ~ partial · ✗ obstructed · ◌ pending ──
+          // Pre-pass: among visible spheres whose symbol disc covers this pixel,
+          // pick the one with the smallest NDC Z (closest to camera).
+          // This prevents back-sphere symbols bleeding through front spheres.
+          int   nearestIdx = -1;
+          float nearestZ   = 1e9;
+          for (int j = 0; j < ${MAX_SPHERES}; j++) {
+            if (j >= uNumSpheres) break;
+            if (texture(sphereMask, uSphereData[j].xy).r < 0.5) continue;
+            vec2  dj   = (vUv - uSphereData[j].xy) * resolution;
+            float sr_j = uSphereData[j].w;
+            if (dot(dj, dj) > (sr_j + 4.0) * (sr_j + 4.0)) continue;
+            float z = uSphereZ[j];
+            if (z < nearestZ) { nearestZ = z; nearestIdx = j; }
+          }
           for (int i = 0; i < ${MAX_SPHERES}; i++) {
             if (i >= uNumSpheres) break;
+            if (i != nearestIdx) continue;
             vec4  sph    = uSphereData[i];
             int   status = int(sph.z + 0.5);
-            if (texture(sphereMask, sph.xy).r < 0.5) continue;
             vec2  delta  = (vUv - sph.xy) * resolution;
             float sr     = sph.w * 0.6;
             if (dot(delta, delta) > (sr + 2.0) * (sr + 2.0)) continue;
@@ -512,6 +529,7 @@ function SphereOutline({ meshRefs, samplePoints, analyses, hoveredSphereRef }: S
       pv.project(camera)
       const cx = (pv.x + 1) * 0.5
       const cy = (pv.y + 1) * 0.5
+      sphereZBuf.current[i] = pv.z  // NDC Z: -1=near, 1=far
 
       // Project sphere edge (centre + right × sphere_radius) to get screen radius in px
       ev.set(mp.x + cr.x * 0.8, mp.z + cr.y * 0.8, -mp.y + cr.z * 0.8)
@@ -531,6 +549,7 @@ function SphereOutline({ meshRefs, samplePoints, analyses, hoveredSphereRef }: S
       buf[i * 4 + 3] = screenRadius
     }
     compositeMat.uniforms.uSphereData.value = buf
+    compositeMat.uniforms.uSphereZ.value    = sphereZBuf.current
     compositeMat.uniforms.uNumSpheres.value = n
     compositeMat.uniforms.uTime.value = state.clock.elapsedTime
 
