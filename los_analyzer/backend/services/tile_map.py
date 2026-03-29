@@ -51,12 +51,20 @@ def intersection_image_for_tile(
     if rasterized_intersection.max() == 0:
         return None
 
-    # TODO: These colors could probably use some improvement
-    rgba = np.zeros((TILE_SIDE_USFT, TILE_SIDE_USFT, 4), dtype=np.uint8)
-    rgba[:, :, 0] = np.where(rasterized_intersection <= 0.5, rasterized_intersection * 2.0 * 255, 255).astype(np.uint8)
-    rgba[:, :, 1] = np.where(rasterized_intersection <= 0.5, 255, (1.0 - (rasterized_intersection - 0.5) * 2.0) * 255).astype(np.uint8)
-    # rgba[:, :, 2]  = np.zeros(len(vals), dtype=np.uint8)
-    rgba[:, :, 3]  = np.where(rasterized_intersection > 0, 200, 0).astype(np.uint8)
+    # SunsetDark-inspired: saturated yellow → orange → red → very dark red (near-purple)
+    # Control points at t = 0.0, 0.25, 0.5, 0.75, 1.0
+    _stops = np.array([0.0, 0.4, 0.6, 0.75, 1.0])
+    _r     = np.array([255, 255,  210, 138,  214], dtype=np.float32)
+    _g     = np.array([215, 105,   18,   0,    2], dtype=np.float32)
+    _b     = np.array([  0,   0,   28,  16,   52], dtype=np.float32)
+
+    v = rasterized_intersection.ravel()
+    rgba = np.zeros((TILE_SIDE_USFT * TILE_SIDE_USFT, 4), dtype=np.uint8)
+    rgba[:, 0] = np.interp(v, _stops, _r).astype(np.uint8)
+    rgba[:, 1] = np.interp(v, _stops, _g).astype(np.uint8)
+    rgba[:, 2] = np.interp(v, _stops, _b).astype(np.uint8)
+    rgba[:, 3] = np.where(v > 0, 255, 0).astype(np.uint8)
+    rgba = rgba.reshape((TILE_SIDE_USFT, TILE_SIDE_USFT, 4))
 
     rgba = rgba[::-1]
     rgba = np.repeat(np.repeat(rgba, 2, axis=0), 2, axis=1)
