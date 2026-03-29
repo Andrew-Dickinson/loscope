@@ -91,9 +91,12 @@ interface SamplePointsProps {
   analyses: (PointAnalysis | null)[]
   onPointClick: (idx: number) => void
   onRefsChange: (refs: MeshRef[]) => void
+  onHover: (globalIdx: number) => void
+  onHoverEnd: () => void
+  hoveredSphereRef: React.MutableRefObject<number>
 }
 
-function SamplePoints({ samplePoints, analyses, onPointClick, onRefsChange }: SamplePointsProps) {
+function SamplePoints({ samplePoints, analyses, onPointClick, onRefsChange, onHover, onHoverEnd, hoveredSphereRef }: SamplePointsProps) {
   const dummy = useMemo(() => new THREE.Object3D(), [])
   const refsRef = useRef<MeshRef[]>([])
 
@@ -130,6 +133,9 @@ function SamplePoints({ samplePoints, analyses, onPointClick, onRefsChange }: Sa
           onPointClick={onPointClick}
           onMeshMount={addRef}
           onMeshUnmount={removeRef}
+          onHover={onHover}
+          onHoverEnd={onHoverEnd}
+          hoveredSphereRef={hoveredSphereRef}
         />
       ))}
     </>
@@ -145,24 +151,24 @@ interface SphereGroupProps {
   onPointClick: (idx: number) => void
   onMeshMount: (ref: MeshRef) => void
   onMeshUnmount: (ref: MeshRef) => void
+  onHover: (globalIdx: number) => void
+  onHoverEnd: () => void
+  hoveredSphereRef: React.MutableRefObject<number>
 }
 
-function SphereGroup({ idxs, samplePoints, color, dummy, hoverable, onPointClick, onMeshMount, onMeshUnmount }: SphereGroupProps) {
+function SphereGroup({ idxs, samplePoints, color, dummy, hoverable, onPointClick, onMeshMount, onMeshUnmount, onHover, onHoverEnd, hoveredSphereRef }: SphereGroupProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null)
   const geo = useMemo(() => new THREE.SphereGeometry(0.8, 16, 12), [])
   const mat = useMemo(() => new THREE.MeshBasicMaterial({ color }), [color])
-  const [hoveredId, setHoveredId] = useState<number | null>(null)
-  const prevHoveredId = useRef<number | null>(null)
+  const prevHoveredGlobal = useRef<number>(-1)
 
-  // Register the ref (not the mesh) — ref.current stays valid even when R3F
-  // recreates the InstancedMesh due to args changes (e.g. idxs.length changes)
   useEffect(() => {
     onMeshMount(meshRef)
     return () => onMeshUnmount(meshRef)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Set all instance matrices at normal scale
+  // Set all instance matrices at normal scale (positions + scale=1)
   useEffect(() => {
     const mesh = meshRef.current
     if (!mesh) return
@@ -176,25 +182,30 @@ function SphereGroup({ idxs, samplePoints, color, dummy, hoverable, onPointClick
     mesh.instanceMatrix.needsUpdate = true
   }, [idxs, samplePoints, dummy])
 
-  // Scale hovered instance up, restore previous
-  useEffect(() => {
+  // Drive hover scale from the shared ref so it updates in the same frame as the
+  // composite shader — eliminating the desync caused by React state → useEffect.
+  useFrame(() => {
     const mesh = meshRef.current
     if (!mesh) return
-    const applyScale = (instanceIdx: number, scale: number) => {
-      const mp = samplePoints[idxs[instanceIdx]].measurement_point
+    const cur  = hoveredSphereRef.current
+    const prev = prevHoveredGlobal.current
+    if (cur === prev) return
+    const applyScale = (globalIdx: number, scale: number) => {
+      const instanceIdx = idxs.indexOf(globalIdx)
+      if (instanceIdx === -1) return
+      const mp = samplePoints[globalIdx].measurement_point
       dummy.position.set(mp.x, mp.z, -mp.y)
       dummy.scale.set(scale, scale, scale)
       dummy.updateMatrix()
       mesh.setMatrixAt(instanceIdx, dummy.matrix)
       dummy.scale.set(1, 1, 1)
     }
-    if (prevHoveredId.current !== null) applyScale(prevHoveredId.current, 1)
-    if (hoveredId !== null) applyScale(hoveredId, 1.8)
-    prevHoveredId.current = hoveredId
+    if (prev !== -1) applyScale(prev, 1)
+    if (cur  !== -1) applyScale(cur,  1.8)
     mesh.instanceMatrix.needsUpdate = true
-  }, [hoveredId, idxs, samplePoints, dummy])
+    prevHoveredGlobal.current = cur
+  })
 
-  // Reset cursor if unmounted while hovering
   useEffect(() => () => { document.body.style.cursor = 'default' }, [])
 
   return (
@@ -208,12 +219,12 @@ function SphereGroup({ idxs, samplePoints, color, dummy, hoverable, onPointClick
       onPointerOver={hoverable ? (e: ThreeEvent<PointerEvent>) => {
         e.stopPropagation()
         if (e.instanceId !== undefined) {
-          setHoveredId(e.instanceId)
+          onHover(idxs[e.instanceId])
           document.body.style.cursor = 'pointer'
         }
       } : undefined}
       onPointerOut={hoverable ? () => {
-        setHoveredId(null)
+        onHoverEnd()
         document.body.style.cursor = 'default'
       } : undefined}
     />
@@ -281,11 +292,22 @@ interface SceneProps {
   onPointClick: (idx: number) => void
 }
 
-function SphereOutline({ meshRefs }: { meshRefs: MeshRef[] }) {
-  const { gl, scene, camera, size } = useThree()
+const MAX_SPHERES = 128
 
-  // Keep linear colour space while mounted so R3F's own render (priority 0) doesn't
-  // apply sRGB encoding. Our composite pass does the single final sRGB conversion.
+interface SphereOutlineProps {
+  meshRefs: MeshRef[]
+  samplePoints: BackendSamplePoint[]
+  analyses: (PointAnalysis | null)[]
+  hoveredSphereRef: React.MutableRefObject<number>
+}
+
+function SphereOutline({ meshRefs, samplePoints, analyses, hoveredSphereRef }: SphereOutlineProps) {
+  const { gl, scene, camera, size } = useThree()
+  const sphereDataBuf = useRef(new Float32Array(MAX_SPHERES * 4))
+  const projVec       = useRef(new THREE.Vector3())
+  const edgeVec       = useRef(new THREE.Vector3())
+  const camRight      = useRef(new THREE.Vector3())
+
   useEffect(() => {
     const prevCS = gl.outputColorSpace
     const prevTM = gl.toneMapping
@@ -295,8 +317,6 @@ function SphereOutline({ meshRefs }: { meshRefs: MeshRef[] }) {
   }, [gl])
 
   // ── Render targets ────────────────────────────────────────────────────────────
-  // Both targets keep a depth buffer.  maskTgt reuses its own depth for HW occlusion.
-  // Must use physical pixels (CSS size × DPR) or the scene renders at CSS resolution.
   const targets = useMemo(() => {
     const dpr = gl.getPixelRatio()
     const w = Math.round(size.width  * dpr)
@@ -311,8 +331,6 @@ function SphereOutline({ meshRefs }: { meshRefs: MeshRef[] }) {
     targets.maskTgt.dispose()
   }, [targets])
 
-  // White material for the sphere-only mask render.
-  // MeshBasicMaterial handles InstancedMesh natively; depthTest gives HW occlusion.
   const whiteMat = useMemo(() => new THREE.MeshBasicMaterial({
     color: 0xffffff,
     depthWrite: false,
@@ -323,41 +341,113 @@ function SphereOutline({ meshRefs }: { meshRefs: MeshRef[] }) {
     const os  = new THREE.Scene()
     const oc  = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
     const mat = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3,
       uniforms: {
-        sceneColor: { value: null as THREE.Texture | null },
-        sphereMask: { value: null as THREE.Texture | null },
+        sceneColor:  { value: null as THREE.Texture | null },
+        sphereMask:  { value: null as THREE.Texture | null },
         resolution:  { value: new THREE.Vector2() },
+        uSphereData: { value: new Float32Array(MAX_SPHERES * 4) },
+        uNumSpheres: { value: 0 },
+        uTime:       { value: 0 },
       },
       vertexShader: /* glsl */`
-        varying vec2 vUv;
+        out vec2 vUv;
         void main() { vUv = uv; gl_Position = vec4(position, 1.0); }
       `,
       fragmentShader: /* glsl */`
         uniform sampler2D sceneColor;
         uniform sampler2D sphereMask;
-        uniform vec2 resolution;
-        varying vec2 vUv;
+        uniform vec2  resolution;
+        uniform vec4  uSphereData[${MAX_SPHERES}];
+        uniform int   uNumSpheres;
+        uniform float uTime;
+        in  vec2 vUv;
+        out vec4 fragColor;
+
+        float sdSeg(vec2 p, vec2 a, vec2 b) {
+          vec2 pa = p - a, ba = b - a;
+          return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+        }
+        // ✓ check mark
+        float sdCheck(vec2 p) {
+          return min(
+            sdSeg(p, vec2(-0.55,  0.05), vec2(-0.10, -0.45)),
+            sdSeg(p, vec2(-0.10, -0.45), vec2( 0.60,  0.50))
+          );
+        }
+        // ✗ cross
+        float sdCross(vec2 p) {
+          return min(
+            sdSeg(p, vec2(-0.50, -0.50), vec2(0.50, 0.50)),
+            sdSeg(p, vec2(-0.50,  0.50), vec2(0.50, -0.50))
+          );
+        }
+        // ~ tilde (four-segment sine approximation)
+        float sdTilde(vec2 p) {
+          return min(min(
+            sdSeg(p, vec2(-0.55,  0.00), vec2(-0.28,  0.28)),
+            sdSeg(p, vec2(-0.28,  0.28), vec2( 0.00,  0.00))
+          ), min(
+            sdSeg(p, vec2( 0.00,  0.00), vec2( 0.28, -0.28)),
+            sdSeg(p, vec2( 0.28, -0.28), vec2( 0.55,  0.00))
+          ));
+        }
+        // ◌ rotating arc spinner (returns alpha directly, not an SDF distance)
+        float spinnerAlpha(vec2 p, float t) {
+          const float PI = 3.14159265;
+          float r      = length(p);
+          float radial = smoothstep(0.40, 0.48, r) * smoothstep(0.88, 0.80, r);
+          if (radial < 0.001) return 0.0;
+          float angle  = mod(atan(p.y, p.x) / (2.0 * PI) - t * 0.7, 1.0);
+          float arc    = 0.78;   // fraction of circle that is filled
+          float fade   = 0.06;   // angular softness at arc endpoints
+          float angA   = smoothstep(0.0, fade, angle) * smoothstep(arc, arc - fade, angle);
+          return radial * angA;
+        }
+
         void main() {
-          vec4  color = texture2D(sceneColor, vUv);
-          float m     = texture2D(sphereMask, vUv).r;
-          // Find distance to the nearest pixel with the OPPOSITE mask state.
-          // This feathers symmetrically: outside pixels fade in toward the edge,
-          // inside pixels fade in toward the edge, creating a smooth glow on both sides.
+          vec4  color = texture(sceneColor, vUv);
+          float m     = texture(sphereMask, vUv).r;
+
+          // ── feathered outline ───────────────────────────────────────────────
           float minDist2 = 99.0;
           for (int dx = -3; dx <= 3; dx++) {
             for (int dy = -3; dy <= 3; dy++) {
               float d2 = float(dx * dx + dy * dy);
               if (d2 > 0.0 && d2 <= 9.5) {
-                float n = texture2D(
-                  sphereMask, vUv + vec2(float(dx), float(dy)) / resolution
-                ).r;
-                bool acrossBoundary = (m < 0.5) ? (n > 0.5) : (n < 0.5);
-                if (acrossBoundary) minDist2 = min(minDist2, d2);
+                float n = texture(sphereMask, vUv + vec2(float(dx), float(dy)) / resolution).r;
+                bool across = (m < 0.5) ? (n > 0.5) : (n < 0.5);
+                if (across) minDist2 = min(minDist2, d2);
               }
             }
           }
-          float alpha = (minDist2 < 9.5) ? 1.0 - smoothstep(0.5, 3.5, sqrt(minDist2)) : 0.0;
-          gl_FragColor = mix(color, vec4(1.0), alpha);
+          float outlineA = (minDist2 < 9.5) ? 1.0 - smoothstep(0.5, 3.5, sqrt(minDist2)) : 0.0;
+          vec4 result = mix(color, vec4(1.0), outlineA);
+
+          // ── symbols: ✓ unobstructed · ~ partial · ✗ obstructed · ◌ pending ──
+          for (int i = 0; i < ${MAX_SPHERES}; i++) {
+            if (i >= uNumSpheres) break;
+            vec4  sph    = uSphereData[i];
+            int   status = int(sph.z + 0.5);
+            if (texture(sphereMask, sph.xy).r < 0.5) continue;
+            vec2  delta  = (vUv - sph.xy) * resolution;
+            float sr     = sph.w * 0.6;
+            if (dot(delta, delta) > (sr + 2.0) * (sr + 2.0)) continue;
+            vec2  p = delta / sr;
+            float symA;
+            if (status == 0) {
+              symA = 1.0 - smoothstep(0.0, 6.0 / sr, sdCheck(p));
+            } else if (status == 1) {
+              symA = 1.0 - smoothstep(0.0, 6.0 / sr, sdTilde(p));
+            } else if (status == 2) {
+              symA = 1.0 - smoothstep(0.0, 6.0 / sr, sdCross(p));
+            } else {
+              symA = spinnerAlpha(p, uTime);
+            }
+            result = mix(result, vec4(1.0), symA);
+          }
+
+          fragColor = result;
         }
       `,
     })
@@ -377,52 +467,87 @@ function SphereOutline({ meshRefs }: { meshRefs: MeshRef[] }) {
     )
   }, [gl, targets, size, compositeMat])
 
-  useFrame(() => {
+  useFrame((state) => {
     const meshes = meshRefs.map(r => r.current).filter(Boolean) as THREE.InstancedMesh[]
     const ctx = gl.getContext() as WebGL2RenderingContext
 
-    // Pass 1 — render full scene to sceneTgt (colour + depth populated by HW)
+    // Pass 1 — render full scene → sceneTgt
     gl.setRenderTarget(targets.sceneTgt)
     gl.render(scene, camera)
 
-    // Pass 2 — build sphere mask in maskTgt with correct HW depth occlusion:
-    //   2a: render full scene to maskTgt with colour writes off → populates depth buffer
+    // Pass 2 — sphere mask with HW depth occlusion
     gl.setRenderTarget(targets.maskTgt)
     ctx.colorMask(false, false, false, false)
     gl.render(scene, camera)
     ctx.colorMask(true, true, true, true)
-
-    //   2b: clear only the colour buffer, keeping the depth from 2a
     gl.clear(true, false, false)
-
-    //   2c: render sphere-only layer with HW depth test; occluded fragments are
-    //       naturally discarded because their depth > the scene depth in the buffer.
     const origLayerMasks = meshes.map(m => m.layers.mask)
     const prevCamMask    = camera.layers.mask
     meshes.forEach(m => m.layers.set(1))
     camera.layers.set(1)
     scene.overrideMaterial = whiteMat
     const prevAutoClear = gl.autoClear
-    gl.autoClear = false       // must NOT clear depth before this render
+    gl.autoClear = false
     gl.render(scene, camera)
     gl.autoClear = prevAutoClear
     scene.overrideMaterial = null
     camera.layers.mask = prevCamMask
     meshes.forEach((m, i) => { m.layers.mask = origLayerMasks[i] })
 
-    // Pass 3 — composite scene colour + outline onto the canvas (sRGB output)
+    // Project sphere centres to UV space for symbol rendering.
+    // Also compute the projected screen radius so symbols scale with the sphere.
+    const dpr = gl.getPixelRatio()
+    const pw  = Math.round(size.width  * dpr)
+    const ph  = Math.round(size.height * dpr)
+    const n   = Math.min(samplePoints.length, MAX_SPHERES)
+    const buf = sphereDataBuf.current
+    const pv  = projVec.current
+    const ev  = edgeVec.current
+    const cr  = camRight.current
+    cr.setFromMatrixColumn(camera.matrixWorld, 0)  // camera right in world space
+
+    for (let i = 0; i < n; i++) {
+      const mp = samplePoints[i].measurement_point
+      pv.set(mp.x, mp.z, -mp.y)
+      pv.project(camera)
+      const cx = (pv.x + 1) * 0.5
+      const cy = (pv.y + 1) * 0.5
+
+      // Project sphere edge (centre + right × sphere_radius) to get screen radius in px
+      ev.set(mp.x + cr.x * 0.8, mp.z + cr.y * 0.8, -mp.y + cr.z * 0.8)
+      ev.project(camera)
+      const dx = ((ev.x + 1) * 0.5 - cx) * pw
+      const dy = ((ev.y + 1) * 0.5 - cy) * ph
+      const hoverScale   = i === hoveredSphereRef.current ? 1.8 : 1.0
+      const screenRadius = Math.sqrt(dx * dx + dy * dy) * hoverScale
+
+      const result = analyses[i]?.result
+      const si     = result === 'unobstructed' ? 0
+                   : result === 'partially_obstructed' ? 1
+                   : result === 'obstructed' ? 2 : 3
+      buf[i * 4 + 0] = cx
+      buf[i * 4 + 1] = cy
+      buf[i * 4 + 2] = si
+      buf[i * 4 + 3] = screenRadius
+    }
+    compositeMat.uniforms.uSphereData.value = buf
+    compositeMat.uniforms.uNumSpheres.value = n
+    compositeMat.uniforms.uTime.value = state.clock.elapsedTime
+
+    // Pass 3 — composite to canvas (sRGB output)
     gl.outputColorSpace = THREE.SRGBColorSpace
     gl.setRenderTarget(null)
     gl.render(orthoScene, orthoCamera)
-    gl.outputColorSpace = THREE.LinearSRGBColorSpace  // restore for next frame
+    gl.outputColorSpace = THREE.LinearSRGBColorSpace
   }, 1)
 
   return null
 }
 
 function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick }: SceneProps) {
-  const objUrl = `/api/rooftop/render/${binId}`
+  const objUrl         = `/api/rooftop/render/${binId}`
   const [sphereRefs, setSphereRefs] = useState<MeshRef[]>([])
+  const hoveredSphereRef = useRef<number>(-1)
   return (
     <>
       <ambientLight intensity={0.6} />
@@ -430,10 +555,23 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick }: 
       <CameraSync stateRef={cameraStateRef} />
       <Suspense fallback={null}>
         <TerrainMesh objUrl={objUrl} samplePoints={samplePoints} analyses={analyses} />
-        <SamplePoints samplePoints={samplePoints} analyses={analyses} onPointClick={onPointClick} onRefsChange={setSphereRefs} />
+        <SamplePoints
+          samplePoints={samplePoints}
+          analyses={analyses}
+          onPointClick={onPointClick}
+          onRefsChange={setSphereRefs}
+          onHover={(idx) => { hoveredSphereRef.current = idx }}
+          onHoverEnd={() => { hoveredSphereRef.current = -1 }}
+          hoveredSphereRef={hoveredSphereRef}
+        />
         <CameraFit objUrl={objUrl} stateRef={cameraStateRef} />
       </Suspense>
-      <SphereOutline meshRefs={sphereRefs} />
+      <SphereOutline
+        meshRefs={sphereRefs}
+        samplePoints={samplePoints}
+        analyses={analyses}
+        hoveredSphereRef={hoveredSphereRef}
+      />
     </>
   )
 }
