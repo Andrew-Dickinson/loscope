@@ -40,8 +40,8 @@ def test_roundtrip_gps_to_nys_to_gps():
     nys = translate_to_nys_plane(_KNOWN_GPS)
     gps_back = translate_from_nys_plane(nys)
 
-    assert gps_back[0] == pytest.approx(_KNOWN_GPS[0], abs=0.000001)
-    assert gps_back[1] == pytest.approx(_KNOWN_GPS[1], abs=0.000001)
+    assert gps_back[1] == pytest.approx(_KNOWN_GPS[0], abs=0.000001)
+    assert gps_back[0] == pytest.approx(_KNOWN_GPS[1], abs=0.000001)
     # TODO: This is a pretty large vertical error, we should investigate this
     assert gps_back[2] == pytest.approx(_KNOWN_GPS[2], abs=1.0)
 

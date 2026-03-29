@@ -15,6 +15,4 @@ def translate_to_nys_plane(gps_point: tuple[float, float, float]) -> tuple[float
     return gps_to_nys.transform(*gps_point, tt=EPOCH)[:len(gps_point)]
 
 def translate_from_nys_plane(nys_point: tuple[float, float, float]) -> tuple[float, float, float]:
-    transformed = nys_to_gps.transform(*nys_point, tt=EPOCH)[:len(nys_point)]
-    return transformed[1], transformed[0], *transformed[2:]
-
+    return nys_to_gps.transform(*nys_point, tt=EPOCH)[:len(nys_point)]
