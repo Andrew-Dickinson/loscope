@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import InputForm from './components/InputForm/InputForm'
 import type { RooftopSubmitValues } from './components/InputForm/InputForm'
 import RooftopViewer from './components/RooftopViewer/RooftopViewer'
-import type { BackendSamplePoint, PointAnalysis } from './components/RooftopViewer/RooftopViewer'
+import type { BackendSamplePoint, PointAnalysis, RooftopCameraState } from './components/RooftopViewer/RooftopViewer'
 import TileMap from './components/TileMap/TileMap'
 import type { AnalysisOverview } from './components/TileMap/TileMap'
 import LoadingToast from './components/ui/LoadingToast'
@@ -95,6 +95,9 @@ export default function App() {
   // Abort ref — set to true to stop the analysis loop between requests
   const abortRef = useRef(false)
   const [analyzing, setAnalyzing] = useState(false)
+
+  // Persists rooftop camera across map view navigation
+  const rooftopCameraRef = useRef<RooftopCameraState | null>(null)
 
   const handleSubmit = useCallback(async (values: RooftopSubmitValues) => {
     // Reset
@@ -203,6 +206,7 @@ export default function App() {
               binId={binId}
               samplePoints={samplePoints}
               analyses={analyses}
+              cameraStateRef={rooftopCameraRef}
               onPointClick={handlePointClick}
             />
           ) : (

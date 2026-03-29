@@ -6,7 +6,7 @@
  * - Renders sample point spheres (grey while analysis pending, colored when done)
  * - Click a sphere → onPointClick(index)
  */
-import { useRef, useMemo, useEffect, Suspense } from 'react'
+import { useRef, useState, useMemo, useEffect, Suspense } from 'react'
 import { Canvas, useLoader, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
@@ -37,6 +37,7 @@ interface RooftopViewerProps {
   binId: string
   samplePoints: BackendSamplePoint[]
   analyses: (PointAnalysis | null)[]
+  cameraStateRef: React.MutableRefObject<RooftopCameraState | null>
   onPointClick: (idx: number) => void
 }
 
@@ -112,6 +113,7 @@ function SamplePoints({ samplePoints, analyses, onPointClick }: SamplePointsProp
           samplePoints={samplePoints}
           color={STATUS_COLOR[status] ?? PENDING_COLOR}
           dummy={dummy}
+          hoverable={status !== '__pending__'}
           onPointClick={onPointClick}
         />
       ))}
@@ -124,25 +126,51 @@ interface SphereGroupProps {
   samplePoints: BackendSamplePoint[]
   color: number
   dummy: THREE.Object3D
+  hoverable: boolean
   onPointClick: (idx: number) => void
 }
 
-function SphereGroup({ idxs, samplePoints, color, dummy, onPointClick }: SphereGroupProps) {
+function SphereGroup({ idxs, samplePoints, color, dummy, hoverable, onPointClick }: SphereGroupProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null)
   const geo = useMemo(() => new THREE.SphereGeometry(0.8, 8, 6), [])
   const mat = useMemo(() => new THREE.MeshBasicMaterial({ color }), [color])
+  const [hoveredId, setHoveredId] = useState<number | null>(null)
+  const prevHoveredId = useRef<number | null>(null)
 
+  // Set all instance matrices at normal scale
   useEffect(() => {
     const mesh = meshRef.current
     if (!mesh) return
     idxs.forEach((ptIdx, i) => {
       const mp = samplePoints[ptIdx].measurement_point
       dummy.position.set(mp.x, mp.z, -mp.y)
+      dummy.scale.set(1, 1, 1)
       dummy.updateMatrix()
       mesh.setMatrixAt(i, dummy.matrix)
     })
     mesh.instanceMatrix.needsUpdate = true
   }, [idxs, samplePoints, dummy])
+
+  // Scale hovered instance up, restore previous
+  useEffect(() => {
+    const mesh = meshRef.current
+    if (!mesh) return
+    const applyScale = (instanceIdx: number, scale: number) => {
+      const mp = samplePoints[idxs[instanceIdx]].measurement_point
+      dummy.position.set(mp.x, mp.z, -mp.y)
+      dummy.scale.set(scale, scale, scale)
+      dummy.updateMatrix()
+      mesh.setMatrixAt(instanceIdx, dummy.matrix)
+      dummy.scale.set(1, 1, 1)
+    }
+    if (prevHoveredId.current !== null) applyScale(prevHoveredId.current, 1)
+    if (hoveredId !== null) applyScale(hoveredId, 1.8)
+    prevHoveredId.current = hoveredId
+    mesh.instanceMatrix.needsUpdate = true
+  }, [hoveredId, idxs, samplePoints, dummy])
+
+  // Reset cursor if unmounted while hovering
+  useEffect(() => () => { document.body.style.cursor = 'default' }, [])
 
   return (
     <instancedMesh
@@ -152,34 +180,69 @@ function SphereGroup({ idxs, samplePoints, color, dummy, onPointClick }: SphereG
         e.stopPropagation()
         if (e.instanceId !== undefined) onPointClick(idxs[e.instanceId])
       }}
+      onPointerOver={hoverable ? (e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation()
+        if (e.instanceId !== undefined) {
+          setHoveredId(e.instanceId)
+          document.body.style.cursor = 'pointer'
+        }
+      } : undefined}
+      onPointerOut={hoverable ? () => {
+        setHoveredId(null)
+        document.body.style.cursor = 'default'
+      } : undefined}
     />
   )
 }
 
-// ── Camera auto-fit ───────────────────────────────────────────────────────────
-function CameraFit({ objUrl }: { objUrl: string }) {
+// ── Camera state persistence ──────────────────────────────────────────────────
+export interface RooftopCameraState {
+  position: [number, number, number]
+  target:   [number, number, number]
+}
+
+// Writes camera + orbit target to a ref on every controls change (no re-renders).
+function CameraSync({ stateRef }: { stateRef: React.MutableRefObject<RooftopCameraState | null> }) {
+  const { camera, controls } = useThree()
+  useEffect(() => {
+    if (!controls) return
+    const oc = controls as unknown as { target: THREE.Vector3; addEventListener: Function; removeEventListener: Function }
+    const save = () => {
+      stateRef.current = {
+        position: camera.position.toArray() as [number, number, number],
+        target:   oc.target.toArray()       as [number, number, number],
+      }
+    }
+    oc.addEventListener('change', save)
+    return () => oc.removeEventListener('change', save)
+  }, [camera, controls, stateRef])
+  return null
+}
+
+// Auto-fits on first load; restores saved state if available.
+function CameraFit({ objUrl, stateRef }: { objUrl: string; stateRef: React.MutableRefObject<RooftopCameraState | null> }) {
   const { camera, controls } = useThree()
   const obj = useLoader(OBJLoader, objUrl)
 
   useEffect(() => {
-    const box = new THREE.Box3().setFromObject(obj)
-    const center = new THREE.Vector3()
-    const size   = new THREE.Vector3()
-    box.getCenter(center)
-    box.getSize(size)
-    const span = Math.max(size.x, size.z)
-    camera.position.set(
-      center.x - span * 0.6,
-      center.y + span * 0.9,
-      center.z + span * 1.3,
-    )
-    camera.lookAt(center)
-    if (controls) {
-      const oc = controls as unknown as { target: THREE.Vector3; update: () => void }
-      oc.target.copy(center)
-      oc.update()
+    const oc = controls as unknown as { target: THREE.Vector3; update: () => void } | null
+    if (stateRef.current) {
+      const { position, target } = stateRef.current
+      camera.position.set(...position)
+      if (oc) { oc.target.set(...target); oc.update() }
+      camera.lookAt(new THREE.Vector3(...target))
+    } else {
+      const box = new THREE.Box3().setFromObject(obj)
+      const center = new THREE.Vector3()
+      const size   = new THREE.Vector3()
+      box.getCenter(center)
+      box.getSize(size)
+      const span = Math.max(size.x, size.z)
+      camera.position.set(center.x - span * 0.6, center.y + span * 0.9, center.z + span * 1.3)
+      camera.lookAt(center)
+      if (oc) { oc.target.copy(center); oc.update() }
     }
-  }, [obj, camera, controls])
+  }, [obj, camera, controls, stateRef])
 
   return null
 }
@@ -189,26 +252,28 @@ interface SceneProps {
   binId: string
   samplePoints: BackendSamplePoint[]
   analyses: (PointAnalysis | null)[]
+  cameraStateRef: React.MutableRefObject<RooftopCameraState | null>
   onPointClick: (idx: number) => void
 }
 
-function Scene({ binId, samplePoints, analyses, onPointClick }: SceneProps) {
+function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick }: SceneProps) {
   const objUrl = `/api/rooftop/render/${binId}`
   return (
     <>
       <ambientLight intensity={0.6} />
       <directionalLight position={[1, 3, 2]} intensity={1.0} color={0xffeedd} />
+      <CameraSync stateRef={cameraStateRef} />
       <Suspense fallback={null}>
         <TerrainMesh objUrl={objUrl} samplePoints={samplePoints} analyses={analyses} />
         <SamplePoints samplePoints={samplePoints} analyses={analyses} onPointClick={onPointClick} />
-        <CameraFit objUrl={objUrl} />
+        <CameraFit objUrl={objUrl} stateRef={cameraStateRef} />
       </Suspense>
     </>
   )
 }
 
 // ── Top-level ─────────────────────────────────────────────────────────────────
-export default function RooftopViewer({ binId, samplePoints, analyses, onPointClick }: RooftopViewerProps) {
+export default function RooftopViewer({ binId, samplePoints, analyses, cameraStateRef, onPointClick }: RooftopViewerProps) {
   const n_clear   = analyses.filter(a => a?.result === 'unobstructed').length
   const n_partial = analyses.filter(a => a?.result === 'partially_obstructed').length
   const n_full    = analyses.filter(a => a?.result === 'obstructed').length
@@ -226,6 +291,7 @@ export default function RooftopViewer({ binId, samplePoints, analyses, onPointCl
           binId={binId}
           samplePoints={samplePoints}
           analyses={analyses}
+          cameraStateRef={cameraStateRef}
           onPointClick={onPointClick}
         />
       </Canvas>
