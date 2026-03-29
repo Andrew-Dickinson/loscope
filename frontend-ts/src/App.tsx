@@ -3,116 +3,218 @@ import type { ReactNode } from 'react'
 import InputForm from './components/InputForm/InputForm'
 import type { RooftopSubmitValues } from './components/InputForm/InputForm'
 import RooftopViewer from './components/RooftopViewer/RooftopViewer'
-import type { RooftopResult, SamplePoint } from './components/RooftopViewer/RooftopViewer'
+import type { BackendSamplePoint, PointAnalysis } from './components/RooftopViewer/RooftopViewer'
 import TileMap from './components/TileMap/TileMap'
+import type { AnalysisOverview } from './components/TileMap/TileMap'
 import LoadingToast from './components/ui/LoadingToast'
-import { useJob } from './hooks/useJob'
-import type { JobState } from './hooks/useJob'
+import type { LoadingState } from './components/ui/LoadingToast'
 
-type AppState = 'input' | 'rooftop' | 'tilemap'
+type AppState = 'input' | 'rooftop' | 'map'
+
+interface ActiveMap {
+  analysisId: string
+  overview: AnalysisOverview
+}
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+
+async function toNys(lat: number, lon: number, alt_m: number): Promise<[number, number, number]> {
+  const res = await fetch('/api/coords/toNys', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lat, lon, alt_m }),
+  })
+  if (!res.ok) throw new Error(`Coordinate conversion failed: HTTP ${res.status}`)
+  const d = await res.json() as { nys_e: number; nys_n: number; nys_z: number }
+  return [d.nys_e, d.nys_n, d.nys_z]
+}
+
+async function getSamplePoints(
+  binId: string,
+  params: { mast_offset_ft: number; sample_spacing: number },
+): Promise<BackendSamplePoint[]> {
+  const res = await fetch(`/api/rooftop/samplePoints/${binId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) throw new Error(`Sample points failed: HTTP ${res.status}`)
+  const data = await res.json() as { sample_points: BackendSamplePoint[] }
+  return data.sample_points
+}
+
+async function analyzePoint(
+  pt: BackendSamplePoint,
+  nysB: [number, number, number],
+  freqGhz: number,
+): Promise<PointAnalysis> {
+  const res = await fetch('/api/analysis/analyzePointPair', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      point_a_nys: [pt.measurement_point.nys_e, pt.measurement_point.nys_n, pt.measurement_point.nys_z],
+      point_b_nys: nysB,
+      frequency_ghz: freqGhz,
+    }),
+  })
+  if (!res.ok) throw new Error(`Analysis failed: HTTP ${res.status}`)
+  return res.json() as Promise<PointAnalysis>
+}
+
+async function runConcurrent<T>(
+  items: T[],
+  fn: (item: T, idx: number) => Promise<void>,
+  concurrency = 4,
+): Promise<void> {
+  let next = 0
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++
+      await fn(items[i], i)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker))
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [appState, setAppState]         = useState<AppState>('input')
-  const [rooftopJobId, setRooftopJobId] = useState<string | null>(null)
-  const [tileMapJobId, setTileMapJobId] = useState<string | null>(null)
-  const [freqGhz, setFreqGhz]           = useState(24)
+  const [appState, setAppState] = useState<AppState>('input')
+  const [loading,  setLoading]  = useState<LoadingState | null>(null)
 
-  const rooftopJob  = useJob(rooftopJobId)
-  const tileMapJob  = useJob(tileMapJobId)
+  // Rooftop state
+  const [binId,        setBinId]        = useState<string | null>(null)
+  const [samplePoints, setSamplePoints] = useState<BackendSamplePoint[]>([])
+  const [analyses,     setAnalyses]     = useState<(PointAnalysis | null)[]>([])
+  const [nysB,         setNysB]         = useState<[number, number, number] | null>(null)
+  const [freqGhz,      setFreqGhz]      = useState(24)
 
-  // Show toast for whichever job is currently running
-  const activeJob: JobState | null = (() => {
-    if (tileMapJob && tileMapJob.status !== 'done' && tileMapJob.status !== 'error') return tileMapJob
-    if (rooftopJob && rooftopJob.status !== 'done' && rooftopJob.status !== 'error') return rooftopJob
-    return null
-  })()
+  // Map state
+  const [activeMap, setActiveMap] = useState<ActiveMap | null>(null)
 
-  const rooftopResult: RooftopResult | null =
-    rooftopJob?.status === 'done' ? (rooftopJob.result as unknown as RooftopResult) : null
-
-  // ── Submit rooftop evaluation ─────────────────────────────────────────────
-  const handleRooftopSubmit = useCallback(async (values: RooftopSubmitValues) => {
-    setRooftopJobId(null)
-    setTileMapJobId(null)
+  const handleSubmit = useCallback(async (values: RooftopSubmitValues) => {
+    // Reset
+    setBinId(null); setSamplePoints([]); setAnalyses([]); setActiveMap(null); setNysB(null)
     setFreqGhz(values.frequency_ghz)
     setAppState('rooftop')
+
     try {
-      const res = await fetch('/api/evaluate-rooftop', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(values),
+      setLoading({ message: 'Converting far-end coordinates…' })
+      const nysBPoint = await toNys(values.lat, values.lon, values.alt_m)
+
+      setLoading({ message: 'Loading rooftop sample points…' })
+      const points = await getSamplePoints(values.bin_id, {
+        mast_offset_ft: values.mast_offset_ft,
+        sample_spacing: values.sample_spacing,
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const { job_id } = await res.json() as { job_id: string }
-      setRooftopJobId(job_id)
+
+      setBinId(values.bin_id)
+      setNysB(nysBPoint)
+      setSamplePoints(points)
+
+      if (points.length === 0) {
+        setLoading(null)
+        return
+      }
+
+      const total = points.length
+      let done = 0
+      setAnalyses(new Array(total).fill(null))
+      setLoading({ message: `Analyzing 0 / ${total} points…`, progress: 0 })
+
+      const indices = Array.from({ length: total }, (_, i) => i)
+      for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[indices[i], indices[j]] = [indices[j], indices[i]]
+      }
+
+      await runConcurrent(indices, async (ptIdx) => {
+        try {
+          const result = await analyzePoint(points[ptIdx], nysBPoint, values.frequency_ghz)
+          setAnalyses(prev => { const next = [...prev]; next[ptIdx] = result; return next })
+        } catch {
+          // Leave analysis[ptIdx] as null on error; counting as done anyway
+        }
+        done++
+        setLoading({
+          message: `Analyzing ${done} / ${total} points…`,
+          progress: Math.round(done / total * 100),
+        })
+      })
+
+      setLoading(null)
     } catch (err) {
-      console.error('Rooftop submit failed:', err)
-      setAppState('input')
+      setLoading({ message: String(err), isError: true })
     }
   }, [])
 
-  // ── Point click → tile map ────────────────────────────────────────────────
-  const handlePointClick = useCallback(async (point: SamplePoint) => {
-    if (!rooftopResult?._nys_b) return
-    setTileMapJobId(null)
-    setAppState('tilemap')
+  const handlePointClick = useCallback(async (idx: number) => {
+    const analysis = analyses[idx]
+    if (!analysis) return
+
+    setActiveMap(null)
+    setAppState('map')
+    setLoading({ message: 'Loading map overview…' })
+
     try {
-      const res = await fetch('/api/tile-map', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nys_a: [point.nys_e, point.nys_n, point.nys_z],
-          nys_b: rooftopResult._nys_b,
-          frequency_ghz: freqGhz,
-        }),
-      })
+      const res = await fetch(`/api/analysis/overview/${analysis.analysis_id}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const { job_id } = await res.json() as { job_id: string }
-      setTileMapJobId(job_id)
+      const overview = await res.json() as AnalysisOverview
+      setActiveMap({ analysisId: analysis.analysis_id, overview })
+      setLoading(null)
     } catch (err) {
-      console.error('Tile-map submit failed:', err)
+      setLoading({ message: String(err), isError: true })
     }
-  }, [rooftopResult, freqGhz])
+  }, [analyses])
+
+  const n_clear   = analyses.filter(a => a?.result === 'unobstructed').length
+  const n_partial = analyses.filter(a => a?.result === 'partially_obstructed').length
+  const n_full    = analyses.filter(a => a?.result === 'obstructed').length
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <LoadingToast job={activeJob} />
+      <LoadingToast loading={loading} />
 
       {appState === 'input' && (
-        <InputForm onSubmit={handleRooftopSubmit} />
+        <InputForm onSubmit={handleSubmit} />
       )}
 
       {appState === 'rooftop' && (
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           <TopBar
-            left={<BackButton onClick={() => setAppState('input')} />}
-            center={rooftopResult && <RooftopHUD result={rooftopResult} />}
+            left={<BackButton onClick={() => { setAppState('input'); setLoading(null) }} />}
+            center={binId && <RooftopHUD binId={binId} nClear={n_clear} nPartial={n_partial} nFull={n_full} />}
             right={<Hint>Click a point to view tile map</Hint>}
           />
-          {rooftopResult ? (
+          {binId && samplePoints.length > 0 ? (
             <RooftopViewer
-              jobId={rooftopJobId}
-              result={rooftopResult}
+              binId={binId}
+              samplePoints={samplePoints}
+              analyses={analyses}
               onPointClick={handlePointClick}
             />
           ) : (
-            <WaitingScreen job={rooftopJob} label="Evaluating building…" />
+            <WaitingScreen label={
+              loading?.isError ? `Error: ${loading.message}` : 'Loading rooftop…'
+            } />
           )}
         </div>
       )}
 
-      {appState === 'tilemap' && (
+      {appState === 'map' && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={styles.topBarFlat}>
-            <BackButton onClick={() => setAppState('rooftop')} />
+            <BackButton onClick={() => { setAppState('rooftop'); setLoading(null) }} />
             <Hint>Click a tile to open 3D view</Hint>
           </div>
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            <TileMap
-              tileMapJob={tileMapJob}
-              rooftopResult={rooftopResult}
-              frequency_ghz={freqGhz}
-            />
+            {activeMap ? (
+              <TileMap overview={activeMap.overview} analysisId={activeMap.analysisId} />
+            ) : (
+              <WaitingScreen label={
+                loading?.isError ? `Error: ${loading.message}` : 'Loading map…'
+              } />
+            )}
           </div>
         </div>
       )}
@@ -122,13 +224,7 @@ export default function App() {
 
 // ── Shared UI helpers ─────────────────────────────────────────────────────────
 
-interface TopBarProps {
-  left: ReactNode
-  center: ReactNode
-  right: ReactNode
-}
-
-function TopBar({ left, center, right }: TopBarProps) {
+function TopBar({ left, center, right }: { left: ReactNode; center: ReactNode; right: ReactNode }) {
   return (
     <div style={styles.topBarAbs}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -141,33 +237,30 @@ function TopBar({ left, center, right }: TopBarProps) {
 }
 
 function BackButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button style={styles.backBtn} onClick={onClick}>← Back</button>
-  )
+  return <button style={styles.backBtn} onClick={onClick}>← Back</button>
 }
 
 function Hint({ children }: { children: ReactNode }) {
   return <span style={styles.hint}>{children}</span>
 }
 
-function RooftopHUD({ result }: { result: RooftopResult }) {
-  const { n_clear, n_partial, n_full } = result.summary
+function RooftopHUD({ binId, nClear, nPartial, nFull }: {
+  binId: string; nClear: number; nPartial: number; nFull: number
+}) {
   return (
     <span style={styles.hud}>
-      BIN {result.bin_id}&nbsp;·&nbsp;
-      <span style={{ color: '#22cc44' }}>{n_clear} clear</span>&nbsp;·&nbsp;
-      <span style={{ color: '#ffcc00' }}>{n_partial} partial</span>&nbsp;·&nbsp;
-      <span style={{ color: '#ff4444' }}>{n_full} blocked</span>
+      BIN {binId}&nbsp;·&nbsp;
+      <span style={{ color: '#22cc44' }}>{nClear} clear</span>&nbsp;·&nbsp;
+      <span style={{ color: '#ffcc00' }}>{nPartial} partial</span>&nbsp;·&nbsp;
+      <span style={{ color: '#ff4444' }}>{nFull} obstructed</span>
     </span>
   )
 }
 
-function WaitingScreen({ job, label }: { job: JobState | null; label: string }) {
+function WaitingScreen({ label }: { label: string }) {
   return (
     <div style={styles.waiting}>
-      {job?.status === 'error'
-        ? <span style={{ color: '#ff4444' }}>Error: {job.error?.trim().split('\n').pop()}</span>
-        : <span style={{ color: '#484f58' }}>{label}</span>}
+      <span style={{ color: '#484f58' }}>{label}</span>
     </div>
   )
 }

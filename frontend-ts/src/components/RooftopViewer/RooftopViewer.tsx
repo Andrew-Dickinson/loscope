@@ -1,10 +1,10 @@
 /**
  * Interactive 3D rooftop viewer using React Three Fiber.
  *
- * - Loads building terrain OBJ from /api/rooftop/<jobId>/terrain.obj
+ * - Loads building OBJ from /api/rooftop/render/<binId>
  * - Colors terrain with Voronoi shader (nearest sample point status)
- * - Renders measurement point spheres as InstancedMesh
- * - Click a sphere → onPointClick(point) with absolute NYS coords
+ * - Renders sample point spheres (grey while analysis pending, colored when done)
+ * - Click a sphere → onPointClick(index)
  */
 import { useRef, useMemo, useEffect, Suspense } from 'react'
 import { Canvas, useLoader, useThree } from '@react-three/fiber'
@@ -14,57 +14,62 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { buildVoronoiMaterial } from './VoronoiMaterial'
 import type { ThreeEvent } from '@react-three/fiber'
 
-export interface SamplePoint {
+export interface EncodedPoint {
   x: number
   y: number
   z: number
-  s: string
   nys_e: number
   nys_n: number
   nys_z: number
 }
 
-export interface RooftopSummary {
-  n_clear: number
-  n_partial: number
-  n_full: number
-  total: number
+export interface BackendSamplePoint {
+  display_point: EncodedPoint
+  measurement_point: EncodedPoint
 }
 
-export interface RooftopResult {
-  bin_id: string
-  job_id: string
-  x_sw: number
-  y_sw: number
-  display_points: SamplePoint[]
-  points: SamplePoint[]
-  summary: RooftopSummary
-  _nys_b: [number, number, number]
+export interface PointAnalysis {
+  analysis_id: string
+  result: string  // 'unobstructed' | 'partially_obstructed' | 'obstructed'
 }
 
 interface RooftopViewerProps {
-  jobId: string | null
-  result: RooftopResult
-  onPointClick: (point: SamplePoint) => void
+  binId: string
+  samplePoints: BackendSamplePoint[]
+  analyses: (PointAnalysis | null)[]
+  onPointClick: (idx: number) => void
 }
 
 const STATUS_COLOR: Record<string, number> = {
   unobstructed:         0x22cc44,
   partially_obstructed: 0xffcc00,
-  fully_obstructed:     0xff4444,
+  obstructed:           0xff4444,
 }
+const PENDING_COLOR = 0x94a3b8
 
 // ── Terrain mesh ──────────────────────────────────────────────────────────────
 interface TerrainMeshProps {
   objUrl: string
-  displayPoints: SamplePoint[]
+  samplePoints: BackendSamplePoint[]
+  analyses: (PointAnalysis | null)[]
 }
 
-function TerrainMesh({ objUrl, displayPoints }: TerrainMeshProps) {
+function TerrainMesh({ objUrl, samplePoints, analyses }: TerrainMeshProps) {
   const obj = useLoader(OBJLoader, objUrl)
-  const mat = useMemo(() => buildVoronoiMaterial(displayPoints), [displayPoints])
+
+  const voronoiPoints = useMemo(() => samplePoints.map((sp, i) => ({
+    x: sp.display_point.x,
+    y: sp.display_point.y,
+    z: sp.display_point.z,
+    status: analyses[i]?.result ?? '__pending__',
+  })), [samplePoints, analyses])
+
+  const mat = useMemo(() => buildVoronoiMaterial(voronoiPoints), [voronoiPoints])
 
   useEffect(() => {
+    // OBJ is Z-up (X=easting, Y=northing, Z=elev); Three.js is Y-up.
+    // Rotate -90° around X → maps (x,y,z) to (x, z, -y), matching sphere placement.
+    obj.rotation.x = -Math.PI / 2
     obj.traverse(child => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh
@@ -79,33 +84,33 @@ function TerrainMesh({ objUrl, displayPoints }: TerrainMeshProps) {
 
 // ── Sample point spheres ──────────────────────────────────────────────────────
 interface SamplePointsProps {
-  points: SamplePoint[]
-  onPointClick: (point: SamplePoint) => void
+  samplePoints: BackendSamplePoint[]
+  analyses: (PointAnalysis | null)[]
+  onPointClick: (idx: number) => void
 }
 
-interface IndexedPoint extends SamplePoint {
-  _idx: number
-}
-
-function SamplePoints({ points, onPointClick }: SamplePointsProps) {
+function SamplePoints({ samplePoints, analyses, onPointClick }: SamplePointsProps) {
   const dummy = useMemo(() => new THREE.Object3D(), [])
 
+  // Group indices by color
   const groups = useMemo(() => {
-    const g: Record<string, IndexedPoint[]> = {}
-    points.forEach((pt, idx) => {
-      if (!g[pt.s]) g[pt.s] = []
-      g[pt.s].push({ ...pt, _idx: idx })
+    const g: Record<string, number[]> = {}
+    samplePoints.forEach((_, i) => {
+      const status = analyses[i]?.result ?? '__pending__'
+      if (!g[status]) g[status] = []
+      g[status].push(i)
     })
     return g
-  }, [points])
+  }, [samplePoints, analyses])
 
   return (
     <>
-      {Object.entries(groups).map(([status, pts]) => (
+      {Object.entries(groups).map(([status, idxs]) => (
         <SphereGroup
           key={status}
-          pts={pts}
-          color={STATUS_COLOR[status] ?? 0xffffff}
+          idxs={idxs}
+          samplePoints={samplePoints}
+          color={STATUS_COLOR[status] ?? PENDING_COLOR}
           dummy={dummy}
           onPointClick={onPointClick}
         />
@@ -115,13 +120,14 @@ function SamplePoints({ points, onPointClick }: SamplePointsProps) {
 }
 
 interface SphereGroupProps {
-  pts: IndexedPoint[]
+  idxs: number[]
+  samplePoints: BackendSamplePoint[]
   color: number
   dummy: THREE.Object3D
-  onPointClick: (point: SamplePoint) => void
+  onPointClick: (idx: number) => void
 }
 
-function SphereGroup({ pts, color, dummy, onPointClick }: SphereGroupProps) {
+function SphereGroup({ idxs, samplePoints, color, dummy, onPointClick }: SphereGroupProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null)
   const geo = useMemo(() => new THREE.SphereGeometry(0.8, 8, 6), [])
   const mat = useMemo(() => new THREE.MeshBasicMaterial({ color }), [color])
@@ -129,32 +135,29 @@ function SphereGroup({ pts, color, dummy, onPointClick }: SphereGroupProps) {
   useEffect(() => {
     const mesh = meshRef.current
     if (!mesh) return
-    pts.forEach((pt, i) => {
-      dummy.position.set(pt.x, pt.z, -pt.y)
+    idxs.forEach((ptIdx, i) => {
+      const mp = samplePoints[ptIdx].measurement_point
+      dummy.position.set(mp.x, mp.z, -mp.y)
       dummy.updateMatrix()
       mesh.setMatrixAt(i, dummy.matrix)
     })
     mesh.instanceMatrix.needsUpdate = true
-  }, [pts, dummy])
+  }, [idxs, samplePoints, dummy])
 
   return (
     <instancedMesh
       ref={meshRef}
-      args={[geo, mat, pts.length]}
+      args={[geo, mat, idxs.length]}
       onClick={(e: ThreeEvent<MouseEvent>) => {
         e.stopPropagation()
-        if (e.instanceId !== undefined) onPointClick(pts[e.instanceId])
+        if (e.instanceId !== undefined) onPointClick(idxs[e.instanceId])
       }}
     />
   )
 }
 
 // ── Camera auto-fit ───────────────────────────────────────────────────────────
-interface CameraFitProps {
-  objUrl: string
-}
-
-function CameraFit({ objUrl }: CameraFitProps) {
+function CameraFit({ objUrl }: { objUrl: string }) {
   const { camera, controls } = useThree()
   const obj = useLoader(OBJLoader, objUrl)
 
@@ -172,12 +175,9 @@ function CameraFit({ objUrl }: CameraFitProps) {
     )
     camera.lookAt(center)
     if (controls) {
-      const orbitControls = controls as unknown as {
-        target: THREE.Vector3
-        update: () => void
-      }
-      orbitControls.target.copy(center)
-      orbitControls.update()
+      const oc = controls as unknown as { target: THREE.Vector3; update: () => void }
+      oc.target.copy(center)
+      oc.update()
     }
   }, [obj, camera, controls])
 
@@ -186,29 +186,34 @@ function CameraFit({ objUrl }: CameraFitProps) {
 
 // ── Scene ─────────────────────────────────────────────────────────────────────
 interface SceneProps {
-  jobId: string
-  result: RooftopResult
-  onPointClick: (point: SamplePoint) => void
+  binId: string
+  samplePoints: BackendSamplePoint[]
+  analyses: (PointAnalysis | null)[]
+  onPointClick: (idx: number) => void
 }
 
-function Scene({ jobId, result, onPointClick }: SceneProps) {
-  const objUrl = `/api/rooftop/${jobId}/terrain.obj`
-
+function Scene({ binId, samplePoints, analyses, onPointClick }: SceneProps) {
+  const objUrl = `/api/rooftop/render/${binId}`
   return (
     <>
       <ambientLight intensity={0.6} />
       <directionalLight position={[1, 3, 2]} intensity={1.0} color={0xffeedd} />
       <Suspense fallback={null}>
-        <TerrainMesh objUrl={objUrl} displayPoints={result.display_points} />
-        <SamplePoints points={result.points} onPointClick={onPointClick} />
+        <TerrainMesh objUrl={objUrl} samplePoints={samplePoints} analyses={analyses} />
+        <SamplePoints samplePoints={samplePoints} analyses={analyses} onPointClick={onPointClick} />
         <CameraFit objUrl={objUrl} />
       </Suspense>
     </>
   )
 }
 
-// ── Top-level component ───────────────────────────────────────────────────────
-export default function RooftopViewer({ jobId, result, onPointClick }: RooftopViewerProps) {
+// ── Top-level ─────────────────────────────────────────────────────────────────
+export default function RooftopViewer({ binId, samplePoints, analyses, onPointClick }: RooftopViewerProps) {
+  const n_clear   = analyses.filter(a => a?.result === 'unobstructed').length
+  const n_partial = analyses.filter(a => a?.result === 'partially_obstructed').length
+  const n_full    = analyses.filter(a => a?.result === 'obstructed').length
+  const pending   = analyses.filter(a => a === null).length
+
   return (
     <div style={{ position: 'absolute', inset: 0, top: 42 }}>
       <Canvas
@@ -216,35 +221,30 @@ export default function RooftopViewer({ jobId, result, onPointClick }: RooftopVi
         gl={{ antialias: true }}
         style={{ background: '#111827' }}
       >
-        <OrbitControls enableDamping dampingFactor={0.08} />
-        {jobId && (
-          <Scene jobId={jobId} result={result} onPointClick={onPointClick} />
-        )}
+        <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
+        <Scene
+          binId={binId}
+          samplePoints={samplePoints}
+          analyses={analyses}
+          onPointClick={onPointClick}
+        />
       </Canvas>
 
-      {/* Legend */}
       <div style={styles.legend}>
         <div style={styles.legendTitle}>LOS Status</div>
-        <LegendRow color="#22cc44" label={`Unobstructed (${result.summary.n_clear})`} />
-        <LegendRow color="#ffcc00" label={`Partial (${result.summary.n_partial})`} />
-        <LegendRow color="#ff4444" label={`Blocked (${result.summary.n_full})`} />
+        <LegendRow color="#22cc44" label={`Unobstructed (${n_clear})`} />
+        <LegendRow color="#ffcc00" label={`Partial (${n_partial})`} />
+        <LegendRow color="#ff4444" label={`Obstructed (${n_full})`} />
+        {pending > 0 && <LegendRow color="#94a3b8" label={`Pending (${pending})`} />}
       </div>
     </div>
   )
 }
 
-interface LegendRowProps {
-  color: string
-  label: string
-}
-
-function LegendRow({ color, label }: LegendRowProps) {
+function LegendRow({ color, label }: { color: string; label: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 0' }}>
-      <span style={{
-        width: 10, height: 10, borderRadius: '50%',
-        background: color, flexShrink: 0,
-      }} />
+      <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
       <span style={{ fontSize: 12, color: '#e5e7eb', fontFamily: 'monospace' }}>{label}</span>
     </div>
   )

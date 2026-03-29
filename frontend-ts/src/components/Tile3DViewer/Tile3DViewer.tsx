@@ -1,106 +1,160 @@
 /**
  * 3D tile viewer using React Three Fiber.
  *
- * - Displacement-mapped PlaneGeometry terrain (from heightmap PNG data URI)
- * - Optional ortho texture on terrain
- * - Fresnel zone OBJ (translucent, from /api/tile-3d/<jobId>/zone.obj)
- * - Obstruction OBJs (from /api/tile-3d/<jobId>/<obsId>.obj)
- * - OrbitControls
- * - Scrollable legend with visibility toggles
+ * Fetches its own data directly from tileview endpoints — no job polling.
  *
- * OBJ coordinate system: X=local easting, Y=local northing, Z=elevation (ft)
- * Three.js world: rotation.x=-PI/2, position=(-250, 0, 250) centers the tile
+ * - Heightmap: GET /api/tileview/terrain/heightRaster/<tileId> → TIFF decoded by geotiff.js
+ * - Ortho texture: GET /api/tileview/terrain/orthoImage/<tileId>
+ * - Obstruction OBJs: GET /api/tileview/terrain/obstructionObj/<type>/<id>/<tileId>
+ * - Fresnel zone OBJ: GET /api/tileView/fresnelSliceObj/<analysisId>/<tileId>
+ *
+ * Tile obstruction_ids from GET /api/tileview/terrain/tileOverview/<tileId>
+ * are keyed by type: { building: [id, ...], permit: [id, ...], ... }
+ *
+ * OBJ coord system: X=local easting, Y=local northing, Z=elevation (ft)
+ * Three.js transform: rotation.x=-PI/2, position=(-250, 0, 250)
+ *
+ * TIFF layout (from numpy shape (easting=500, northing=500)):
+ *   TIFF row = easting axis, TIFF col = northing axis
+ *   rasters[0][easting * width + northing] = height in inches
  */
-import { useRef, useMemo, useEffect, useState, Suspense } from 'react'
-import { Canvas, useLoader, useThree } from '@react-three/fiber'
+import { useRef, useMemo, useEffect, useState } from 'react'
+import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
-import { useJob } from '../../hooks/useJob'
 import type { ThreeEvent } from '@react-three/fiber'
 
-interface HeightmapData {
-  url: string
-  min_height_in: number
-  max_height_in: number
+interface TileOverviewData {
+  obstruction_ids: Record<string, string[]>  // { type: [id, ...] }
 }
 
-interface ObsInfo {
-  type: string
-  attributes: Record<string, unknown>
+interface HeightmapInfo {
+  data: Uint16Array | Int16Array | Float32Array
+  width: number   // = northing count (TIFF cols)
+  height: number  // = easting count (TIFF rows)
 }
 
-export interface Tile3DResult {
-  tile_id: string
-  job_id: string
-  heightmap: HeightmapData | null
-  ortho_texture: string | null
-  zone_obj_available: boolean
-  obstruction_ids: string[]
-  obs_info: Record<string, ObsInfo>
-}
-
-interface Tile3DViewerProps {
-  jobId: string | null
-  tileId: string | null
-  tileHeightmap?: HeightmapData | null
-  tileOrtho?: string | null
-}
-
-const OBJ_ROTATION: [number, number, number] = [-Math.PI / 2, 0, 0]
-const OBJ_POSITION: [number, number, number] = [-250, 0, 250]
-const OBS_COLORS = [0xff6633, 0xffaa00, 0xff3388, 0xaa44ff, 0x44ccff]
-
-// ── Terrain mesh ──────────────────────────────────────────────────────────────
 interface TerrainInfo {
   minFt: number
   maxFt: number
   heightRange: number
 }
 
+interface TileData {
+  tileOverview: TileOverviewData
+  heightmap: HeightmapInfo
+  zoneAvailable: boolean
+}
+
+// Flat list of obstruction {type, id} pairs
+interface ObsEntry {
+  type: string
+  id: string
+}
+
+const OBJ_ROTATION: [number, number, number] = [-Math.PI / 2, 0, 0]
+const OBJ_POSITION: [number, number, number] = [-250, 0, 250]
+const OBS_COLORS = [0xff6633, 0xffaa00, 0xff3388, 0xaa44ff, 0x44ccff]
+
+// ── Data fetching hook ────────────────────────────────────────────────────────
+function useTileData(tileId: string | null, analysisId: string | null): TileData | null | 'loading' | 'error' {
+  const [state, setState] = useState<TileData | null | 'loading' | 'error'>(null)
+
+  useEffect(() => {
+    if (!tileId || !analysisId) { setState(null); return }
+    setState('loading')
+    let cancelled = false
+
+    const run = async () => {
+      try {
+        // 1. Fetch tile overview (obstruction IDs by type)
+        const overviewRes = await fetch(`/api/tileview/terrain/tileOverview/${tileId}`)
+        if (!overviewRes.ok) throw new Error(`Tile overview HTTP ${overviewRes.status}`)
+        const tileOverview = await overviewRes.json() as TileOverviewData
+        if (cancelled) return
+
+        // 2. Check if Fresnel zone OBJ is available (204 = not in this tile)
+        const zoneRes = await fetch(
+          `/api/tileView/fresnelSliceObj/${analysisId}/${tileId}`,
+          { method: 'HEAD' }
+        )
+        const zoneAvailable = zoneRes.ok && zoneRes.status !== 204
+        if (cancelled) return
+
+        // 3. Fetch + decode TIFF heightmap
+        const tiffRes = await fetch(`/api/tileview/terrain/heightRaster/${tileId}`)
+        if (!tiffRes.ok) throw new Error(`Heightmap HTTP ${tiffRes.status}`)
+        const buf = await tiffRes.arrayBuffer()
+        if (cancelled) return
+
+        const { fromArrayBuffer } = await import('geotiff')
+        const tiff = await fromArrayBuffer(buf)
+        const image = await tiff.getImage()
+        const rasters = await image.readRasters()
+        if (cancelled) return
+
+        const heightmap: HeightmapInfo = {
+          data: rasters[0] as Uint16Array,
+          width: image.getWidth(),
+          height: image.getHeight(),
+        }
+
+        setState({ tileOverview, heightmap, zoneAvailable })
+      } catch {
+        if (!cancelled) setState('error')
+      }
+    }
+
+    run()
+    return () => { cancelled = true }
+  }, [tileId, analysisId])
+
+  return state
+}
+
+// ── Terrain mesh (TIFF displacement) ─────────────────────────────────────────
 interface TerrainMeshProps {
-  heightmapData: HeightmapData
-  orthoUrl: string | null | undefined
+  heightmap: HeightmapInfo
+  orthoUrl: string
   onReady: (info: TerrainInfo) => void
 }
 
-function TerrainMesh({ heightmapData, orthoUrl, onReady }: TerrainMeshProps) {
-  const { min_height_in, max_height_in, url } = heightmapData
-  const minFt = min_height_in / 12
-  const maxFt = max_height_in / 12
-  const heightRange = Math.max(maxFt - minFt, 1)
+function TerrainMesh({ heightmap, orthoUrl, onReady }: TerrainMeshProps) {
+  const { data, width, height } = heightmap
 
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null)
   const [texture,  setTexture]  = useState<THREE.Texture | null>(null)
 
-  // Decode heightmap PNG via offscreen canvas → displace vertices
+  const onReadyRef = useRef(onReady)
+  onReadyRef.current = onReady
+
   useEffect(() => {
-    const img = new Image()
-    img.onload = () => {
-      const cvs = document.createElement('canvas')
-      cvs.width = 500; cvs.height = 500
-      const ctx = cvs.getContext('2d')!
-      ctx.drawImage(img, 0, 0, 500, 500)
-      const pixels = ctx.getImageData(0, 0, 500, 500).data  // RGBA, row 0 = north
+    // width = northing count (TIFF cols), height = easting count (TIFF rows)
+    const geo = new THREE.PlaneGeometry(500, 500, width - 1, height - 1)
+    geo.rotateX(-Math.PI / 2)
+    const pos = geo.attributes['position'] as THREE.BufferAttribute
 
-      const geo = new THREE.PlaneGeometry(500, 500, 499, 499)
-      geo.rotateX(-Math.PI / 2)
-      const pos = geo.attributes['position'] as THREE.BufferAttribute
-      for (let i = 0; i < pos.count; i++) {
-        const col = i % 500
-        const row = Math.floor(i / 500)  // row 0 = north
-        const t = pixels[(row * 500 + col) * 4] / 255
-        pos.setY(i, minFt + t * heightRange)
+    let minFt = Infinity, maxFt = -Infinity
+    for (let i = 0; i < pos.count; i++) {
+      const col = i % width          // easting index
+      const row = Math.floor(i / width)  // PlaneGeometry row (0 = north)
+      const northing = (height - 1) - row  // northing index (row 0 → max northing)
+      const heightIn = data[col * width + northing]  // rasters[0][easting * width + northing]
+      const heightFt = heightIn / 12.0
+      pos.setY(i, heightFt)
+      if (heightIn > 0) {
+        minFt = Math.min(minFt, heightFt)
+        maxFt = Math.max(maxFt, heightFt)
       }
-      pos.needsUpdate = true
-      geo.computeVertexNormals()
-      setGeometry(geo)
-      if (onReady) onReady({ minFt, maxFt, heightRange })
     }
-    img.src = url
-  }, [url, minFt, maxFt, heightRange, onReady])
+    if (minFt === Infinity) { minFt = 0; maxFt = 0 }
+    pos.needsUpdate = true
+    geo.computeVertexNormals()
+    setGeometry(geo)
+    onReadyRef.current({ minFt, maxFt, heightRange: Math.max(maxFt - minFt, 1) })
+  }, [data, width, height])
 
-  // Load ortho texture
   useEffect(() => {
     if (!orthoUrl) return
     const loader = new THREE.TextureLoader()
@@ -117,16 +171,23 @@ function TerrainMesh({ heightmapData, orthoUrl, onReady }: TerrainMeshProps) {
   return <mesh geometry={geometry} material={mat} />
 }
 
-// ── Zone OBJ ──────────────────────────────────────────────────────────────────
-interface ZoneObjProps {
-  jobId: string
+// ── Imperative OBJ loader (avoids useLoader's global Suspense cache) ──────────
+function useObjLoader(url: string): THREE.Group | null {
+  const [obj, setObj] = useState<THREE.Group | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    setObj(null)
+    new OBJLoader().load(url, loaded => { if (!cancelled) setObj(loaded) })
+    return () => { cancelled = true }
+  }, [url])
+  return obj
 }
 
-function ZoneObj({ jobId }: ZoneObjProps) {
-  const url = `/api/tile-3d/${jobId}/zone.obj`
-  const obj = useLoader(OBJLoader, url)
-
+// ── Zone OBJ ──────────────────────────────────────────────────────────────────
+function ZoneObj({ analysisId, tileId }: { analysisId: string; tileId: string }) {
+  const obj = useObjLoader(`/api/tileView/fresnelSliceObj/${analysisId}/${tileId}`)
   useEffect(() => {
+    if (!obj) return
     obj.traverse(child => {
       if ((child as THREE.Mesh).isMesh) {
         (child as THREE.Mesh).material = new THREE.MeshStandardMaterial({
@@ -136,29 +197,18 @@ function ZoneObj({ jobId }: ZoneObjProps) {
       }
     })
   }, [obj])
-
-  return (
-    <primitive
-      object={obj}
-      rotation={OBJ_ROTATION}
-      position={OBJ_POSITION}
-    />
-  )
+  if (!obj) return null
+  return <primitive object={obj} rotation={OBJ_ROTATION} position={OBJ_POSITION} />
 }
 
 // ── Obstruction OBJ ───────────────────────────────────────────────────────────
-interface ObsObjProps {
-  jobId: string
-  obsId: string
-  color: number
-  onHit: (obsId: string) => void
-}
-
-function ObsObj({ jobId, obsId, color, onHit }: ObsObjProps) {
-  const url = `/api/tile-3d/${jobId}/${obsId}.obj`
-  const obj = useLoader(OBJLoader, url)
-
+function ObsObj({ type, obsId, tileId, color, onHit }: {
+  type: string; obsId: string; tileId: string; color: number; onHit: (key: string) => void
+}) {
+  const obj = useObjLoader(`/api/tileview/terrain/obstructionObj/${type}/${obsId}/${tileId}`)
+  const key = `${type}/${obsId}`
   useEffect(() => {
+    if (!obj) return
     obj.traverse(child => {
       if ((child as THREE.Mesh).isMesh) {
         (child as THREE.Mesh).material = new THREE.MeshStandardMaterial({
@@ -167,35 +217,27 @@ function ObsObj({ jobId, obsId, color, onHit }: ObsObjProps) {
       }
     })
   }, [obj, color])
-
+  if (!obj) return null
   return (
     <primitive
       object={obj}
       rotation={OBJ_ROTATION}
       position={OBJ_POSITION}
-      onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onHit(obsId) }}
+      onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onHit(key) }}
     />
   )
 }
 
 // ── Camera setup ──────────────────────────────────────────────────────────────
-interface CameraSetupProps {
-  heightRange: number
-  midFt: number
-}
-
-function CameraSetup({ heightRange, midFt }: CameraSetupProps) {
+function CameraSetup({ heightRange, midFt }: { heightRange: number; midFt: number }) {
   const { camera, controls } = useThree()
 
   useEffect(() => {
     const camDist = Math.max(heightRange * 3, 300)
     if (controls) {
-      const orbitControls = controls as unknown as {
-        target: THREE.Vector3
-        update: () => void
-      }
-      orbitControls.target.set(0, midFt, 0)
-      orbitControls.update()
+      const oc = controls as unknown as { target: THREE.Vector3; update: () => void }
+      oc.target.set(0, midFt, 0)
+      oc.update()
     }
     camera.position.set(camDist * 0.6, midFt + camDist * 0.8, camDist * 0.9)
     camera.lookAt(0, midFt, 0)
@@ -206,13 +248,16 @@ function CameraSetup({ heightRange, midFt }: CameraSetupProps) {
 
 // ── Scene ─────────────────────────────────────────────────────────────────────
 interface SceneProps {
-  result: Tile3DResult
-  onObsClick: (obsId: string) => void
+  tileId: string
+  analysisId: string
+  tileData: TileData
+  orthoUrl: string
+  obstructions: ObsEntry[]
+  onObsClick: (key: string) => void
 }
 
-function Scene({ result, onObsClick }: SceneProps) {
+function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, onObsClick }: SceneProps) {
   const [terrainInfo, setTerrainInfo] = useState<TerrainInfo | null>(null)
-
   const heightRange = terrainInfo?.heightRange ?? 1
   const midFt = terrainInfo ? (terrainInfo.minFt + terrainInfo.maxFt) / 2 : 0
 
@@ -230,29 +275,22 @@ function Scene({ result, onObsClick }: SceneProps) {
         color={0x6080b0}
       />
 
-      {result.heightmap && (
-        <TerrainMesh
-          heightmapData={result.heightmap}
-          orthoUrl={result.ortho_texture}
-          onReady={setTerrainInfo}
+      <TerrainMesh
+        heightmap={tileData.heightmap}
+        orthoUrl={orthoUrl}
+        onReady={setTerrainInfo}
+      />
+
+      {tileData.zoneAvailable && <ZoneObj analysisId={analysisId} tileId={tileId} />}
+      {obstructions.map(({ type, id }, i) => (
+        <ObsObj
+          key={`${type}/${id}`}
+          type={type}
+          obsId={id}
+          tileId={tileId}
+          color={OBS_COLORS[i % OBS_COLORS.length]}
+          onHit={onObsClick}
         />
-      )}
-
-      {result.zone_obj_available && (
-        <Suspense fallback={null}>
-          <ZoneObj jobId={result.job_id} />
-        </Suspense>
-      )}
-
-      {result.obstruction_ids?.map((obsId, i) => (
-        <Suspense key={obsId} fallback={null}>
-          <ObsObj
-            jobId={result.job_id}
-            obsId={obsId}
-            color={OBS_COLORS[i % OBS_COLORS.length]}
-            onHit={onObsClick}
-          />
-        </Suspense>
       ))}
 
       <OrbitControls
@@ -262,36 +300,22 @@ function Scene({ result, onObsClick }: SceneProps) {
         maxDistance={5000}
         maxPolarAngle={Math.PI * 0.9}
       />
-      {terrainInfo && (
-        <CameraSetup heightRange={heightRange} midFt={midFt} />
-      )}
+      {terrainInfo && <CameraSetup heightRange={heightRange} midFt={midFt} />}
     </>
   )
 }
 
 // ── Legend ────────────────────────────────────────────────────────────────────
-interface LegendItem {
-  key: string
-  color: string
-  label: string
-}
-
-interface LegendProps {
-  result: Tile3DResult
-}
-
-function Legend({ result }: LegendProps) {
-  const items: LegendItem[] = [
+function Legend({ tileData, obstructions }: { tileData: TileData; obstructions: ObsEntry[] }) {
+  const items = [
     { key: 'terrain', color: '#ffffff', label: 'Terrain' },
-    ...(result.zone_obj_available ? [{ key: 'zone', color: '#cc44ff', label: 'Fresnel Zone' }] : []),
-    ...(result.obstruction_ids?.map((id, i) => ({
-      key: id,
+    ...(tileData.zoneAvailable ? [{ key: 'zone', color: '#cc44ff', label: 'Fresnel Zone' }] : []),
+    ...obstructions.map(({ type, id }, i) => ({
+      key: `${type}/${id}`,
       color: '#' + OBS_COLORS[i % OBS_COLORS.length].toString(16).padStart(6, '0'),
-      label: `${(result.obs_info?.[id]?.type || 'obstruction').replace(/_/g, ' ')} · ${id.slice(0, 8)}`,
-    })) ?? []),
+      label: `${type.replace(/_/g, ' ')} · ${id.slice(0, 8)}`,
+    })),
   ]
-
-  if (items.length === 0) return null
 
   return (
     <div style={styles.legend}>
@@ -307,39 +331,38 @@ function Legend({ result }: LegendProps) {
 }
 
 // ── Top-level ─────────────────────────────────────────────────────────────────
-export default function Tile3DViewer({ jobId, tileId: _tileId, tileHeightmap: _tileHeightmap, tileOrtho: _tileOrtho }: Tile3DViewerProps) {
-  const job = useJob(jobId)
+interface Tile3DViewerProps {
+  tileId: string | null
+  analysisId: string | null
+}
+
+export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) {
+  const tileData = useTileData(tileId, analysisId)
   const [activeObs, setActiveObs] = useState<string | null>(null)
 
-  const result = job?.status === 'done' ? (job.result as unknown as Tile3DResult) : null
-
-  if (!jobId) {
-    return (
-      <div style={styles.placeholder}>
-        Click a tile on the map to open the 3D view
-      </div>
-    )
+  if (!tileId || !analysisId) {
+    return <div style={styles.placeholder}>Click a tile on the map to open the 3D view</div>
   }
 
-  if (job?.status === 'error') {
-    return (
-      <div style={styles.placeholder}>
-        <span style={{ color: '#ff4444' }}>
-          Error: {job.error?.trim().split('\n').pop()}
-        </span>
-      </div>
-    )
+  if (tileData === 'error') {
+    return <div style={styles.placeholder}><span style={{ color: '#ff4444' }}>Failed to load tile data</span></div>
   }
 
-  if (!result) {
+  if (tileData === 'loading' || tileData === null) {
     return (
       <div style={styles.placeholder}>
         <span style={{ color: '#484f58', fontFamily: 'monospace', fontSize: 12 }}>
-          {job?.message || 'Loading…'}
+          Loading tile data…
         </span>
       </div>
     )
   }
+
+  // Flatten obstruction dict into ordered list
+  const obstructions: ObsEntry[] = Object.entries(tileData.tileOverview.obstruction_ids)
+    .flatMap(([type, ids]) => ids.map(id => ({ type, id })))
+
+  const orthoUrl = `/api/tileview/terrain/orthoImage/${tileId}`
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -349,21 +372,26 @@ export default function Tile3DViewer({ jobId, tileId: _tileId, tileHeightmap: _t
           gl={{ antialias: true }}
           style={{ background: '#0e1117' }}
         >
-          <Scene result={result} onObsClick={setActiveObs} />
+          <Scene
+            tileId={tileId}
+            analysisId={analysisId}
+            tileData={tileData}
+            orthoUrl={orthoUrl}
+            obstructions={obstructions}
+            onObsClick={setActiveObs}
+          />
         </Canvas>
       </div>
 
-      {/* Obstruction label */}
       {activeObs && (
         <div style={styles.obsLabel}>
-          <span>{(result.obs_info?.[activeObs]?.type || 'obstruction').replace(/_/g, ' ')}</span>
-          <span style={{ color: '#484f58', marginLeft: 8, fontSize: 11 }}>{activeObs}</span>
+          <span>{activeObs.split('/')[0].replace(/_/g, ' ')}</span>
+          <span style={{ color: '#484f58', marginLeft: 8, fontSize: 11 }}>{activeObs.split('/')[1]}</span>
           <button style={styles.obsClose} onClick={() => setActiveObs(null)}>×</button>
         </div>
       )}
 
-      {/* Legend */}
-      <Legend result={result} />
+      <Legend tileData={tileData} obstructions={obstructions} />
     </div>
   )
 }

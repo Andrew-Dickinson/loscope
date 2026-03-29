@@ -1,19 +1,20 @@
-import { type JobState } from '../../hooks/useJob'
+export interface LoadingState {
+  message: string
+  progress?: number
+  isError?: boolean
+}
 
 interface LoadingToastProps {
-  job: JobState | null
+  loading: LoadingState | null
 }
 
 /**
  * Non-intrusive loading indicator — fixed top-center bar.
- * Shows when a job is running, disappears when done or on error.
  */
-export default function LoadingToast({ job }: LoadingToastProps) {
-  if (!job || job.status === 'done') return null
+export default function LoadingToast({ loading }: LoadingToastProps) {
+  if (!loading) return null
 
-  const isError = job.status === 'error'
-  const pct = job.progress_pct ?? 0
-  const msg = job.message || (isError ? 'Error' : 'Processing…')
+  const { message, progress, isError = false } = loading
 
   return (
     <div style={{
@@ -31,22 +32,17 @@ export default function LoadingToast({ job }: LoadingToastProps) {
       boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
       backdropFilter: 'blur(8px)',
     }}>
-      {/* Progress bar */}
       {!isError && (
-        <div style={{
-          height: 2,
-          background: 'rgba(255,255,255,0.08)',
-        }}>
+        <div style={{ height: 2, background: 'rgba(255,255,255,0.08)' }}>
           <div style={{
             height: '100%',
-            width: pct > 0 ? `${pct}%` : '30%',
+            width: progress != null && progress > 0 ? `${progress}%` : '30%',
             background: 'linear-gradient(90deg, #388bfd, #58a6ff)',
-            transition: pct > 0 ? 'width 0.4s ease' : undefined,
-            animation: pct === 0 ? 'indeterminate 1.4s ease infinite' : undefined,
+            transition: progress != null && progress > 0 ? 'width 0.4s ease' : undefined,
+            animation: progress == null || progress === 0 ? 'indeterminate 1.4s ease infinite' : undefined,
           }} />
         </div>
       )}
-      {/* Message */}
       <div style={{
         padding: '6px 14px',
         fontSize: 12,
@@ -67,10 +63,10 @@ export default function LoadingToast({ job }: LoadingToastProps) {
           }} />
         )}
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {msg}
+          {message}
         </span>
-        {pct > 0 && !isError && (
-          <span style={{ color: '#484f58', flexShrink: 0 }}>{pct}%</span>
+        {progress != null && progress > 0 && !isError && (
+          <span style={{ color: '#484f58', flexShrink: 0 }}>{Math.round(progress)}%</span>
         )}
       </div>
       <style>{`
