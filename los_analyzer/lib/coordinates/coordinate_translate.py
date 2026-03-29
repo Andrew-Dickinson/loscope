@@ -6,9 +6,9 @@ nys_to_gps = pyproj.Transformer.from_crs(nys_crs, gps_crs, always_xy=True)
 gps_to_nys = pyproj.Transformer.from_crs(gps_crs, nys_crs, always_xy=False)
 
 # Hard to know for sure what value to use here, it sorta depends on what the base
-# layers in the maps we use are doing, 2020 is a reasonable default as it's the refernce for WGS 84 (G2296), but
-# really this could plausibly be anything 2014+
-EPOCH = 2020
+# layers in the maps we use are doing. Emperically, 1990 seems to look pretty good against OSM, even though that doesn't
+# really make much sense
+EPOCH = 1990
 
 
 def translate_to_nys_plane(gps_point: tuple[float, float, float]) -> tuple[float, float, float]:
