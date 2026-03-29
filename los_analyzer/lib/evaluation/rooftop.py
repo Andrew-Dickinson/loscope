@@ -18,7 +18,7 @@ from los_analyzer.lib.fresnel.fresnel_zone2 import compute_fresnel_zone, Fresnel
 from los_analyzer.lib.providers.obstruction_provider import ObstructionProvider
 from los_analyzer.lib.providers.tile_provider import TileProvider
 from los_analyzer.lib.tiles.identify import identify_tiles
-from los_analyzer.lib.tiles.intersect import compute_intersection, IntersectionGrid
+from los_analyzer.lib.tiles.intersect import compute_intersection
 from los_analyzer.lib.tiles.load import load_terrain_grid
 
 
@@ -116,8 +116,8 @@ def evaluate_point(
         zone_partial, tiles, tile_provider, obstruction_types, obstruction_provider
     )
 
-    intersection_full = compute_intersection(zone_full, terrain_full)
-    intersection_partial = compute_intersection(zone_partial, terrain_partial)
+    intersection_full = compute_intersection(zone_full, terrain_full, pt_a_nys, pt_b_nys)
+    intersection_partial = compute_intersection(zone_partial, terrain_partial, pt_a_nys, pt_b_nys)
 
     max_full = _valid_max(intersection_full)
     max_partial = _valid_max(intersection_partial)

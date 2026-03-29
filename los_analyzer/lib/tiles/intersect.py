@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
 from los_analyzer.lib.fresnel.fresnel_zone2 import FresnelZone
 from los_analyzer.lib.tiles.load import TerrainGrid
+
+# XY radius (in US survey feet) around each Fresnel zone endpoint within which
+# obstruction values are zeroed out in the intersection grid.
+ENDPOINT_EXCLUSION_RADIUS_USFT: float = 4.0
 
 
 @dataclass
@@ -20,6 +25,8 @@ class IntersectionGrid:
 def compute_intersection(
     fresnel_zone: FresnelZone,
     terrain: TerrainGrid,
+    pt_a_nys: Optional[tuple[float, float, float]] = None,
+    pt_b_nys: Optional[tuple[float, float, float]] = None,
 ) -> IntersectionGrid:
     """Compute the per-cell obstruction level from a FresnelZone and a TerrainGrid.
 
@@ -46,6 +53,19 @@ def compute_intersection(
         w = int(widths[i])
         if w < maxW:
             values[i, w:] = 0.0
+
+    # Zero out cells within the exclusion radius of either endpoint
+    if pt_a_nys is not None or pt_b_nys is not None:
+        j = np.arange(maxW)[None, :]                                          # (1, maxW)
+        x = fresnel_zone.x_base_offset + fresnel_zone.offsets[:, None] + j   # (H, maxW)
+        y = (fresnel_zone.y_base_offset + np.arange(H))[:, None]             # (H, 1)
+        r2 = ENDPOINT_EXCLUSION_RADIUS_USFT ** 2
+        exclude = np.zeros((H, maxW), dtype=bool)
+        if pt_a_nys is not None:
+            exclude |= (x - pt_a_nys[0]) ** 2 + (y - pt_a_nys[1]) ** 2 <= r2
+        if pt_b_nys is not None:
+            exclude |= (x - pt_b_nys[0]) ** 2 + (y - pt_b_nys[1]) ** 2 <= r2
+        values[exclude] = 0.0
 
     return IntersectionGrid(
         values=values,
