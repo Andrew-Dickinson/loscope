@@ -20,7 +20,7 @@ def render_rooftop(bin_id):
         'model/obj'
     )
 
-@app.get("/api/rooftop/samplePoints/<bin_id>")
+@app.post("/api/rooftop/samplePoints/<bin_id>")
 def sample_rooftop_points(bin_id):
     data = request.get_json(force=True)
     try:
