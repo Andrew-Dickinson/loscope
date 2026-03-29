@@ -54,11 +54,13 @@ def create_zone_obj(zone: FresnelZone, tile_id: str) -> Optional[BytesIO]:
 
     for xi in range(TILE_SIDE_USFT):
         for yi in range(TILE_SIDE_USFT):
-            if not in_zone[xi, yi]:
+            # Rasterized arrays are indexed [northing, easting] (row-major),
+            # so access as [yi, xi] while emitting OBJ coords as (xi=easting, yi=northing).
+            if not in_zone[yi, xi]:
                 continue
 
-            zt = float(top_z[xi, yi])
-            zb = float(bottom_z[xi, yi])
+            zt = float(top_z[yi, xi])
+            zb = float(bottom_z[yi, xi])
             x0, y0 = float(xi), float(yi)
             x1, y1 = x0 + 1.0, y0 + 1.0
 
@@ -89,9 +91,9 @@ def create_zone_obj(zone: FresnelZone, tile_id: str) -> Optional[BytesIO]:
                 (-1,  0, x0, y1, x0, y0),  # west  (-X)
             ):
                 nxi, nyi = xi + dxi, yi + dyi
-                if 0 <= nxi < TILE_SIDE_USFT and 0 <= nyi < TILE_SIDE_USFT and in_zone[nxi, nyi]:
-                    nzt = float(top_z[nxi, nyi])
-                    nzb = float(bottom_z[nxi, nyi])
+                if 0 <= nxi < TILE_SIDE_USFT and 0 <= nyi < TILE_SIDE_USFT and in_zone[nyi, nxi]:
+                    nzt = float(top_z[nyi, nxi])
+                    nzb = float(bottom_z[nyi, nxi])
                     # Top-surface step: fill gap where this cell is higher.
                     if zt > nzt:
                         f.write(f"v {ax} {ay} {nzt:.3f}\n")

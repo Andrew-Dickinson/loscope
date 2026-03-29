@@ -39,7 +39,7 @@ def rasterize_stairstep_grid_for_tile(
             continue
 
         out_col = overlap_e_start - e0
-        out_row = i - i_start
+        out_row = i - (n0 - y_base_offset)  # local northing from tile SW; i_start is wrong when zone starts N of tile SW
         output_values[out_row, out_col:out_col + len(vals)] = vals
 
     return output_values
