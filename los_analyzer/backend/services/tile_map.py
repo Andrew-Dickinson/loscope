@@ -67,7 +67,22 @@ def intersection_image_for_tile(
     rgba = rgba.reshape((TILE_SIDE_USFT, TILE_SIDE_USFT, 4))
 
     rgba = rgba[::-1]
-    rgba = np.repeat(np.repeat(rgba, 2, axis=0), 2, axis=1)
+    rgba = np.repeat(np.repeat(rgba, 8, axis=0), 8, axis=1)
+
+    # 2-px black outline: any transparent pixel within 2px of an opaque pixel
+    filled = rgba[:, :, 3] > 0
+    dilated = filled
+    for _ in range(2):
+        dilated = (
+            np.roll(dilated,  1, axis=0) |
+            np.roll(dilated, -1, axis=0) |
+            np.roll(dilated,  1, axis=1) |
+            np.roll(dilated, -1, axis=1) |
+            dilated
+        )
+    border = dilated & ~filled
+    rgba[border] = (0, 0, 0, 255)
+
     return Image.fromarray(rgba, "RGBA")
 
 
