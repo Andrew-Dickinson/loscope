@@ -331,6 +331,39 @@ function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibilit
   )
 }
 
+// ── Obstruction label fetching ────────────────────────────────────────────────
+function useObstructionLabels(obstructions: ObsEntry[]): Record<string, string> {
+  const [labels, setLabels] = useState<Record<string, string>>({})
+  // Stable key so effect only re-runs when the actual list changes
+  const key = obstructions.map(o => `${o.type}/${o.id}`).join(',')
+  useEffect(() => {
+    if (!obstructions.length) { setLabels({}); return }
+    let cancelled = false
+    Promise.all(
+      obstructions.map(({ type, id }) =>
+        fetch(`/api/tileview/terrain/obstructionOverview/${type}/${id}`)
+          .then(r => r.ok ? r.json() : null)
+          .catch(() => null)
+          .then(data => ({ key: `${type}/${id}`, data }))
+      )
+    ).then(results => {
+      if (cancelled) return
+      const map: Record<string, string> = {}
+      for (const { key: k, data } of results) {
+        const typePart = k.split('/')[0].replace(/_/g, ' ')
+        const addr = data?.attributes?.street_addr as string | undefined
+        const bin = data?.attributes?.bin as string | undefined
+        const name = addr ?? (bin ? `BIN ${bin}` : null)
+        map[k] = name ? `${name} (${typePart})` : `(${typePart})`
+      }
+      setLabels(map)
+    })
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return labels
+}
+
 // ── Legend ────────────────────────────────────────────────────────────────────
 function LegendSwatch({ color, loaded }: { color: string; loaded: boolean }) {
   if (!loaded) {
@@ -346,10 +379,11 @@ function LegendSwatch({ color, loaded }: { color: string; loaded: boolean }) {
 }
 
 function Legend({
-  tileData, obstructions, visibility, loadedKeys, onToggle,
+  tileData, obstructions, obsLabels, visibility, loadedKeys, onToggle,
 }: {
   tileData: TileData
   obstructions: ObsEntry[]
+  obsLabels: Record<string, string>
   visibility: Record<string, boolean>
   loadedKeys: Record<string, true>
   onToggle: (key: string) => void
@@ -361,7 +395,7 @@ function Legend({
     ...obstructions.map(({ type, id }, i) => ({
       key: `${type}/${id}`,
       color: '#' + OBS_COLORS[i % OBS_COLORS.length].toString(16).padStart(6, '0'),
-      label: `${type.replace(/_/g, ' ')} · ${id.slice(0, 8)}`,
+      label: obsLabels[`${type}/${id}`] ?? `${type.replace(/_/g, ' ')} · ${id.slice(0, 8)}`,
     })),
   ]
 
@@ -407,6 +441,16 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
   const toggleVisibility = (key: string) =>
     setVisibility(v => ({ ...v, [key]: v[key] === false ? true : false }))
 
+  // Must be before early returns to satisfy Rules of Hooks
+  const obstructions = useMemo<ObsEntry[]>(
+    () => tileData && tileData !== 'loading' && tileData !== 'error'
+      ? Object.entries(tileData.tileOverview.obstruction_ids)
+          .flatMap(([type, ids]) => ids.map(id => ({ type, id })))
+      : [],
+    [tileData],
+  )
+  const obsLabels = useObstructionLabels(obstructions)
+
   if (!tileId || !analysisId) {
     return <div style={styles.placeholder}>Click a tile on the map to open the 3D view</div>
   }
@@ -424,10 +468,6 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
       </div>
     )
   }
-
-  // Flatten obstruction dict into ordered list
-  const obstructions: ObsEntry[] = Object.entries(tileData.tileOverview.obstruction_ids)
-    .flatMap(([type, ids]) => ids.map(id => ({ type, id })))
 
   const orthoUrl = `/api/tileview/terrain/orthoImage/${tileId}`
 
@@ -460,7 +500,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
         </div>
       )}
 
-      <Legend tileData={tileData} obstructions={obstructions} visibility={visibility} loadedKeys={loadedKeys} onToggle={toggleVisibility} />
+      <Legend tileData={tileData} obstructions={obstructions} obsLabels={obsLabels} visibility={visibility} loadedKeys={loadedKeys} onToggle={toggleVisibility} />
     </div>
   )
 }
