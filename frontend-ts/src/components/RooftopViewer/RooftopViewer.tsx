@@ -305,19 +305,21 @@ function SphereGroup({ idxs, samplePoints, dummy, hoverable, onPointClick, onHov
 
 // ── Camera state persistence ──────────────────────────────────────────────────
 export interface RooftopCameraState {
+  binId:    string
   position: [number, number, number]
   target:   [number, number, number]
 }
 
 // Writes camera + orbit target to a ref on every controls change (no re-renders).
 // Also calls invalidate() so demand-mode canvas re-renders on camera movement.
-function CameraSync({ stateRef }: { stateRef: React.MutableRefObject<RooftopCameraState | null> }) {
+function CameraSync({ binId, stateRef }: { binId: string; stateRef: React.MutableRefObject<RooftopCameraState | null> }) {
   const { camera, controls, invalidate } = useThree()
   useEffect(() => {
     if (!controls) return
     const oc = controls as unknown as { target: THREE.Vector3; addEventListener: Function; removeEventListener: Function }
     const save = () => {
       stateRef.current = {
+        binId,
         position: camera.position.toArray() as [number, number, number],
         target:   oc.target.toArray()       as [number, number, number],
       }
@@ -325,18 +327,18 @@ function CameraSync({ stateRef }: { stateRef: React.MutableRefObject<RooftopCame
     }
     oc.addEventListener('change', save)
     return () => oc.removeEventListener('change', save)
-  }, [camera, controls, stateRef, invalidate])
+  }, [binId, camera, controls, stateRef, invalidate])
   return null
 }
 
 // Auto-fits on first load; restores saved state if available.
-function CameraFit({ objUrl, stateRef }: { objUrl: string; stateRef: React.MutableRefObject<RooftopCameraState | null> }) {
+function CameraFit({ binId, objUrl, stateRef }: { binId: string; objUrl: string; stateRef: React.MutableRefObject<RooftopCameraState | null> }) {
   const { camera, controls } = useThree()
   const obj = useLoader(OBJLoader, objUrl)
 
   useEffect(() => {
     const oc = controls as unknown as { target: THREE.Vector3; update: () => void } | null
-    if (stateRef.current) {
+    if (stateRef.current?.binId === binId) {
       const { position, target } = stateRef.current
       camera.position.set(...position)
       if (oc) { oc.target.set(...target); oc.update() }
@@ -352,7 +354,7 @@ function CameraFit({ objUrl, stateRef }: { objUrl: string; stateRef: React.Mutab
       camera.lookAt(center)
       if (oc) { oc.target.copy(center); oc.update() }
     }
-  }, [obj, camera, controls, stateRef])
+  }, [binId, obj, camera, controls, stateRef])
 
   return null
 }
@@ -598,7 +600,7 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, ny
     <>
       <ambientLight intensity={0.6} />
       <directionalLight position={[1, 3, 2]} intensity={1.0} color={0xffeedd} />
-      <CameraSync stateRef={cameraStateRef} />
+      <CameraSync binId={binId} stateRef={cameraStateRef} />
       <Suspense fallback={null}>
         <TerrainMesh objUrl={objUrl} samplePoints={samplePoints} analyses={analyses} />
         <SamplePoints
@@ -615,7 +617,7 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, ny
           hoveredSphereRef={hoveredSphereRef}
         />
         {nysB && <DirectionArrows samplePoints={samplePoints} analyses={analyses} nysB={nysB} hoveredSphereRef={hoveredSphereRef} />}
-        <CameraFit objUrl={objUrl} stateRef={cameraStateRef} />
+        <CameraFit binId={binId} objUrl={objUrl} stateRef={cameraStateRef} />
       </Suspense>
     </>
   )
