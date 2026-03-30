@@ -85,7 +85,7 @@ export default function App() {
   // Rooftop state
   const [binId,        setBinId]        = useState<string | null>(null)
   const [samplePoints, setSamplePoints] = useState<BackendSamplePoint[]>([])
-  const [analyses,     setAnalyses]     = useState<(PointAnalysis | null)[]>([])
+  const [analyses,     setAnalyses]     = useState<(PointAnalysis | null | undefined)[]>([])
   const [nysB,         setNysB]         = useState<[number, number, number] | null>(null)
   const [freqGhz,      setFreqGhz]      = useState(24)
 
@@ -126,7 +126,7 @@ export default function App() {
 
       const total = points.length
       let done = 0
-      setAnalyses(new Array(total).fill(null))
+      setAnalyses(new Array(total).fill(undefined))
       setLoading({ message: `Analyzing 0 / ${total} points…`, progress: 0 })
 
       const indices = Array.from({ length: total }, (_, i) => i)
@@ -139,6 +139,7 @@ export default function App() {
       setAnalyzing(true)
       await runConcurrent(indices, async (ptIdx) => {
         if (abortRef.current) return
+        setAnalyses(prev => { const next = [...prev]; next[ptIdx] = null; return next })
         try {
           const result = await analyzePoint(points[ptIdx], nysBPoint, values.frequency_ghz)
           if (abortRef.current) return

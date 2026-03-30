@@ -36,7 +36,7 @@ export interface PointAnalysis {
 interface RooftopViewerProps {
   binId: string
   samplePoints: BackendSamplePoint[]
-  analyses: (PointAnalysis | null)[]
+  analyses: (PointAnalysis | null | undefined)[]
   cameraStateRef: React.MutableRefObject<RooftopCameraState | null>
   onPointClick: (idx: number) => void
   nysB?: [number, number, number] | null
@@ -47,7 +47,7 @@ interface RooftopViewerProps {
 interface TerrainMeshProps {
   objUrl: string
   samplePoints: BackendSamplePoint[]
-  analyses: (PointAnalysis | null)[]
+  analyses: (PointAnalysis | null | undefined)[]
 }
 
 function TerrainMesh({ objUrl, samplePoints, analyses }: TerrainMeshProps) {
@@ -96,7 +96,7 @@ type ArrowEntry = { group: THREE.Group } | null
 
 function DirectionArrows({ samplePoints, analyses, nysB, hoveredSphereRef }: {
   samplePoints: BackendSamplePoint[]
-  analyses: (PointAnalysis | null)[]
+  analyses: (PointAnalysis | null | undefined)[]
   nysB: [number, number, number]
   hoveredSphereRef: React.MutableRefObject<number>
 }) {
@@ -183,7 +183,7 @@ function DirectionArrows({ samplePoints, analyses, nysB, hoveredSphereRef }: {
 // ── Sample point spheres ──────────────────────────────────────────────────────
 interface SamplePointsProps {
   samplePoints: BackendSamplePoint[]
-  analyses: (PointAnalysis | null)[]
+  analyses: (PointAnalysis | null | undefined)[]
   onPointClick: (idx: number) => void
   onHover: (globalIdx: number) => void
   onHoverEnd: () => void
@@ -363,7 +363,7 @@ function CameraFit({ binId, objUrl, stateRef }: { binId: string; objUrl: string;
 interface SceneProps {
   binId: string
   samplePoints: BackendSamplePoint[]
-  analyses: (PointAnalysis | null)[]
+  analyses: (PointAnalysis | null | undefined)[]
   cameraStateRef: React.MutableRefObject<RooftopCameraState | null>
   onPointClick: (idx: number) => void
   nysB?: [number, number, number] | null
@@ -488,7 +488,8 @@ const OVERLAY_FRAG = /* glsl */`
       if      (status == 0) symA = sdfStroke(sdCheck(ps), 0.06);
       else if (status == 1) symA = sdfStroke(sdTilde(ps), 0.06);
       else if (status == 2) symA = sdfStroke(sdCross(ps), 0.06);
-      else                  symA = spinnerAlpha(ps, uTime);
+      else if (status == 3) symA = spinnerAlpha(ps, uTime);
+      // status 4: not yet requested — plain grey circle, no symbol
     }
 
     float alpha = max(fill, ring);
@@ -501,7 +502,7 @@ const OVERLAY_FRAG = /* glsl */`
 
 function SphereOverlay({ samplePoints, analyses, hoveredSphereRef }: {
   samplePoints: BackendSamplePoint[]
-  analyses: (PointAnalysis | null)[]
+  analyses: (PointAnalysis | null | undefined)[]
   hoveredSphereRef: React.MutableRefObject<number>
 }) {
   const n = samplePoints.length
@@ -556,11 +557,14 @@ function SphereOverlay({ samplePoints, analyses, hoveredSphereRef }: {
     // Sync status per instance
     const statusAttr = mesh.geometry.getAttribute('aStatus') as THREE.InstancedBufferAttribute
     for (let i = 0; i < n; i++) {
-      const r = analyses[i]?.result
+      const a = analyses[i]
+      const r = a?.result
       statusAttr.setX(i,
         r === 'unobstructed'         ? 0 :
         r === 'partially_obstructed' ? 1 :
-        r === 'obstructed'           ? 2 : 3
+        r === 'obstructed'           ? 2 :
+        a === null                   ? 3 :  // null = request in flight
+                                       4    // undefined = not yet requested
       )
     }
     statusAttr.needsUpdate = true
@@ -584,8 +588,8 @@ function SphereOverlay({ samplePoints, analyses, hoveredSphereRef }: {
       prevHovered.current = cur
     }
 
-    // Keep rendering while spinner animation is running
-    if (analyses.some(a => !a)) state.invalidate()
+    // Keep rendering while spinner animation is running (only for in-flight requests)
+    if (analyses.some(a => a === null)) state.invalidate()
   })
 
   return <instancedMesh ref={meshRef} args={[geo, mat, n]} renderOrder={1} />
