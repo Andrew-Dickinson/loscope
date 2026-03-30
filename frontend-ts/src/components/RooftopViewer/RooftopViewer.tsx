@@ -196,7 +196,10 @@ function SamplePoints({ samplePoints, analyses, onPointClick, onHover, onHoverEn
   const groups = useMemo(() => {
     const g: Record<string, number[]> = {}
     samplePoints.forEach((_, i) => {
-      const status = analyses[i]?.result ?? '__pending__'
+      const a = analyses[i]
+      const status = a === undefined ? '__not_requested__'
+                   : a === null      ? '__loading__'
+                   : a.result
       if (!g[status]) g[status] = []
       g[status].push(i)
     })
@@ -211,7 +214,8 @@ function SamplePoints({ samplePoints, analyses, onPointClick, onHover, onHoverEn
           idxs={idxs}
           samplePoints={samplePoints}
           dummy={dummy}
-          hoverable={status !== '__pending__'}
+          hoverable={status !== '__loading__'}
+          clickable={status !== '__loading__'}
           onPointClick={onPointClick}
           onHover={onHover}
           onHoverEnd={onHoverEnd}
@@ -227,22 +231,29 @@ interface SphereGroupProps {
   samplePoints: BackendSamplePoint[]
   dummy: THREE.Object3D
   hoverable: boolean
+  clickable: boolean
   onPointClick: (idx: number) => void
   onHover: (globalIdx: number) => void
   onHoverEnd: () => void
   hoveredSphereRef: React.MutableRefObject<number>
 }
 
-function SphereGroup({ idxs, samplePoints, dummy, hoverable, onPointClick, onHover, onHoverEnd, hoveredSphereRef }: SphereGroupProps) {
-  const meshRef = useRef<THREE.InstancedMesh>(null)
+function SphereGroup({ idxs, samplePoints, dummy, hoverable, clickable, onPointClick, onHover, onHoverEnd, hoveredSphereRef }: SphereGroupProps) {
+  const meshRef  = useRef<THREE.InstancedMesh>(null)
+  const depthRef = useRef<THREE.InstancedMesh>(null)
   const { invalidate } = useThree()
-  const geo = useMemo(() => new THREE.SphereGeometry(0.8, 8, 6), [])
-  // Invisible — used only for raycasting (click/hover). Visuals come from SphereOverlay.
-  const mat = useMemo(() => new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 }), [])
+  // Hitbox — larger radius for easier interaction, no depth write so it doesn't occlude overlays
+  const geo = useMemo(() => new THREE.SphereGeometry(0.96, 8, 6), [])
+  const mat = useMemo(() => new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }), [])
+  // Depth mask — visual radius, writes depth so circles behind others are occluded correctly
+  const depthGeo = useMemo(() => new THREE.SphereGeometry(0.8, 8, 6), [])
+  const depthMat = useMemo(() => new THREE.MeshBasicMaterial({ colorWrite: false }), [])
   const prevHoveredGlobal = useRef<number>(-1)
+  const pointerDownPos = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
-    const mesh = meshRef.current
+    const mesh  = meshRef.current
+    const depth = depthRef.current
     if (!mesh) return
     idxs.forEach((ptIdx, i) => {
       const mp = samplePoints[ptIdx].measurement_point
@@ -250,12 +261,20 @@ function SphereGroup({ idxs, samplePoints, dummy, hoverable, onPointClick, onHov
       dummy.scale.set(1, 1, 1)
       dummy.updateMatrix()
       mesh.setMatrixAt(i, dummy.matrix)
+      depth?.setMatrixAt(i, dummy.matrix)
     })
     mesh.instanceMatrix.needsUpdate = true
-  }, [idxs, samplePoints, dummy])
+    if (depth) depth.instanceMatrix.needsUpdate = true
+    // If the hovered point left this group (e.g. transitioned to loading), reset cursor
+    if (hoveredSphereRef.current !== -1 && !idxs.includes(hoveredSphereRef.current)) {
+      onHoverEnd()
+      document.body.style.cursor = 'default'
+    }
+  }, [idxs, samplePoints, dummy, hoveredSphereRef, onHoverEnd])
 
   useFrame(() => {
-    const mesh = meshRef.current
+    const mesh  = meshRef.current
+    const depth = depthRef.current
     if (!mesh) return
     const cur  = hoveredSphereRef.current
     const prev = prevHoveredGlobal.current
@@ -268,38 +287,49 @@ function SphereGroup({ idxs, samplePoints, dummy, hoverable, onPointClick, onHov
       dummy.scale.set(scale, scale, scale)
       dummy.updateMatrix()
       mesh.setMatrixAt(instanceIdx, dummy.matrix)
+      depth?.setMatrixAt(instanceIdx, dummy.matrix)
       dummy.scale.set(1, 1, 1)
     }
     if (prev !== -1) applyScale(prev, 1)
     if (cur  !== -1) applyScale(cur,  1.8)
     mesh.instanceMatrix.needsUpdate = true
+    if (depth) depth.instanceMatrix.needsUpdate = true
     prevHoveredGlobal.current = cur
   })
 
   useEffect(() => () => { document.body.style.cursor = 'default' }, [])
 
   return (
-    <instancedMesh
-      ref={meshRef}
-      args={[geo, mat, idxs.length]}
-      onClick={(e: ThreeEvent<MouseEvent>) => {
-        e.stopPropagation()
-        if (e.instanceId !== undefined) onPointClick(idxs[e.instanceId])
-      }}
-      onPointerOver={hoverable ? (e: ThreeEvent<PointerEvent>) => {
-        e.stopPropagation()
-        if (e.instanceId !== undefined) {
-          onHover(idxs[e.instanceId])
-          document.body.style.cursor = 'pointer'
+    <>
+      <instancedMesh ref={depthRef} args={[depthGeo, depthMat, idxs.length]} />
+      <instancedMesh
+        ref={meshRef}
+        args={[geo, mat, idxs.length]}
+        onPointerDown={(e: ThreeEvent<PointerEvent>) => { pointerDownPos.current = { x: e.clientX, y: e.clientY } }}
+        onClick={clickable ? (e: ThreeEvent<MouseEvent>) => {
+          const down = pointerDownPos.current
+          if (!down) return
+          const dx = e.clientX - down.x
+          const dy = e.clientY - down.y
+          if (dx * dx + dy * dy > 25) return  // >5px drag, ignore
+          e.stopPropagation()
+          if (e.instanceId !== undefined) onPointClick(idxs[e.instanceId])
+        } : undefined}
+        onPointerOver={hoverable ? (e: ThreeEvent<PointerEvent>) => {
+          e.stopPropagation()
+          if (e.instanceId !== undefined) {
+            onHover(idxs[e.instanceId])
+            document.body.style.cursor = 'pointer'
+            invalidate()
+          }
+        } : undefined}
+        onPointerOut={hoverable ? () => {
+          onHoverEnd()
+          document.body.style.cursor = 'default'
           invalidate()
-        }
-      } : undefined}
-      onPointerOut={hoverable ? () => {
-        onHoverEnd()
-        document.body.style.cursor = 'default'
-        invalidate()
-      } : undefined}
-    />
+        } : undefined}
+      />
+    </>
   )
 }
 

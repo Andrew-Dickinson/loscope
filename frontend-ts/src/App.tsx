@@ -163,7 +163,21 @@ export default function App() {
 
   const handlePointClick = useCallback(async (idx: number) => {
     const analysis = analyses[idx]
-    if (!analysis) return
+
+    if (analysis === undefined) {
+      // Not yet requested — fire immediately, jumping the queue
+      if (!nysB) return
+      setAnalyses(prev => { const next = [...prev]; next[idx] = null; return next })
+      try {
+        const result = await analyzePoint(samplePoints[idx], nysB, freqGhz)
+        setAnalyses(prev => { const next = [...prev]; next[idx] = result; return next })
+      } catch {
+        setAnalyses(prev => { const next = [...prev]; next[idx] = undefined; return next })
+      }
+      return
+    }
+
+    if (analysis === null) return  // already in flight
 
     setActiveMap(null)
     setAppState('map')
@@ -178,7 +192,7 @@ export default function App() {
     } catch (err) {
       setLoading({ message: String(err), isError: true })
     }
-  }, [analyses])
+  }, [analyses, samplePoints, nysB, freqGhz])
 
   const n_clear   = analyses.filter(a => a?.result === 'unobstructed').length
   const n_partial = analyses.filter(a => a?.result === 'partially_obstructed').length
