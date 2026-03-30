@@ -208,6 +208,7 @@ export default function App() {
               analyses={analyses}
               cameraStateRef={rooftopCameraRef}
               onPointClick={handlePointClick}
+              nysB={nysB}
             />
           ) : (
             <WaitingScreen label={

@@ -39,6 +39,7 @@ interface RooftopViewerProps {
   analyses: (PointAnalysis | null)[]
   cameraStateRef: React.MutableRefObject<RooftopCameraState | null>
   onPointClick: (idx: number) => void
+  nysB?: [number, number, number] | null
 }
 
 
@@ -75,6 +76,108 @@ function TerrainMesh({ objUrl, samplePoints, analyses }: TerrainMeshProps) {
   }, [obj, mat])
 
   return <primitive object={obj} />
+}
+
+// ── Direction arrows ──────────────────────────────────────────────────────────
+const ARROW_SHAFT_LENGTH = 3.0
+const ARROW_HEAD_LENGTH  = 1.0
+const ARROW_SHAFT_RADIUS = 0.15
+const ARROW_HEAD_RADIUS  = 0.25
+const ARROW_OPACITY      = 0.8
+
+const STATUS_COLORS: Record<string, number> = {
+  unobstructed:         0x00cc88,
+  partially_obstructed: 0xffcc00,
+  obstructed:           0xff1a00,
+  __pending__:          0x94a3b8,
+}
+
+type ArrowEntry = { group: THREE.Group } | null
+
+function DirectionArrows({ samplePoints, analyses, nysB, hoveredSphereRef }: {
+  samplePoints: BackendSamplePoint[]
+  analyses: (PointAnalysis | null)[]
+  nysB: [number, number, number]
+  hoveredSphereRef: React.MutableRefObject<number>
+}) {
+  const rootRef     = useRef<THREE.Group>(null)
+  const entriesRef  = useRef<ArrowEntry[]>([])
+  const prevHovered = useRef(-1)
+
+
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+
+    for (const child of [...root.children]) root.remove(child)
+    entriesRef.current = []
+    prevHovered.current = -1
+
+    const shaftGeo = new THREE.CylinderGeometry(ARROW_SHAFT_RADIUS, ARROW_SHAFT_RADIUS, ARROW_SHAFT_LENGTH, 6)
+    const headGeo  = new THREE.ConeGeometry(ARROW_HEAD_RADIUS, ARROW_HEAD_LENGTH, 6)
+    const mats: Record<string, THREE.MeshBasicMaterial> = {}
+    const getMat = (status: string) => {
+      if (!mats[status]) mats[status] = new THREE.MeshBasicMaterial({
+        color: STATUS_COLORS[status] ?? STATUS_COLORS.__pending__,
+        transparent: true,
+        opacity: ARROW_OPACITY,
+      })
+      return mats[status]
+    }
+    const yAxis = new THREE.Vector3(0, 1, 0)
+
+    samplePoints.forEach((sp, i) => {
+      const mp     = sp.measurement_point
+      const status = analyses[i]?.result ?? '__pending__'
+
+      const dx = nysB[0] - mp.nys_e
+      const dy = nysB[1] - mp.nys_n
+      const dz = nysB[2] - mp.nys_z
+      const dir = new THREE.Vector3(dx, dz, -dy)
+      if (dir.lengthSq() === 0) { entriesRef.current[i] = null; return }
+      dir.normalize()
+
+      const quat    = new THREE.Quaternion().setFromUnitVectors(yAxis, dir)
+      const baseMat = getMat(status)
+
+      // Shaft and head positioned relative to the arrow group's local origin
+      const shaft = new THREE.Mesh(shaftGeo, baseMat)
+      shaft.position.addScaledVector(dir, ARROW_SHAFT_LENGTH / 2)
+      shaft.quaternion.copy(quat)
+
+      const head = new THREE.Mesh(headGeo, baseMat)
+      head.position.addScaledVector(dir, ARROW_SHAFT_LENGTH + ARROW_HEAD_LENGTH / 2)
+      head.quaternion.copy(quat)
+
+      // Group anchored at the measurement point — scaling grows outward from there
+      const arrowGroup = new THREE.Group()
+      arrowGroup.position.set(mp.x, mp.z, -mp.y)
+      arrowGroup.add(shaft)
+      arrowGroup.add(head)
+      root.add(arrowGroup)
+
+      entriesRef.current[i] = { group: arrowGroup }
+    })
+
+    return () => { for (const child of [...root.children]) root.remove(child) }
+  }, [samplePoints, analyses, nysB])
+
+  useFrame(() => {
+    const cur  = hoveredSphereRef.current
+    const prev = prevHovered.current
+    if (cur === prev) return
+
+    const apply = (idx: number, hovered: boolean) => {
+      const e = entriesRef.current[idx]
+      if (!e) return
+      e.group.scale.setScalar(hovered ? 1.5 : 1.0)
+    }
+    if (prev !== -1) apply(prev, false)
+    if (cur  !== -1) apply(cur,  true)
+    prevHovered.current = cur
+  })
+
+  return <group ref={rootRef} />
 }
 
 // ── Sample point spheres ──────────────────────────────────────────────────────
@@ -261,6 +364,7 @@ interface SceneProps {
   analyses: (PointAnalysis | null)[]
   cameraStateRef: React.MutableRefObject<RooftopCameraState | null>
   onPointClick: (idx: number) => void
+  nysB?: [number, number, number] | null
 }
 
 // ── Sphere overlay: billboard ring + SDF symbols, single draw call ────────────
@@ -485,7 +589,7 @@ function SphereOverlay({ samplePoints, analyses, hoveredSphereRef }: {
   return <instancedMesh ref={meshRef} args={[geo, mat, n]} renderOrder={1} />
 }
 
-function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick }: SceneProps) {
+function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, nysB }: SceneProps) {
   const objUrl           = `/api/rooftop/render/${binId}`
   const hoveredSphereRef = useRef<number>(-1)
   const { invalidate }   = useThree()
@@ -510,6 +614,7 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick }: 
           analyses={analyses}
           hoveredSphereRef={hoveredSphereRef}
         />
+        {nysB && <DirectionArrows samplePoints={samplePoints} analyses={analyses} nysB={nysB} hoveredSphereRef={hoveredSphereRef} />}
         <CameraFit objUrl={objUrl} stateRef={cameraStateRef} />
       </Suspense>
     </>
@@ -517,7 +622,7 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick }: 
 }
 
 // ── Top-level ─────────────────────────────────────────────────────────────────
-export default function RooftopViewer({ binId, samplePoints, analyses, cameraStateRef, onPointClick }: RooftopViewerProps) {
+export default function RooftopViewer({ binId, samplePoints, analyses, cameraStateRef, onPointClick, nysB }: RooftopViewerProps) {
   const n_clear   = analyses.filter(a => a?.result === 'unobstructed').length
   const n_partial = analyses.filter(a => a?.result === 'partially_obstructed').length
   const n_full    = analyses.filter(a => a?.result === 'obstructed').length
@@ -538,6 +643,7 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
           analyses={analyses}
           cameraStateRef={cameraStateRef}
           onPointClick={onPointClick}
+          nysB={nysB}
         />
       </Canvas>
 
