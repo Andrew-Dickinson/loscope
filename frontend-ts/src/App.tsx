@@ -236,7 +236,10 @@ export default function App() {
       {appState === 'map' && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={styles.topBarFlat}>
-            <BackButton onClick={() => { setAppState('rooftop'); setLoading(null) }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <BackButton onClick={() => { setAppState('rooftop'); setLoading(null) }} />
+              {activeMap && <KmlDownloadButton analysisId={activeMap.analysisId} />}
+            </div>
             <Hint>Click a tile to open 3D view</Hint>
           </div>
           <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -255,6 +258,39 @@ export default function App() {
 }
 
 // ── Shared UI helpers ─────────────────────────────────────────────────────────
+
+function KmlDownloadButton({ analysisId }: { analysisId: string }) {
+  const [loading, setLoading] = useState(false)
+
+  const handleClick = async () => {
+    if (loading) return
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/analysis/fresnelKml/${analysisId}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `fresnel_${analysisId}.kml`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <style>{`@keyframes app-spin { to { transform: rotate(360deg); } }`}</style>
+      <button style={{ ...styles.kmlBtn, opacity: loading ? 0.6 : 1, cursor: loading ? 'default' : 'pointer' }} onClick={handleClick} disabled={loading}>
+        {loading
+          ? <><span style={styles.kmlSpinner} />Generating…</>
+          : 'Download KML'}
+      </button>
+    </>
+  )
+}
 
 function TopBar({ left, center, right }: { left: ReactNode; center: ReactNode; right: ReactNode }) {
   return (
@@ -331,6 +367,28 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(255,255,255,0.1)',
     background: 'rgba(255,255,255,0.04)',
     cursor: 'pointer',
+  },
+  kmlBtn: {
+    color: '#8b949e',
+    fontSize: 12,
+    fontFamily: 'monospace',
+    padding: '3px 10px',
+    borderRadius: 4,
+    border: '1px solid rgba(255,255,255,0.1)',
+    background: 'rgba(255,255,255,0.04)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  kmlSpinner: {
+    display: 'inline-block',
+    width: 10,
+    height: 10,
+    borderRadius: '50%',
+    border: '1.5px solid rgba(255,255,255,0.12)',
+    borderTopColor: '#8b949e',
+    animation: 'app-spin 0.7s linear infinite',
+    flexShrink: 0,
   },
   hud: {
     color: '#8b949e',
