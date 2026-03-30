@@ -8,6 +8,7 @@ from los_analyzer.backend.app import app, app_cache, tile_provider, obstruction_
 from los_analyzer.backend.cache.private_cache import Key
 from los_analyzer.backend.io.images import serve_pil_image
 from los_analyzer.backend.io.parsing import parse_coords, parse_obstruction_types
+from los_analyzer.backend.services.fresnel_kml import build_fresnel_kml
 from los_analyzer.backend.services.tile_map import rasterize_intersection_grid_for_tile, fresnel_ellipse_ring, \
     intersection_image_for_tile
 from los_analyzer.lib.coordinates.coordinate_translate import translate_from_nys_plane
@@ -101,3 +102,27 @@ def get_intersection_raster(analysis_id, tile_id):
         return Response(status=204)
 
     return serve_pil_image(image)
+
+@app.get("/api/analysis/fresnelKml/<analysis_id>")
+def get_fresnel_kml(analysis_id):
+    try:
+        parsed_uuid = str(uuid.UUID(analysis_id, version=4))
+        cache_key = Key(SamplePointEvaluation, parsed_uuid)
+        if not app_cache.contains(cache_key):
+            abort(404, f"No such analysis_id: {analysis_id}")
+    except (KeyError, TypeError, ValueError) as exc:
+        abort(400, str(exc))
+
+    ev: SamplePointEvaluation = app_cache.fetch(cache_key)
+    kml = build_fresnel_kml(
+        parsed_uuid,
+        translate_from_nys_plane(ev.point_a_nys),
+        translate_from_nys_plane(ev.point_b_nys),
+        ev.frequency_hz,
+    )
+
+    return Response(
+        kml,
+        mimetype='application/vnd.google-earth.kml+xml',
+        headers={'Content-Disposition': f'attachment; filename="{parsed_uuid}.kml"'}
+    )
