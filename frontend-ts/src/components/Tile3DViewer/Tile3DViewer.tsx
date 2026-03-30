@@ -331,37 +331,133 @@ function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibilit
   )
 }
 
-// ── Obstruction label fetching ────────────────────────────────────────────────
-function useObstructionLabels(obstructions: ObsEntry[]): Record<string, string> {
-  const [labels, setLabels] = useState<Record<string, string>>({})
-  // Stable key so effect only re-runs when the actual list changes
+// ── Obstruction overview fetching ────────────────────────────────────────────
+interface ObsOverview {
+  obstruction_type: string
+  attributes: Record<string, string | number | null>
+}
+
+function useObstructionOverviews(obstructions: ObsEntry[]): Record<string, ObsOverview | null> {
+  const [overviews, setOverviews] = useState<Record<string, ObsOverview | null>>({})
   const key = obstructions.map(o => `${o.type}/${o.id}`).join(',')
   useEffect(() => {
-    if (!obstructions.length) { setLabels({}); return }
+    if (!obstructions.length) { setOverviews({}); return }
     let cancelled = false
     Promise.all(
       obstructions.map(({ type, id }) =>
         fetch(`/api/tileview/terrain/obstructionOverview/${type}/${id}`)
           .then(r => r.ok ? r.json() : null)
           .catch(() => null)
-          .then(data => ({ key: `${type}/${id}`, data }))
+          .then(data => ({ key: `${type}/${id}`, data: data as ObsOverview | null }))
       )
     ).then(results => {
       if (cancelled) return
-      const map: Record<string, string> = {}
-      for (const { key: k, data } of results) {
-        const typePart = k.split('/')[0].replace(/_/g, ' ')
-        const addr = data?.attributes?.street_addr as string | undefined
-        const bin = data?.attributes?.bin as string | undefined
-        const name = addr ?? (bin ? `BIN ${bin}` : null)
-        map[k] = name ? `${name} (${typePart})` : `(${typePart})`
-      }
-      setLabels(map)
+      const map: Record<string, ObsOverview | null> = {}
+      for (const { key: k, data } of results) map[k] = data
+      setOverviews(map)
     })
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
-  return labels
+  return overviews
+}
+
+function obsEntryLabel(overview: ObsOverview | null | undefined, type: string): string {
+  const typePart = type.replace(/_/g, ' ')
+  const addr = overview?.attributes?.street_addr as string | undefined
+  const bin = overview?.attributes?.bin as string | undefined
+  const name = addr ?? (bin ? `BIN ${bin}` : null)
+  return name ? `${name} (${typePart})` : `(${typePart})`
+}
+
+// ── Obstruction detail panel ──────────────────────────────────────────────────
+const ATTR_LABELS: Record<string, string> = {
+  street_addr: 'Address',
+  borough: 'Borough',
+  bin: 'BIN',
+  bbl: 'BBL',
+  ground_elevation: 'Ground elev.',
+  height_roof: 'Roof height',
+  job_id: 'Job ID',
+  job_application_system: 'App. system',
+  job_filing_date: 'Filing date',
+  job_approval_date: 'Approval date',
+  tco_date: 'TCO date',
+  construction_year: 'Const. year',
+  last_status_type: 'Status',
+  geom_source: 'Geom. source',
+}
+const ATTR_UNITS: Record<string, string> = { ground_elevation: ' ft', height_roof: ' ft' }
+
+const DOB_SEARCH_URLS: Record<string, string> = {
+  DOB_BIS: 'https://a810-bisweb.nyc.gov/bisweb/bsqpm01.jsp',
+  DOB_NOW: 'https://a810-dobnow.nyc.gov/publish/Index.html#!/search',
+}
+
+function ObsDetailPanel({ obsKey, overview, onClose }: {
+  obsKey: string
+  overview: ObsOverview | null | undefined
+  onClose: () => void
+}) {
+  const type = obsKey.split('/')[0]
+  const title = obsEntryLabel(overview ?? null, type)
+  const attrs = overview?.attributes ?? {}
+  const jobId = attrs.job_id as string | undefined
+  const appSystem = attrs.job_application_system as string | undefined
+  const dobUrl = appSystem ? DOB_SEARCH_URLS[appSystem] : undefined
+
+  const handleCopy = () => {
+    if (!jobId) return
+    navigator.clipboard.writeText(String(jobId))
+  }
+
+  return (
+    <div style={styles.detailPanel}>
+      <div style={styles.detailHeader}>
+        <span style={styles.detailTitle}>{title}</span>
+        <button style={styles.obsClose} onClick={onClose}>×</button>
+      </div>
+      <div style={styles.detailBody}>
+        {Object.entries(attrs).map(([k, v]) => {
+          if (v === null || v === undefined) return null
+          const label = ATTR_LABELS[k] ?? k.replace(/_/g, ' ')
+          const unit = ATTR_UNITS[k] ?? ''
+
+          if (k === 'job_id') {
+            return (
+              <div key={k} style={styles.detailRow}>
+                <span style={styles.detailKey}>{label}</span>
+                <span style={{ ...styles.detailVal, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>{String(v)}</span>
+                  <button
+                    style={styles.copyBtn}
+                    onClick={handleCopy}
+                    title="Copy job number"
+                  >⎘</button>
+                  {dobUrl && (
+                    <a
+                      href={dobUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={styles.dobLink}
+                      title={`Search ${appSystem}`}
+                    >↗</a>
+                  )}
+                </span>
+              </div>
+            )
+          }
+
+          return (
+            <div key={k} style={styles.detailRow}>
+              <span style={styles.detailKey}>{label}</span>
+              <span style={styles.detailVal}>{String(v)}{unit}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 // ── Legend ────────────────────────────────────────────────────────────────────
@@ -379,32 +475,36 @@ function LegendSwatch({ color, loaded }: { color: string; loaded: boolean }) {
 }
 
 function Legend({
-  tileData, obstructions, obsLabels, visibility, loadedKeys, onToggle,
+  tileData, obstructions, obsOverviews, visibility, loadedKeys, activeKey, onToggle, onSelect,
 }: {
   tileData: TileData
   obstructions: ObsEntry[]
-  obsLabels: Record<string, string>
+  obsOverviews: Record<string, ObsOverview | null>
   visibility: Record<string, boolean>
   loadedKeys: Record<string, true>
+  activeKey: string | null
   onToggle: (key: string) => void
+  onSelect: (key: string) => void
 }) {
-  const items = [
-    { key: 'terrain', color: '#ffffff', label: 'Terrain Geometry' },
-    { key: 'ortho', color: '#4a90d9', label: 'Terrain Textures' },
-    ...(tileData.zoneAvailable ? [{ key: 'zone', color: '#cc44ff', label: 'Fresnel Zone' }] : []),
-    ...obstructions.map(({ type, id }, i) => ({
-      key: `${type}/${id}`,
-      color: '#' + OBS_COLORS[i % OBS_COLORS.length].toString(16).padStart(6, '0'),
-      label: obsLabels[`${type}/${id}`] ?? `${type.replace(/_/g, ' ')} · ${id.slice(0, 8)}`,
-    })),
+  const staticItems = [
+    { key: 'terrain', color: '#ffffff', label: 'Terrain Geometry', obsKey: null as string | null },
+    { key: 'ortho', color: '#4a90d9', label: 'Terrain Textures', obsKey: null as string | null },
+    ...(tileData.zoneAvailable ? [{ key: 'zone', color: '#cc44ff', label: 'Fresnel Zone', obsKey: null as string | null }] : []),
   ]
+  const obsItems = obstructions.map(({ type, id }, i) => ({
+    key: `${type}/${id}`,
+    color: '#' + OBS_COLORS[i % OBS_COLORS.length].toString(16).padStart(6, '0'),
+    label: obsEntryLabel(obsOverviews[`${type}/${id}`], type),
+    obsKey: `${type}/${id}`,
+  }))
+  const items = [...staticItems, ...obsItems]
 
   return (
     <div style={styles.legend}>
       <style>{`@keyframes tile3d-spin { to { transform: rotate(360deg); } }`}</style>
       <div style={styles.legendTitle}>Scene objects</div>
       {items.map(item => (
-        <label key={item.key} style={styles.legendItem}>
+        <div key={item.key} style={styles.legendItem}>
           <input
             type="checkbox"
             checked={visibility[item.key] !== false}
@@ -412,8 +512,19 @@ function Legend({
             style={styles.checkbox}
           />
           <LegendSwatch color={item.color} loaded={!!loadedKeys[item.key]} />
-          <span style={styles.legendLabel}>{item.label}</span>
-        </label>
+          <span
+            style={{
+              ...styles.legendLabel,
+              ...(item.obsKey ? {
+                cursor: 'pointer',
+                color: activeKey === item.obsKey ? '#e6edf3' : '#8b949e',
+              } : {}),
+            }}
+            onClick={item.obsKey ? () => onSelect(item.obsKey!) : undefined}
+          >
+            {item.label}
+          </span>
+        </div>
       ))}
     </div>
   )
@@ -449,7 +560,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
       : [],
     [tileData],
   )
-  const obsLabels = useObstructionLabels(obstructions)
+  const obsOverviews = useObstructionOverviews(obstructions)
 
   if (!tileId || !analysisId) {
     return <div style={styles.placeholder}>Click a tile on the map to open the 3D view</div>
@@ -493,14 +604,23 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
       </div>
 
       {activeObs && (
-        <div style={styles.obsLabel}>
-          <span>{activeObs.split('/')[0].replace(/_/g, ' ')}</span>
-          <span style={{ color: '#484f58', marginLeft: 8, fontSize: 11 }}>{activeObs.split('/')[1]}</span>
-          <button style={styles.obsClose} onClick={() => setActiveObs(null)}>×</button>
-        </div>
+        <ObsDetailPanel
+          obsKey={activeObs}
+          overview={obsOverviews[activeObs]}
+          onClose={() => setActiveObs(null)}
+        />
       )}
 
-      <Legend tileData={tileData} obstructions={obstructions} obsLabels={obsLabels} visibility={visibility} loadedKeys={loadedKeys} onToggle={toggleVisibility} />
+      <Legend
+        tileData={tileData}
+        obstructions={obstructions}
+        obsOverviews={obsOverviews}
+        visibility={visibility}
+        loadedKeys={loadedKeys}
+        activeKey={activeObs}
+        onToggle={toggleVisibility}
+        onSelect={key => setActiveObs(prev => prev === key ? null : key)}
+      />
     </div>
   )
 }
@@ -561,29 +681,93 @@ const styles: Record<string, React.CSSProperties> = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  obsLabel: {
+  detailPanel: {
     position: 'absolute',
-    bottom: 10,
-    left: '50%',
-    transform: 'translateX(-50%)',
-    background: 'rgba(0,0,0,0.75)',
-    color: '#fff',
+    top: 10,
+    right: 10,
+    width: 240,
+    background: 'rgba(13, 17, 23, 0.94)',
+    border: '1px solid #1c2128',
+    borderRadius: 6,
     fontFamily: 'monospace',
     fontSize: 11,
-    padding: '4px 12px',
-    borderRadius: 4,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 4,
-    whiteSpace: 'nowrap',
     pointerEvents: 'auto',
+    zIndex: 10,
+  },
+  detailHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    padding: '8px 10px 6px',
+    borderBottom: '1px solid #1c2128',
+    gap: 8,
+  },
+  detailTitle: {
+    color: '#e6edf3',
+    fontSize: 11,
+    lineHeight: 1.4,
+  },
+  detailBody: {
+    padding: '6px 10px 8px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 3,
+  },
+  detailRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  detailKey: {
+    color: '#6e7681',
+    flexShrink: 0,
+  },
+  detailVal: {
+    color: '#adbac7',
+    textAlign: 'right' as const,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   obsClose: {
     color: '#666',
     fontSize: 16,
-    marginLeft: 6,
+    lineHeight: 1,
     cursor: 'pointer',
     background: 'none',
     border: 'none',
+    flexShrink: 0,
+    padding: 0,
+  },
+  copyBtn: {
+    color: '#000000',
+    fontSize: 18,
+    cursor: 'pointer',
+    background: '#ffffff',
+    border: 'none',
+    borderRadius: '50%',
+    width: 16,
+    height: 16,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    padding: 0,
+    lineHeight: 1,
+  },
+  dobLink: {
+    color: '#ffffff',
+    textDecoration: 'none',
+    fontSize: 18,
+    background: '#388bfd',
+    borderRadius: '50%',
+    width: 16,
+    height: 16,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    lineHeight: 1,
+    paddingBottom: 3,
   },
 }
