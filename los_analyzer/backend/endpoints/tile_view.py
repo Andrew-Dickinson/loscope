@@ -38,6 +38,30 @@ def get_terrain_height_raster(tile_id):
 
     return send_from_directory(TILE_DIR, tiff_path.name)
 
+@app.get("/api/tileview/terrain/obstructionOverview/<obstruction_type>/<obstruction_id>")
+def get_terrain_obstruction_meta(obstruction_type, obstruction_id):
+    try:
+        if not re.match(r"^[_a-zA-Z]+$", obstruction_type):
+            raise ValueError(f"Invalid obstruction type: {obstruction_type}")
+        parsed_uuid = str(uuid.UUID(obstruction_id, version=4))
+    except (KeyError, TypeError, ValueError) as exc:
+        abort(400, str(exc))
+
+    obs = obstruction_provider.get_obstruction(obstruction_type, parsed_uuid)
+    if not obs:
+        abort(404, f"No obstruction found with ID: {parsed_uuid} and type {obstruction_type}")
+
+    return {
+        "obstruction_id": obs.obstruction_id,
+        # The metadata stored in the files is kinda janky and obs.obstruction_type is incorrect
+        "obstruction_type": obstruction_type,
+        "attributes": obs.attributes,
+        "x_offset": obs.x_offset,
+        "y_offset": obs.y_offset,
+        "tile_ids": obs.tile_ids,
+    }
+
+
 @app.get("/api/tileview/terrain/obstructionObj/<obstruction_type>/<obstruction_id>/<tile_id>")
 def get_terrain_obstruction_obj(obstruction_type, obstruction_id, tile_id):
     # TODO: Would it be better to use a CDN style direct browser file access for this?
