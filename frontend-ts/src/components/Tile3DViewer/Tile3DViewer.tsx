@@ -173,7 +173,7 @@ function TerrainMesh({ heightmap, orthoUrl, showOrtho, onReady, onLoaded, onOrth
   if (!geometry) return null
 
   const mat = (texture && showOrtho)
-    ? new THREE.MeshBasicMaterial({ map: texture })
+    ? new THREE.MeshStandardMaterial({ map: texture, roughness: 0.85, metalness: 0 })
     : new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0 })
 
   return <mesh geometry={geometry} material={mat} />
@@ -280,10 +280,10 @@ function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibilit
 
   return (
     <>
-      <ambientLight intensity={0.5} color={0x334466} />
+      <ambientLight intensity={1.2} />
       <directionalLight
         position={[-220, Math.max(heightRange * 1.5 + 80, 100), 180]}
-        intensity={4.5}
+        intensity={1.5}
         color={0xfff8e8}
       />
       <directionalLight
