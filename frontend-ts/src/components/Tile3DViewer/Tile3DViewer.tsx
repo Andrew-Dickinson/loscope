@@ -213,13 +213,18 @@ function ZoneObj({ analysisId, tileId, onLoaded, visible }: { analysisId: string
 }
 
 // ── Obstruction OBJ ───────────────────────────────────────────────────────────
-function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, visible }: {
-  type: string; obsId: string; tileId: string; color: number; onHit: (key: string) => void; onLoaded: () => void; visible: boolean
+function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, onBoundsReady, visible }: {
+  type: string; obsId: string; tileId: string; color: number
+  onHit: (key: string) => void; onLoaded: () => void
+  onBoundsReady: (key: string, box: THREE.Box3) => void
+  visible: boolean
 }) {
   const obj = useObjLoader(`/api/tileview/terrain/obstructionObj/${type}/${obsId}/${tileId}`)
   const key = `${type}/${obsId}`
   const onLoadedRef = useRef(onLoaded)
+  const onBoundsRef = useRef(onBoundsReady)
   onLoadedRef.current = onLoaded
+  onBoundsRef.current = onBoundsReady
   useEffect(() => {
     if (!obj) return
     obj.traverse(child => {
@@ -229,8 +234,11 @@ function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, visible }: {
         })
       }
     })
+    // By the time this effect runs R3F has already applied rotation+position to obj,
+    // so setFromObject gives the correct world-space box directly.
+    onBoundsRef.current(key, new THREE.Box3().setFromObject(obj))
     onLoadedRef.current()
-  }, [obj, color])
+  }, [obj, color, key])
   if (!obj) return null
   return (
     <primitive
@@ -244,20 +252,45 @@ function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, visible }: {
 }
 
 // ── Camera setup ──────────────────────────────────────────────────────────────
-function CameraSetup({ heightRange, midFt }: { heightRange: number; midFt: number }) {
-  const { camera, controls } = useThree()
+function CameraSetup({ heightRange, midFt, resetSeq, controlsRef }: {
+  heightRange: number; midFt: number; resetSeq: number; controlsRef: React.RefObject<any>
+}) {
+  const { camera } = useThree()
 
   useEffect(() => {
     const camDist = Math.max(heightRange * 3, 300)
-    if (controls) {
-      const oc = controls as unknown as { target: THREE.Vector3; update: () => void }
+    const oc = controlsRef.current
+    if (oc) {
       oc.target.set(0, midFt, 0)
       oc.update()
     }
     camera.position.set(camDist * 0.6, midFt + camDist * 0.8, camDist * 0.9)
     camera.lookAt(0, midFt, 0)
-  }, [heightRange, midFt, camera, controls])
+  }, [heightRange, midFt, camera, controlsRef, resetSeq])
 
+  return null
+}
+
+// ── Frame obstruction ─────────────────────────────────────────────────────────
+function FrameTarget({ box, controlsRef }: { box: THREE.Box3; controlsRef: React.RefObject<any> }) {
+  const { camera } = useThree()
+  useEffect(() => {
+    const oc = controlsRef.current
+    if (!oc) return
+    const center = new THREE.Vector3()
+    box.getCenter(center)
+    const size = new THREE.Vector3()
+    box.getSize(size)
+    const maxDim = Math.max(size.x, size.y, size.z)
+    const fovRad = 50 * (Math.PI / 180)
+    const distance = (maxDim / (2 * Math.tan(fovRad / 2))) * 2.5
+    // Preserve current viewing angle, just reposition
+    const dir = camera.position.clone().sub(oc.target).normalize()
+    oc.target.copy(center)
+    camera.position.copy(center.clone().addScaledVector(dir, distance))
+    oc.update()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [box])
   return null
 }
 
@@ -269,14 +302,47 @@ interface SceneProps {
   orthoUrl: string
   obstructions: ObsEntry[]
   visibility: Record<string, boolean>
+  frameKey: string | null
   onObsClick: (key: string) => void
   onItemLoaded: (key: string) => void
 }
 
-function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibility, onObsClick, onItemLoaded }: SceneProps) {
+function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibility, frameKey, onObsClick, onItemLoaded }: SceneProps) {
   const [terrainInfo, setTerrainInfo] = useState<TerrainInfo | null>(null)
   const heightRange = terrainInfo?.heightRange ?? 1
   const midFt = terrainInfo ? (terrainInfo.minFt + terrainInfo.maxFt) / 2 : 0
+
+  const controlsRef = useRef<any>(null)
+  // Map of loaded bounding boxes, keyed by type/id
+  const boundsRef = useRef<Record<string, THREE.Box3>>({})
+  // Key pending a frame (selected before its OBJ finished loading)
+  const pendingFrameRef = useRef<string | null>(null)
+  const [frameBox, setFrameBox] = useState<THREE.Box3 | null>(null)
+  const [cameraResetSeq, setCameraResetSeq] = useState(0)
+  const prevFrameKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const prev = prevFrameKeyRef.current
+    prevFrameKeyRef.current = frameKey
+    if (!frameKey) {
+      if (prev !== null) setCameraResetSeq(s => s + 1)
+      return
+    }
+    const box = boundsRef.current[frameKey]
+    if (box) {
+      setFrameBox(box.clone())
+    } else {
+      pendingFrameRef.current = frameKey
+    }
+  }, [frameKey])
+
+  const handleBoundsReady = useCallback((key: string, box: THREE.Box3) => {
+    boundsRef.current[key] = box
+    if (pendingFrameRef.current === key) {
+      pendingFrameRef.current = null
+      setFrameBox(box.clone())
+    }
+  }, [])
 
   return (
     <>
@@ -315,18 +381,21 @@ function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibilit
           color={OBS_COLORS[i % OBS_COLORS.length]}
           onHit={onObsClick}
           onLoaded={() => onItemLoaded(`${type}/${id}`)}
+          onBoundsReady={handleBoundsReady}
           visible={visibility[`${type}/${id}`] !== false}
         />
       ))}
 
       <OrbitControls
+        ref={controlsRef}
         enableDamping
         dampingFactor={0.08}
         minDistance={10}
         maxDistance={5000}
         maxPolarAngle={Math.PI * 0.9}
       />
-      {terrainInfo && <CameraSetup heightRange={heightRange} midFt={midFt} />}
+      {terrainInfo && <CameraSetup heightRange={heightRange} midFt={midFt} resetSeq={cameraResetSeq} controlsRef={controlsRef} />}
+      {frameBox && <FrameTarget box={frameBox} controlsRef={controlsRef} />}
     </>
   )
 }
@@ -597,6 +666,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
             orthoUrl={orthoUrl}
             obstructions={obstructions}
             visibility={visibility}
+            frameKey={activeObs}
             onObsClick={setActiveObs}
             onItemLoaded={handleItemLoaded}
           />
