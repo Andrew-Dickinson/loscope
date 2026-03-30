@@ -239,6 +239,8 @@ function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, onBoundsReady, vi
     onBoundsRef.current(key, new THREE.Box3().setFromObject(obj))
     onLoadedRef.current()
   }, [obj, color, key])
+  const pointerDownPos = useRef<{ x: number; y: number } | null>(null)
+
   if (!obj) return null
   return (
     <primitive
@@ -246,7 +248,16 @@ function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, onBoundsReady, vi
       rotation={OBJ_ROTATION}
       position={OBJ_POSITION}
       visible={visible}
-      onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onHit(key) }}
+      onPointerDown={(e: ThreeEvent<PointerEvent>) => { pointerDownPos.current = { x: e.clientX, y: e.clientY } }}
+      onClick={(e: ThreeEvent<MouseEvent>) => {
+        const down = pointerDownPos.current
+        if (!down) return
+        const dx = e.clientX - down.x
+        const dy = e.clientY - down.y
+        if (dx * dx + dy * dy > 25) return  // >5px drag, ignore
+        e.stopPropagation()
+        onHit(key)
+      }}
     />
   )
 }
@@ -260,12 +271,20 @@ function CameraSetup({ heightRange, midFt, resetSeq, controlsRef }: {
   useEffect(() => {
     const camDist = Math.max(heightRange * 3, 300)
     const oc = controlsRef.current
-    if (oc) {
-      oc.target.set(0, midFt, 0)
+    const newTarget = new THREE.Vector3(0, midFt, 0)
+
+    if (resetSeq > 0 && oc) {
+      // Deselect: preserve current viewing angle, just re-center and reset distance
+      const dir = camera.position.clone().sub(oc.target).normalize()
+      oc.target.copy(newTarget)
+      camera.position.copy(newTarget.clone().addScaledVector(dir, camDist))
       oc.update()
+    } else {
+      // Initial tile load: use default angle
+      if (oc) { oc.target.copy(newTarget); oc.update() }
+      camera.position.set(camDist * 0.6, midFt + camDist * 0.8, camDist * 0.9)
+      camera.lookAt(newTarget)
     }
-    camera.position.set(camDist * 0.6, midFt + camDist * 0.8, camDist * 0.9)
-    camera.lookAt(0, midFt, 0)
   }, [heightRange, midFt, camera, controlsRef, resetSeq])
 
   return null
