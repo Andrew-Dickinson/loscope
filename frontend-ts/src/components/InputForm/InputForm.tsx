@@ -5,6 +5,7 @@ import FarEndPicker from '../FarEndPicker/FarEndPicker'
 
 export interface RooftopSubmitValues {
   bin_id: string
+  building_label?: string
   far_end_nys?: [number, number, number]   // rooftop-picker path
   lat?: number; lon?: number; alt_m?: number  // coords path (dark pattern)
   frequency_ghz: number
@@ -40,7 +41,8 @@ export default function InputForm({ onSubmit }: InputFormProps) {
   const [error, setError]       = useState('')
 
   // Building
-  const [buildingBin, setBuildingBin] = useState<string | null>(null)
+  const [buildingBin,   setBuildingBin]   = useState<string | null>(null)
+  const [buildingLabel, setBuildingLabel] = useState<string | null>(null)
 
   // Far-end: main path = rooftop picker
   const [farEndMode,   setFarEndMode]   = useState<'rooftop' | 'coords'>('rooftop')
@@ -66,6 +68,7 @@ export default function InputForm({ onSubmit }: InputFormProps) {
       if (!farEndNys)  { setError('Place the far-end antenna on the rooftop'); return }
       submitValues = {
         bin_id: buildingBin,
+        building_label: buildingLabel ?? undefined,
         far_end_nys: farEndNys,
         frequency_ghz: parseFloat(values.frequency_ghz) || 24,
         mast_offset_ft: parseFloat(values.mast_offset_ft) || 0,
@@ -76,6 +79,7 @@ export default function InputForm({ onSubmit }: InputFormProps) {
       if (isNaN(latF) || isNaN(lonF) || isNaN(altF)) { setError('Antenna coordinates are required'); return }
       submitValues = {
         bin_id: buildingBin,
+        building_label: buildingLabel ?? undefined,
         lat: latF, lon: lonF, alt_m: altF,
         frequency_ghz: parseFloat(values.frequency_ghz) || 24,
         mast_offset_ft: parseFloat(values.mast_offset_ft) || 0,
@@ -99,8 +103,8 @@ export default function InputForm({ onSubmit }: InputFormProps) {
           <Section label="Building">
             <BuildingLookupField
               disabled={submitting}
-              onBinResolved={(bin) => setBuildingBin(bin)}
-              onBinCleared={() => setBuildingBin(null)}
+              onBinResolved={(bin, label) => { setBuildingBin(bin); setBuildingLabel(label) }}
+              onBinCleared={() => { setBuildingBin(null); setBuildingLabel(null) }}
             />
           </Section>
 

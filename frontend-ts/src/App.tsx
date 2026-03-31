@@ -90,7 +90,8 @@ export default function App() {
   const [loading,  setLoading]  = useState<LoadingState | null>(null)
 
   // Rooftop state
-  const [binId,        setBinId]        = useState<string | null>(null)
+  const [binId,         setBinId]         = useState<string | null>(null)
+  const [buildingLabel, setBuildingLabel] = useState<string | null>(null)
   const [samplePoints, setSamplePoints] = useState<BackendSamplePoint[]>([])
   const [analyses,     setAnalyses]     = useState<(PointAnalysis | null | undefined)[]>([])
   const [nysB,         setNysB]         = useState<[number, number, number] | null>(null)
@@ -110,7 +111,7 @@ export default function App() {
 
   const handleSubmit = useCallback(async (values: RooftopSubmitValues) => {
     // Reset
-    setBinId(null); setSamplePoints([]); setAnalyses([]); setActiveMap(null); setNysB(null); setBuildingOffset(null)
+    setBinId(null); setBuildingLabel(null); setSamplePoints([]); setAnalyses([]); setActiveMap(null); setNysB(null); setBuildingOffset(null)
     setFreqGhz(values.frequency_ghz)
     setMastOffsetFt(values.mast_offset_ft)
     setAppState('rooftop')
@@ -131,6 +132,7 @@ export default function App() {
       })
 
       setBinId(values.bin_id)
+      setBuildingLabel(values.building_label ?? null)
       setNysB(nysBPoint)
       setSamplePoints(points)
       setBuildingOffset({ x_sw, y_sw })
@@ -238,7 +240,7 @@ export default function App() {
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           <TopBar
             left={<BackButton onClick={() => { setAppState('input'); setLoading(null) }} />}
-            center={binId && <RooftopHUD binId={binId} />}
+            center={binId && <RooftopHUD binId={binId} label={buildingLabel} />}
             right={<Hint>Click a point to view tile map</Hint>}
           />
           {binId && buildingOffset !== null ? (
@@ -340,8 +342,13 @@ function Hint({ children }: { children: ReactNode }) {
   return <span style={styles.hint}>{children}</span>
 }
 
-function RooftopHUD({ binId }: { binId: string }) {
-  return <span style={styles.hud}>BIN {binId}</span>
+function RooftopHUD({ binId, label }: { binId: string; label: string | null }) {
+  const showLabel = label && label !== `BIN ${binId}`
+  return (
+    <span style={styles.hud}>
+      {showLabel ? <>{label}&nbsp;·&nbsp;</> : null}BIN {binId}
+    </span>
+  )
 }
 
 function WaitingScreen({ label }: { label: string }) {
