@@ -247,6 +247,6 @@ const s: Record<string, React.CSSProperties> = {
   darkPatternRow: { marginTop: 8, display: 'flex', justifyContent: 'flex-end' },
   darkPatternLink: {
     background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-    fontSize: 10, fontFamily: 'monospace', color: '#3d444d', letterSpacing: '0.02em',
+    fontSize: 11, fontFamily: 'monospace', color: '#5a6472', letterSpacing: '0.02em',
   },
 }

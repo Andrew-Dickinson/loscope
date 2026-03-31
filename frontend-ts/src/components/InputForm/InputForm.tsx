@@ -195,8 +195,8 @@ export default function InputForm({ onSubmit }: InputFormProps) {
                     <div key={v} onClick={() => setValues(val => ({ ...val, sample_spacing: String(v) }))}
                       style={{
                         textAlign: v === 6 ? 'left' : v === 24 ? 'right' : 'center',
-                        fontSize: 10, fontFamily: 'monospace',
-                        color: parseInt(values.sample_spacing) === v ? '#388bfd' : '#3d444d',
+                        fontSize: 11, fontFamily: 'monospace',
+                        color: parseInt(values.sample_spacing) === v ? '#388bfd' : '#5a6472',
                         transition: 'color 0.15s',
                         lineHeight: 1.4,
                         cursor: 'pointer',
@@ -273,7 +273,7 @@ function Advanced({ children }: { children: ReactNode }) {
     <div style={{ marginTop: 10 }}>
       <button type="button" onClick={() => setOpen(o => !o)} style={{
         background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-        fontSize: 10, fontFamily: 'monospace', color: '#3d444d',
+        fontSize: 11, fontFamily: 'monospace', color: '#5a6472',
         letterSpacing: '0.02em', display: 'flex', alignItems: 'center', gap: 4,
       }}>
         <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>›</span>
@@ -333,7 +333,7 @@ const styles: Record<string, React.CSSProperties> = {
   darkPatternRow: { marginTop: 8, display: 'flex', justifyContent: 'flex-end' },
   darkPatternLink: {
     background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-    fontSize: 10, fontFamily: 'monospace', color: '#3d444d', letterSpacing: '0.02em',
+    fontSize: 11, fontFamily: 'monospace', color: '#5a6472', letterSpacing: '0.02em',
   },
   error:  { color: '#ff4444', fontSize: 12, fontFamily: 'monospace', marginBottom: 12 },
   submit: {
