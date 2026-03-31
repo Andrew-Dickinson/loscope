@@ -33,6 +33,8 @@ def sample_rooftop_points(bin_id):
     # TODO: 404 for bad bin
     heightmap = build_building_heightmap_cached(bin_id_parsed, dob_db_dao, tile_provider)
     return {
-        "sample_points": get_paired_sample_points_cached(heightmap, spacing, mast_offset)
+        "sample_points": get_paired_sample_points_cached(heightmap, spacing, mast_offset),
+        "x_sw": heightmap.x_sw,
+        "y_sw": heightmap.y_sw,
     }
 

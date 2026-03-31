@@ -6,7 +6,7 @@
  * - Renders sample point spheres (grey while analysis pending, colored when done)
  * - Click a sphere → onPointClick(index)
  */
-import { useRef, useMemo, useEffect, Suspense } from 'react'
+import { useRef, useMemo, useEffect, useState, Suspense, useCallback } from 'react'
 import { Canvas, useLoader, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
@@ -40,6 +40,31 @@ interface RooftopViewerProps {
   cameraStateRef: React.MutableRefObject<RooftopCameraState | null>
   onPointClick: (idx: number) => void
   nysB?: [number, number, number] | null
+  mastOffsetFt: number
+  buildingOffset: { x_sw: number; y_sw: number } | null
+  onAddCustomPoint: (point: BackendSamplePoint) => void
+}
+
+// ── Custom-point helpers ──────────────────────────────────────────────────────
+function makeCustomPoint(
+  worldPos: THREE.Vector3,  // measurement point (mast tip) in Three.js space
+  mastOffsetFt: number,
+  x_sw: number,
+  y_sw: number,
+): BackendSamplePoint {
+  // Three.js world (after OBJ rotation.x = -PI/2): x=easting, y=elevation, z=-northing
+  const local_x   = worldPos.x
+  const local_y   = -worldPos.z           // northing
+  const meas_z    = worldPos.y            // measurement elevation
+  const display_z = meas_z - mastOffsetFt // surface elevation
+
+  const nys_e = local_x + x_sw
+  const nys_n = local_y + y_sw
+
+  return {
+    display_point:     { x: local_x, y: local_y, z: display_z, nys_e, nys_n, nys_z: display_z },
+    measurement_point: { x: local_x, y: local_y, z: meas_z,    nys_e, nys_n, nys_z: meas_z    },
+  }
 }
 
 
@@ -48,10 +73,15 @@ interface TerrainMeshProps {
   objUrl: string
   samplePoints: BackendSamplePoint[]
   analyses: (PointAnalysis | null | undefined)[]
+  placementMode: boolean
+  onPlacementClick: (point: THREE.Vector3) => void
+  onTerrainLoaded: (obj: THREE.Object3D) => void
 }
 
-function TerrainMesh({ objUrl, samplePoints, analyses }: TerrainMeshProps) {
+function TerrainMesh({ objUrl, samplePoints, analyses, placementMode, onPlacementClick, onTerrainLoaded }: TerrainMeshProps) {
   const obj = useLoader(OBJLoader, objUrl)
+  const pointerDownPos = useRef<{ x: number; y: number } | null>(null)
+  useEffect(() => { onTerrainLoaded(obj) }, [obj, onTerrainLoaded])
 
   const voronoiPoints = useMemo(() => samplePoints.map((sp, i) => ({
     x: sp.display_point.x,
@@ -75,7 +105,28 @@ function TerrainMesh({ objUrl, samplePoints, analyses }: TerrainMeshProps) {
     })
   }, [obj, mat])
 
-  return <primitive object={obj} />
+  useEffect(() => {
+    document.body.style.cursor = placementMode ? 'crosshair' : 'default'
+    return () => { document.body.style.cursor = 'default' }
+  }, [placementMode])
+
+  return (
+    <primitive
+      object={obj}
+      onPointerDown={placementMode ? (e: ThreeEvent<PointerEvent>) => {
+        pointerDownPos.current = { x: e.clientX, y: e.clientY }
+      } : undefined}
+      onClick={placementMode ? (e: ThreeEvent<MouseEvent>) => {
+        const down = pointerDownPos.current
+        if (!down) return
+        const dx = e.clientX - down.x
+        const dy = e.clientY - down.y
+        if (dx * dx + dy * dy > 25) return
+        e.stopPropagation()
+        onPlacementClick(e.point.clone())
+      } : undefined}
+    />
+  )
 }
 
 // ── Direction arrows ──────────────────────────────────────────────────────────
@@ -180,6 +231,50 @@ function DirectionArrows({ samplePoints, analyses, nysB, hoveredSphereRef }: {
   return <group ref={rootRef} />
 }
 
+// ── Placement marker ─────────────────────────────────────────────────────────
+// worldPos is the measurement point (mast tip) position in Three.js space.
+// The surface dot is rendered mastOffsetFt below it.
+function PlacementMarker({ worldPos, mastOffsetFt, onDragStart }: {
+  worldPos: THREE.Vector3
+  mastOffsetFt: number
+  onDragStart: (mastTipY: number) => void
+}) {
+  const mat    = useMemo(() => new THREE.MeshBasicMaterial({ color: 0x4d9fff, transparent: true, opacity: 0.9,  depthWrite: false }), [])
+  const dimMat = useMemo(() => new THREE.MeshBasicMaterial({ color: 0x4d9fff, transparent: true, opacity: 0.35, depthWrite: false }), [])
+
+  const mx      = worldPos.x
+  const mz      = worldPos.z
+  const tipY    = worldPos.y               // mast tip = measurement point
+  const surfY   = worldPos.y - mastOffsetFt  // surface below tip
+
+  return (
+    <group>
+      {/* Surface dot */}
+      <mesh position={[mx, surfY, mz]}>
+        <sphereGeometry args={[0.52, 8, 6]} />
+        <primitive object={dimMat} attach="material" />
+      </mesh>
+      {/* Rod from surface to mast tip */}
+      {mastOffsetFt > 0 && (
+        <mesh position={[mx, surfY + mastOffsetFt / 2, mz]}>
+          <cylinderGeometry args={[0.104, 0.104, mastOffsetFt, 6]} />
+          <primitive object={dimMat} attach="material" />
+        </mesh>
+      )}
+      {/* Mast-tip sphere — draggable, sits at cursor position */}
+      <mesh
+        position={[mx, tipY, mz]}
+        onPointerDown={(e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onDragStart(worldPos.y) }}
+        onPointerEnter={() => { document.body.style.cursor = 'grab' }}
+        onPointerLeave={() => { document.body.style.cursor = 'crosshair' }}
+      >
+        <sphereGeometry args={[1.04, 16, 12]} />
+        <primitive object={mat} attach="material" />
+      </mesh>
+    </group>
+  )
+}
+
 // ── Sample point spheres ──────────────────────────────────────────────────────
 interface SamplePointsProps {
   samplePoints: BackendSamplePoint[]
@@ -188,9 +283,10 @@ interface SamplePointsProps {
   onHover: (globalIdx: number) => void
   onHoverEnd: () => void
   hoveredSphereRef: React.MutableRefObject<number>
+  placementMode: boolean
 }
 
-function SamplePoints({ samplePoints, analyses, onPointClick, onHover, onHoverEnd, hoveredSphereRef }: SamplePointsProps) {
+function SamplePoints({ samplePoints, analyses, onPointClick, onHover, onHoverEnd, hoveredSphereRef, placementMode }: SamplePointsProps) {
   const dummy = useMemo(() => new THREE.Object3D(), [])
 
   const groups = useMemo(() => {
@@ -214,8 +310,8 @@ function SamplePoints({ samplePoints, analyses, onPointClick, onHover, onHoverEn
           idxs={idxs}
           samplePoints={samplePoints}
           dummy={dummy}
-          hoverable={status !== '__loading__'}
-          clickable={status !== '__loading__'}
+          hoverable={!placementMode && status !== '__loading__'}
+          clickable={!placementMode && status !== '__loading__'}
           onPointClick={onPointClick}
           onHover={onHover}
           onHoverEnd={onHoverEnd}
@@ -397,6 +493,10 @@ interface SceneProps {
   cameraStateRef: React.MutableRefObject<RooftopCameraState | null>
   onPointClick: (idx: number) => void
   nysB?: [number, number, number] | null
+  placementMode: boolean
+  pendingWorldPos: THREE.Vector3 | null
+  mastOffsetFt: number
+  onPlacementClick: (point: THREE.Vector3) => void
 }
 
 // ── Sphere overlay: billboard ring + SDF symbols, single draw call ────────────
@@ -625,18 +725,104 @@ function SphereOverlay({ samplePoints, analyses, hoveredSphereRef }: {
   return <instancedMesh ref={meshRef} args={[geo, mat, n]} renderOrder={1} />
 }
 
-function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, nysB }: SceneProps) {
+function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, nysB, placementMode, pendingWorldPos, mastOffsetFt, onPlacementClick }: SceneProps) {
   const objUrl           = `/api/rooftop/render/${binId}`
   const hoveredSphereRef = useRef<number>(-1)
-  const { invalidate }   = useThree()
+  const { invalidate, camera, gl, controls } = useThree()
   useEffect(() => { invalidate() }, [analyses, invalidate])
+
+  // Drag state for PlacementMarker
+  const isDraggingRef  = useRef(false)
+  const dragPlaneYRef  = useRef(0)
+  const terrainRef     = useRef<THREE.Object3D | null>(null)
+  const raycaster      = useMemo(() => new THREE.Raycaster(), [])
+  const vertRaycaster  = useMemo(() => new THREE.Raycaster(), [])
+  // Horizontal plane reused across frames; constant is set at drag-start
+  const dragPlane      = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), [])
+  const dragPlaneHit   = useMemo(() => new THREE.Vector3(), [])
+  const downDir        = useMemo(() => new THREE.Vector3(0, -1, 0), [])
+
+  const handleTerrainLoaded = useCallback((obj: THREE.Object3D) => {
+    terrainRef.current = obj
+  }, [])
+
+  // Called by PlacementMarker with the current mast-tip Y so we can build the drag plane
+  const handleDragStart = useCallback((mastTipY: number) => {
+    isDraggingRef.current  = true
+    dragPlaneYRef.current  = mastTipY
+    if (controls) (controls as unknown as { enabled: boolean }).enabled = false
+    document.body.style.cursor = 'grabbing'
+  }, [controls])
+
+  useEffect(() => {
+    if (!placementMode) return
+    const canvas = gl.domElement
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!isDraggingRef.current) return
+      const rect = canvas.getBoundingClientRect()
+      const x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1
+      const y = -((e.clientY - rect.top)  / rect.height) * 2 + 1
+      raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
+
+      // Pass 1: horizontal plane at mast-tip Y gives correct XZ without any
+      // lateral jump (the cursor is visually at the mast tip, so the plane hit
+      // is exactly the grabbed point on the first frame).
+      dragPlane.constant = -dragPlaneYRef.current
+      if (!raycaster.ray.intersectPlane(dragPlane, dragPlaneHit)) return
+
+      // Pass 2: cast straight down from that XZ to find the actual terrain
+      // surface, so the display dot stays on the OBJ rather than a flat plane.
+      // Start well above any possible terrain height (+500 ft in Three.js Y).
+      vertRaycaster.set(
+        new THREE.Vector3(dragPlaneHit.x, dragPlaneHit.y + 500, dragPlaneHit.z),
+        downDir,
+      )
+      const terrainHits = terrainRef.current
+        ? vertRaycaster.intersectObject(terrainRef.current, true)
+        : []
+
+      if (terrainHits.length > 0) {
+        // Surface found — pass the terrain surface point; handleTerrainClick adds mastOffsetFt
+        onPlacementClick(terrainHits[0].point.clone())
+      } else {
+        // Off-building — fall back to plane hit so the marker keeps moving
+        onPlacementClick(new THREE.Vector3(dragPlaneHit.x, dragPlaneHit.y - mastOffsetFt, dragPlaneHit.z))
+      }
+      invalidate()
+    }
+
+    const onPointerUp = () => {
+      if (!isDraggingRef.current) return
+      isDraggingRef.current = false
+      if (controls) (controls as unknown as { enabled: boolean }).enabled = true
+      document.body.style.cursor = 'crosshair'
+    }
+
+    canvas.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    return () => {
+      canvas.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      isDraggingRef.current = false
+      if (controls) (controls as unknown as { enabled: boolean }).enabled = true
+    }
+  }, [placementMode, mastOffsetFt, camera, gl, controls, raycaster, vertRaycaster, dragPlane, dragPlaneHit, downDir, onPlacementClick, invalidate])
+
   return (
     <>
       <ambientLight intensity={0.6} />
       <directionalLight position={[1, 3, 2]} intensity={1.0} color={0xffeedd} />
       <CameraSync binId={binId} stateRef={cameraStateRef} />
       <Suspense fallback={null}>
-        <TerrainMesh objUrl={objUrl} samplePoints={samplePoints} analyses={analyses} />
+        <TerrainMesh
+          objUrl={objUrl}
+          samplePoints={samplePoints}
+          analyses={analyses}
+          placementMode={placementMode}
+          onPlacementClick={onPlacementClick}
+          onTerrainLoaded={handleTerrainLoaded}
+        />
         <SamplePoints
           samplePoints={samplePoints}
           analyses={analyses}
@@ -644,6 +830,7 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, ny
           onHover={(idx) => { hoveredSphereRef.current = idx }}
           onHoverEnd={() => { hoveredSphereRef.current = -1 }}
           hoveredSphereRef={hoveredSphereRef}
+          placementMode={placementMode}
         />
         <SphereOverlay
           samplePoints={samplePoints}
@@ -651,6 +838,7 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, ny
           hoveredSphereRef={hoveredSphereRef}
         />
         {nysB && <DirectionArrows samplePoints={samplePoints} analyses={analyses} nysB={nysB} hoveredSphereRef={hoveredSphereRef} />}
+        {pendingWorldPos && <PlacementMarker worldPos={pendingWorldPos} mastOffsetFt={mastOffsetFt} onDragStart={handleDragStart} />}
         <CameraFit binId={binId} objUrl={objUrl} stateRef={cameraStateRef} />
       </Suspense>
     </>
@@ -658,11 +846,33 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, ny
 }
 
 // ── Top-level ─────────────────────────────────────────────────────────────────
-export default function RooftopViewer({ binId, samplePoints, analyses, cameraStateRef, onPointClick, nysB }: RooftopViewerProps) {
+export default function RooftopViewer({ binId, samplePoints, analyses, cameraStateRef, onPointClick, nysB, mastOffsetFt, buildingOffset, onAddCustomPoint }: RooftopViewerProps) {
   const n_clear   = analyses.filter(a => a?.result === 'unobstructed').length
   const n_partial = analyses.filter(a => a?.result === 'partially_obstructed').length
   const n_full    = analyses.filter(a => a?.result === 'obstructed').length
   const pending   = analyses.filter(a => a === null).length
+
+  const [placementMode,   setPlacementMode]   = useState(false)
+  const [pendingWorldPos, setPendingWorldPos]  = useState<THREE.Vector3 | null>(null)
+
+  // Store pendingWorldPos as the measurement point (mast tip), not the surface.
+  // This way the draggable sphere sits exactly where the cursor is.
+  const handleTerrainClick = useCallback((surfacePos: THREE.Vector3) => {
+    setPendingWorldPos(new THREE.Vector3(surfacePos.x, surfacePos.y + mastOffsetFt, surfacePos.z))
+  }, [mastOffsetFt])
+
+  const handleConfirm = useCallback(() => {
+    if (!pendingWorldPos || !buildingOffset) return
+    const point = makeCustomPoint(pendingWorldPos, mastOffsetFt, buildingOffset.x_sw, buildingOffset.y_sw)
+    onAddCustomPoint(point)
+    setPlacementMode(false)
+    setPendingWorldPos(null)
+  }, [pendingWorldPos, mastOffsetFt, buildingOffset, onAddCustomPoint])
+
+  const handleCancel = useCallback(() => {
+    setPlacementMode(false)
+    setPendingWorldPos(null)
+  }, [])
 
   return (
     <div style={{ position: 'absolute', inset: 0, top: 42 }}>
@@ -680,6 +890,10 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
           cameraStateRef={cameraStateRef}
           onPointClick={onPointClick}
           nysB={nysB}
+          placementMode={placementMode}
+          pendingWorldPos={pendingWorldPos}
+          mastOffsetFt={mastOffsetFt}
+          onPlacementClick={handleTerrainClick}
         />
       </Canvas>
 
@@ -689,6 +903,32 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
         <LegendRow color="#ffcc00" label={`Partial (${n_partial})`} />
         <LegendRow color="#ff1a00" label={`Obstructed (${n_full})`} />
         {pending > 0 && <LegendRow color="#94a3b8" label={`Pending (${pending})`} />}
+      </div>
+
+      <div style={styles.placementPanel}>
+        {!placementMode ? (
+          <button
+            style={styles.addBtn}
+            onClick={() => setPlacementMode(true)}
+            title="Add a custom sample point"
+          >
+            + Add point
+          </button>
+        ) : (
+          <>
+            <span style={styles.placementHint}>
+              {pendingWorldPos ? 'Click to reposition · ' : 'Click rooftop to place · '}
+            </span>
+            {pendingWorldPos && (
+              <button style={{ ...styles.addBtn, ...styles.confirmBtn }} onClick={handleConfirm}>
+                Confirm
+              </button>
+            )}
+            <button style={styles.cancelBtn} onClick={handleCancel}>
+              Cancel
+            </button>
+          </>
+        )}
       </div>
     </div>
   )
@@ -721,5 +961,47 @@ const styles: Record<string, React.CSSProperties> = {
     textTransform: 'uppercase',
     letterSpacing: '0.07em',
     marginBottom: 7,
+  },
+  placementPanel: {
+    position: 'absolute',
+    bottom: 14,
+    left: 14,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    background: 'rgba(0,0,0,0.65)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: 6,
+    padding: '6px 10px',
+  },
+  addBtn: {
+    fontSize: 12,
+    fontFamily: 'monospace',
+    color: '#8b949e',
+    background: '#21262d',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: 4,
+    padding: '2px 9px',
+    cursor: 'pointer',
+  },
+  confirmBtn: {
+    color: '#4d9fff',
+    borderColor: 'rgba(77,159,255,0.4)',
+    background: 'rgba(77,159,255,0.08)',
+  },
+  cancelBtn: {
+    fontSize: 12,
+    fontFamily: 'monospace',
+    color: '#6b7280',
+    background: 'transparent',
+    border: 'none',
+    padding: '2px 6px',
+    cursor: 'pointer',
+  },
+  placementHint: {
+    fontSize: 12,
+    fontFamily: 'monospace',
+    color: '#4d9fff',
+    userSelect: 'none',
   },
 }

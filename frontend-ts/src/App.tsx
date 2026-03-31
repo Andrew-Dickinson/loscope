@@ -29,18 +29,23 @@ async function toNys(lat: number, lon: number, alt_m: number): Promise<[number, 
   return [d.nys_e, d.nys_n, d.nys_z]
 }
 
+interface SamplePointsResponse {
+  sample_points: BackendSamplePoint[]
+  x_sw: number
+  y_sw: number
+}
+
 async function getSamplePoints(
   binId: string,
   params: { mast_offset_ft: number; sample_spacing: number },
-): Promise<BackendSamplePoint[]> {
+): Promise<SamplePointsResponse> {
   const res = await fetch(`/api/rooftop/samplePoints/${binId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
   })
   if (!res.ok) throw new Error(`Sample points failed: HTTP ${res.status}`)
-  const data = await res.json() as { sample_points: BackendSamplePoint[] }
-  return data.sample_points
+  return res.json() as Promise<SamplePointsResponse>
 }
 
 async function analyzePoint(
@@ -87,7 +92,9 @@ export default function App() {
   const [samplePoints, setSamplePoints] = useState<BackendSamplePoint[]>([])
   const [analyses,     setAnalyses]     = useState<(PointAnalysis | null | undefined)[]>([])
   const [nysB,         setNysB]         = useState<[number, number, number] | null>(null)
-  const [freqGhz,      setFreqGhz]      = useState(24)
+  const [freqGhz,        setFreqGhz]        = useState(24)
+  const [mastOffsetFt,   setMastOffsetFt]   = useState(4)
+  const [buildingOffset, setBuildingOffset] = useState<{ x_sw: number; y_sw: number } | null>(null)
 
   // Map state
   const [activeMap, setActiveMap] = useState<ActiveMap | null>(null)
@@ -101,8 +108,9 @@ export default function App() {
 
   const handleSubmit = useCallback(async (values: RooftopSubmitValues) => {
     // Reset
-    setBinId(null); setSamplePoints([]); setAnalyses([]); setActiveMap(null); setNysB(null)
+    setBinId(null); setSamplePoints([]); setAnalyses([]); setActiveMap(null); setNysB(null); setBuildingOffset(null)
     setFreqGhz(values.frequency_ghz)
+    setMastOffsetFt(values.mast_offset_ft)
     setAppState('rooftop')
 
     try {
@@ -110,7 +118,7 @@ export default function App() {
       const nysBPoint = await toNys(values.lat, values.lon, values.alt_m)
 
       setLoading({ message: 'Loading rooftop sample points…' })
-      const points = await getSamplePoints(values.bin_id, {
+      const { sample_points: points, x_sw, y_sw } = await getSamplePoints(values.bin_id, {
         mast_offset_ft: values.mast_offset_ft,
         sample_spacing: values.sample_spacing,
       })
@@ -118,6 +126,7 @@ export default function App() {
       setBinId(values.bin_id)
       setNysB(nysBPoint)
       setSamplePoints(points)
+      setBuildingOffset({ x_sw, y_sw })
 
       if (points.length === 0) {
         setLoading(null)
@@ -194,6 +203,19 @@ export default function App() {
     }
   }, [analyses, samplePoints, nysB, freqGhz])
 
+  const handleAddCustomPoint = useCallback(async (point: BackendSamplePoint) => {
+    if (!nysB) return
+    const newIdx = samplePoints.length
+    setSamplePoints(prev => [...prev, point])
+    setAnalyses(prev => [...prev, null])
+    try {
+      const result = await analyzePoint(point, nysB, freqGhz)
+      setAnalyses(prev => { const next = [...prev]; next[newIdx] = result; return next })
+    } catch {
+      setAnalyses(prev => { const next = [...prev]; next[newIdx] = undefined; return next })
+    }
+  }, [samplePoints, nysB, freqGhz])
+
   const n_clear   = analyses.filter(a => a?.result === 'unobstructed').length
   const n_partial = analyses.filter(a => a?.result === 'partially_obstructed').length
   const n_full    = analyses.filter(a => a?.result === 'obstructed').length
@@ -224,6 +246,9 @@ export default function App() {
               cameraStateRef={rooftopCameraRef}
               onPointClick={handlePointClick}
               nysB={nysB}
+              mastOffsetFt={mastOffsetFt}
+              buildingOffset={buildingOffset}
+              onAddCustomPoint={handleAddCustomPoint}
             />
           ) : (
             <WaitingScreen label={
