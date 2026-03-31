@@ -26,14 +26,19 @@ def sample_rooftop_points(bin_id):
     try:
         bin_id_parsed = str(int(bin_id))
         mast_offset = float(data.get("mast_offset_ft"))
-        spacing = int(data.get("sample_spacing"))
+        spacing_raw = data.get("sample_spacing")
+        spacing = int(spacing_raw) if spacing_raw is not None else None
     except (KeyError, TypeError, ValueError) as exc:
         abort(400, str(exc))
 
     # TODO: 404 for bad bin
     heightmap = build_building_heightmap_cached(bin_id_parsed, dob_db_dao, tile_provider)
+    sample_points = (
+        get_paired_sample_points_cached(heightmap, spacing, mast_offset)
+        if spacing is not None else []
+    )
     return {
-        "sample_points": get_paired_sample_points_cached(heightmap, spacing, mast_offset),
+        "sample_points": sample_points,
         "x_sw": heightmap.x_sw,
         "y_sw": heightmap.y_sw,
     }

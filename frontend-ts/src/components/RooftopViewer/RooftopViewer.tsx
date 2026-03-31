@@ -90,7 +90,11 @@ function TerrainMesh({ objUrl, samplePoints, analyses, placementMode, onPlacemen
     status: analyses[i]?.result ?? '__pending__',
   })), [samplePoints, analyses])
 
-  const mat = useMemo(() => buildVoronoiMaterial(voronoiPoints), [voronoiPoints])
+  const plainMat = useMemo(() => new THREE.MeshLambertMaterial({ color: 0x8b949e }), [])
+  const mat = useMemo(
+    () => samplePoints.length >= 3 ? buildVoronoiMaterial(voronoiPoints) : plainMat,
+    [samplePoints.length, voronoiPoints, plainMat]
+  )
 
   useEffect(() => {
     // OBJ is Z-up (X=easting, Y=northing, Z=elev); Three.js is Y-up.

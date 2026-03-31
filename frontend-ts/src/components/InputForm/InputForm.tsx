@@ -9,7 +9,7 @@ export interface RooftopSubmitValues {
   lat?: number; lon?: number; alt_m?: number  // coords path (dark pattern)
   frequency_ghz: number
   mast_offset_ft: number
-  sample_spacing: number
+  sample_spacing?: number
 }
 
 interface InputFormProps {
@@ -48,6 +48,7 @@ export default function InputForm({ onSubmit }: InputFormProps) {
   const [farEndLabel,  setFarEndLabel]  = useState('')
   const [farEndNys,    setFarEndNys]    = useState<[number, number, number] | null>(null)
   const [showPicker,   setShowPicker]   = useState(false)
+  const [manualSampling, setManualSampling] = useState(false)
 
   const set = (field: keyof FormFieldValues) => (e: ChangeEvent<HTMLInputElement>) =>
     setValues(v => ({ ...v, [field]: e.target.value }))
@@ -68,7 +69,7 @@ export default function InputForm({ onSubmit }: InputFormProps) {
         far_end_nys: farEndNys,
         frequency_ghz: parseFloat(values.frequency_ghz) || 24,
         mast_offset_ft: parseFloat(values.mast_offset_ft) || 0,
-        sample_spacing: parseInt(values.sample_spacing) || 5,
+        sample_spacing: manualSampling ? undefined : (parseInt(values.sample_spacing) || 15),
       }
     } else {
       const latF = parseFloat(values.lat), lonF = parseFloat(values.lon), altF = parseFloat(values.alt_m)
@@ -78,7 +79,7 @@ export default function InputForm({ onSubmit }: InputFormProps) {
         lat: latF, lon: lonF, alt_m: altF,
         frequency_ghz: parseFloat(values.frequency_ghz) || 24,
         mast_offset_ft: parseFloat(values.mast_offset_ft) || 0,
-        sample_spacing: parseInt(values.sample_spacing) || 5,
+        sample_spacing: manualSampling ? undefined : (parseInt(values.sample_spacing) || 15),
       }
     }
 
@@ -172,37 +173,48 @@ export default function InputForm({ onSubmit }: InputFormProps) {
           </Section>
 
           <Section label="Link Parameters">
-            <div style={{ marginBottom: 2 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-                <span style={{ fontSize: 12, color: '#8b949e', fontFamily: 'monospace' }}>Sample spacing (ft)</span>
-                <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#8b949e' }}>{values.sample_spacing}</span>
+            {!manualSampling && (
+              <div style={{ marginBottom: 2 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                  <span style={{ fontSize: 12, color: '#8b949e', fontFamily: 'monospace' }}>Auto-sample spacing (ft)</span>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#8b949e' }}>{values.sample_spacing}</span>
+                </div>
+                <input
+                  type="range" min={6} max={24} step={3}
+                  value={values.sample_spacing}
+                  onChange={set('sample_spacing')}
+                  disabled={submitting}
+                  style={{ width: '100%', cursor: 'pointer', accentColor: '#388bfd' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                  {[
+                    { v: 6,  label: 'High precision', sub: 'Slow' },
+                    { v: 15, label: 'Medium',         sub: ''     },
+                    { v: 24, label: 'Low precision',  sub: 'Fast' },
+                  ].map(({ v, label, sub }) => (
+                    <div key={v} onClick={() => setValues(val => ({ ...val, sample_spacing: String(v) }))}
+                      style={{
+                        textAlign: v === 6 ? 'left' : v === 24 ? 'right' : 'center',
+                        fontSize: 10, fontFamily: 'monospace',
+                        color: parseInt(values.sample_spacing) === v ? '#388bfd' : '#3d444d',
+                        transition: 'color 0.15s',
+                        lineHeight: 1.4,
+                        cursor: 'pointer',
+                      }}>
+                      {label}{sub && <><br />{sub}</>}
+                    </div>
+                  ))}
+                </div>
               </div>
-              <input
-                type="range" min={6} max={24} step={3}
-                value={values.sample_spacing}
-                onChange={set('sample_spacing')}
-                disabled={submitting}
-                style={{ width: '100%', cursor: 'pointer', accentColor: '#388bfd' }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                {[
-                  { v: 6,  label: 'High precision', sub: 'Slow' },
-                  { v: 15, label: 'Medium',         sub: ''     },
-                  { v: 24, label: 'Low precision',  sub: 'Fast' },
-                ].map(({ v, label, sub }) => (
-                  <div key={v} onClick={() => setValues(val => ({ ...val, sample_spacing: String(v) }))}
-                    style={{
-                      textAlign: v === 6 ? 'left' : v === 24 ? 'right' : 'center',
-                      fontSize: 10, fontFamily: 'monospace',
-                      color: parseInt(values.sample_spacing) === v ? '#388bfd' : '#3d444d',
-                      transition: 'color 0.15s',
-                      lineHeight: 1.4,
-                      cursor: 'pointer',
-                    }}>
-                    {label}{sub && <><br />{sub}</>}
-                  </div>
-                ))}
-              </div>
+            )}
+            <div style={styles.darkPatternRow}>
+              {manualSampling ? (
+                <button type="button" style={styles.darkPatternLink} disabled={submitting}
+                  onClick={() => setManualSampling(false)}>Use automatic sampling</button>
+              ) : (
+                <button type="button" style={styles.darkPatternLink} disabled={submitting}
+                  onClick={() => setManualSampling(true)}>Manual sampling only</button>
+              )}
             </div>
             <Advanced>
               <div style={styles.row}>

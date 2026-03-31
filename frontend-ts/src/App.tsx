@@ -37,12 +37,14 @@ interface SamplePointsResponse {
 
 async function getSamplePoints(
   binId: string,
-  params: { mast_offset_ft: number; sample_spacing: number },
+  params: { mast_offset_ft: number; sample_spacing?: number },
 ): Promise<SamplePointsResponse> {
+  const body: Record<string, unknown> = { mast_offset_ft: params.mast_offset_ft }
+  if (params.sample_spacing !== undefined) body.sample_spacing = params.sample_spacing
   const res = await fetch(`/api/rooftop/samplePoints/${binId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`Sample points failed: HTTP ${res.status}`)
   return res.json() as Promise<SamplePointsResponse>
@@ -243,7 +245,7 @@ export default function App() {
             center={binId && <RooftopHUD binId={binId} nClear={n_clear} nPartial={n_partial} nFull={n_full} />}
             right={<Hint>Click a point to view tile map</Hint>}
           />
-          {binId && samplePoints.length > 0 ? (
+          {binId && buildingOffset !== null ? (
             <RooftopViewer
               binId={binId}
               samplePoints={samplePoints}
