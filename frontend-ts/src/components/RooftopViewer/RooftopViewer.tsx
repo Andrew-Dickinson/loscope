@@ -942,9 +942,9 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
 
 function LegendRow({ color, label }: { color: string; label: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 0' }}>
-      <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
-      <span style={{ fontSize: 12, color: '#e5e7eb', fontFamily: 'monospace' }}>{label}</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
+      <span style={{ width: 12, height: 12, borderRadius: '50%', background: color, flexShrink: 0 }} />
+      <span style={{ fontSize: 14, color: '#e5e7eb', fontFamily: 'monospace' }}>{label}</span>
     </div>
   )
 }
@@ -957,16 +957,16 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'rgba(0,0,0,0.65)',
     border: '1px solid rgba(255,255,255,0.1)',
     borderRadius: 6,
-    padding: '10px 14px',
+    padding: '12px 16px',
     pointerEvents: 'none',
   },
   legendTitle: {
-    fontSize: 11,
+    fontSize: 13,
     color: '#6b7280',
     fontFamily: 'monospace',
     textTransform: 'uppercase',
     letterSpacing: '0.07em',
-    marginBottom: 7,
+    marginBottom: 8,
   },
   placementPanel: {
     position: 'absolute',

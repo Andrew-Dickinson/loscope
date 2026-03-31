@@ -223,10 +223,6 @@ export default function App() {
     }
   }, [samplePoints, nysB, freqGhz])
 
-  const n_clear   = analyses.filter(a => a?.result === 'unobstructed').length
-  const n_partial = analyses.filter(a => a?.result === 'partially_obstructed').length
-  const n_full    = analyses.filter(a => a?.result === 'obstructed').length
-
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <LoadingToast
@@ -242,7 +238,7 @@ export default function App() {
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           <TopBar
             left={<BackButton onClick={() => { setAppState('input'); setLoading(null) }} />}
-            center={binId && <RooftopHUD binId={binId} nClear={n_clear} nPartial={n_partial} nFull={n_full} />}
+            center={binId && <RooftopHUD binId={binId} />}
             right={<Hint>Click a point to view tile map</Hint>}
           />
           {binId && buildingOffset !== null ? (
@@ -344,17 +340,8 @@ function Hint({ children }: { children: ReactNode }) {
   return <span style={styles.hint}>{children}</span>
 }
 
-function RooftopHUD({ binId, nClear, nPartial, nFull }: {
-  binId: string; nClear: number; nPartial: number; nFull: number
-}) {
-  return (
-    <span style={styles.hud}>
-      BIN {binId}&nbsp;·&nbsp;
-      <span style={{ color: '#22cc44' }}>{nClear} clear</span>&nbsp;·&nbsp;
-      <span style={{ color: '#ffcc00' }}>{nPartial} partial</span>&nbsp;·&nbsp;
-      <span style={{ color: '#ff4444' }}>{nFull} obstructed</span>
-    </span>
-  )
+function RooftopHUD({ binId }: { binId: string }) {
+  return <span style={styles.hud}>BIN {binId}</span>
 }
 
 function WaitingScreen({ label }: { label: string }) {
