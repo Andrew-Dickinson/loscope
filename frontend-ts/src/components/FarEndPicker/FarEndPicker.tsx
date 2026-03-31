@@ -18,6 +18,13 @@ interface FarEndPickerProps {
   onCancel: () => void
 }
 
+// Offset point along face normal: 4 ft on horizontal surfaces, 1 ft on vertical.
+function applyNormalOffset(point: THREE.Vector3, face: THREE.Face, object: THREE.Object3D): THREE.Vector3 {
+  const worldNormal = face.normal.clone().transformDirection(object.matrixWorld).normalize()
+  const offsetFt = 2 + 2 * Math.abs(worldNormal.y)
+  return point.clone().addScaledVector(worldNormal, offsetFt)
+}
+
 // ── Terrain mesh ──────────────────────────────────────────────────────────────
 
 function TerrainMesh({ objUrl, onPlacementClick, onLoaded }: {
@@ -31,6 +38,7 @@ function TerrainMesh({ objUrl, onPlacementClick, onLoaded }: {
 
   useEffect(() => {
     obj.rotation.x = -Math.PI / 2
+    obj.updateMatrixWorld(true)
     obj.traverse(child => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh
@@ -53,32 +61,89 @@ function TerrainMesh({ objUrl, onPlacementClick, onLoaded }: {
         const dx = e.clientX - down.x, dy = e.clientY - down.y
         if (dx * dx + dy * dy > 25) return
         e.stopPropagation()
-        onPlacementClick(e.point.clone())
+        const pt = e.face
+          ? applyNormalOffset(e.point, e.face, e.object)
+          : e.point.clone()
+        onPlacementClick(pt)
       }}
     />
   )
 }
 
 // ── Placement marker ─────────────────────────────────────────────────────────
+// Screen-space billboard: same technique as RooftopViewer's SphereOverlay but
+// adapted for a single regular Mesh (modelMatrix instead of instanceMatrix).
+
+const MARKER_VERT = /* glsl */`
+  out vec2 vUv;
+  void main() {
+    vUv = uv;
+    float scale   = length(modelMatrix[0].xyz);
+    float sphereR = 0.8 * scale;
+    vec3  worldCenter = modelMatrix[3].xyz;
+    vec4  viewCenter  = viewMatrix * vec4(worldCenter, 1.0);
+    vec4  clipCenter  = projectionMatrix * viewCenter;
+    float ndcRx = projectionMatrix[0][0] * sphereR / (-viewCenter.z);
+    float ndcRy = projectionMatrix[1][1] * sphereR / (-viewCenter.z);
+    vec4  clipFront = projectionMatrix * vec4(viewCenter.xyz + vec3(0.0, 0.0, sphereR * 1.05), 1.0);
+    gl_Position = vec4(
+      clipCenter.x + position.x * ndcRx * 2.6 * clipCenter.w,
+      clipCenter.y + position.y * ndcRy * 2.6 * clipCenter.w,
+      clipFront.z / clipFront.w * clipCenter.w,
+      clipCenter.w
+    );
+  }
+`
+
+const MARKER_FRAG = /* glsl */`
+  in  vec2 vUv;
+  out vec4 fragColor;
+  void main() {
+    vec2  p = (vUv - 0.5) * 2.0 * 1.3;
+    float r = length(p);
+    if (r > 1.15) discard;
+    float aa       = fwidth(r);
+    float fill     = 1.0 - smoothstep(0.93 - aa, 0.93 + aa, r);
+    float ringDist = abs(r - 1.0);
+    float ringAA   = fwidth(ringDist);
+    float ring     = 1.0 - smoothstep(0.07 - ringAA, 0.07 + ringAA, ringDist);
+    float alpha = max(fill, ring);
+    if (alpha < 0.01) discard;
+    fragColor = vec4(mix(vec3(0.42, 0.13, 0.66), vec3(1.0), ring), alpha);
+  }
+`
 
 function PlacementMarker({ worldPos, onDragStart }: {
   worldPos: THREE.Vector3
-  onDragStart: (tipY: number) => void
+  onDragStart: () => void
 }) {
-  const mat = useMemo(() => new THREE.MeshBasicMaterial({
-    color: 0x4d9fff, transparent: true, opacity: 0.9, depthWrite: false,
+  const mat = useMemo(() => new THREE.ShaderMaterial({
+    glslVersion:    THREE.GLSL3,
+    transparent:    true,
+    depthWrite:     false,
+    depthTest:      true,
+    vertexShader:   MARKER_VERT,
+    fragmentShader: MARKER_FRAG,
   }), [])
 
   return (
-    <mesh
+    <group
       position={[worldPos.x, worldPos.y, worldPos.z]}
-      onPointerDown={(e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onDragStart(worldPos.y) }}
+      onPointerDown={(e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onDragStart() }}
       onPointerEnter={() => { document.body.style.cursor = 'grab' }}
       onPointerLeave={() => { document.body.style.cursor = 'crosshair' }}
     >
-      <sphereGeometry args={[1.04, 16, 12]} />
-      <primitive object={mat} attach="material" />
-    </mesh>
+      {/* Invisible hitbox sphere for pointer events */}
+      <mesh>
+        <sphereGeometry args={[1.04, 16, 12]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      {/* Screen-space billboard quad — scale 1.3 → sphereR = 0.8×1.3 = 1.04 matches hitbox */}
+      <mesh scale={[1.3, 1.3, 1.3]}>
+        <planeGeometry />
+        <primitive object={mat} attach="material" />
+      </mesh>
+    </group>
   )
 }
 
@@ -113,21 +178,15 @@ function Scene({ binId, pendingWorldPos, onTerrainClick }: {
   const { invalidate, camera, gl, controls } = useThree()
 
   const isDraggingRef = useRef(false)
-  const dragPlaneYRef = useRef(0)
   const terrainRef    = useRef<THREE.Object3D | null>(null)
   const raycaster     = useMemo(() => new THREE.Raycaster(), [])
-  const vertRaycaster = useMemo(() => new THREE.Raycaster(), [])
-  const dragPlane     = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), [])
-  const dragPlaneHit  = useMemo(() => new THREE.Vector3(), [])
-  const downDir       = useMemo(() => new THREE.Vector3(0, -1, 0), [])
 
   const handleLoaded = useCallback((obj: THREE.Object3D) => {
     terrainRef.current = obj
   }, [])
 
-  const handleDragStart = useCallback((tipY: number) => {
+  const handleDragStart = useCallback(() => {
     isDraggingRef.current = true
-    dragPlaneYRef.current = tipY
     if (controls) (controls as unknown as { enabled: boolean }).enabled = false
     document.body.style.cursor = 'grabbing'
   }, [controls])
@@ -141,27 +200,18 @@ function Scene({ binId, pendingWorldPos, onTerrainClick }: {
     const canvas = gl.domElement
 
     const onPointerMove = (e: PointerEvent) => {
-      if (!isDraggingRef.current) return
+      if (!isDraggingRef.current || !terrainRef.current) return
       const rect = canvas.getBoundingClientRect()
       const x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1
       const y = -((e.clientY - rect.top)  / rect.height) * 2 + 1
       raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
-
-      dragPlane.constant = -dragPlaneYRef.current
-      if (!raycaster.ray.intersectPlane(dragPlane, dragPlaneHit)) return
-
-      vertRaycaster.set(
-        new THREE.Vector3(dragPlaneHit.x, dragPlaneHit.y + 500, dragPlaneHit.z),
-        downDir,
-      )
-      const hits = terrainRef.current
-        ? vertRaycaster.intersectObject(terrainRef.current, true)
-        : []
-
-      onTerrainClick(hits.length > 0
-        ? hits[0].point.clone()
-        : dragPlaneHit.clone()
-      )
+      const hits = raycaster.intersectObject(terrainRef.current, true)
+      if (hits.length === 0) return
+      const hit = hits[0]
+      const pt = hit.face
+        ? applyNormalOffset(hit.point, hit.face, hit.object)
+        : hit.point.clone()
+      onTerrainClick(pt)
       invalidate()
     }
 
@@ -180,7 +230,7 @@ function Scene({ binId, pendingWorldPos, onTerrainClick }: {
       isDraggingRef.current = false
       if (controls) (controls as unknown as { enabled: boolean }).enabled = true
     }
-  }, [camera, gl, controls, raycaster, vertRaycaster, dragPlane, dragPlaneHit, downDir, onTerrainClick, invalidate])
+  }, [camera, gl, controls, raycaster, onTerrainClick, invalidate])
 
   useEffect(() => { invalidate() }, [pendingWorldPos, invalidate])
 
