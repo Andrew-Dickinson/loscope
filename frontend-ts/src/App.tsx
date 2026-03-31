@@ -232,9 +232,9 @@ export default function App() {
         onAbort={analyzing ? () => { abortRef.current = true; setAnalyzing(false); setLoading(null) } : undefined}
       />
 
-      {appState === 'input' && (
+      <div style={{ display: appState === 'input' ? 'flex' : 'none', flex: 1 }}>
         <InputForm onSubmit={handleSubmit} />
-      )}
+      </div>
 
       {appState === 'rooftop' && (
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
