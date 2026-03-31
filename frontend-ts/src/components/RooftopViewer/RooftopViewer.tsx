@@ -249,11 +249,13 @@ function PlacementMarker({ worldPos, mastOffsetFt, onDragStart }: {
 
   return (
     <group>
-      {/* Surface dot */}
-      <mesh position={[mx, surfY, mz]}>
-        <sphereGeometry args={[0.52, 8, 6]} />
-        <primitive object={dimMat} attach="material" />
-      </mesh>
+      {/* Surface dot — only shown when there is a mast offset to separate it from the tip */}
+      {mastOffsetFt > 0 && (
+        <mesh position={[mx, surfY, mz]}>
+          <sphereGeometry args={[0.52, 8, 6]} />
+          <primitive object={dimMat} attach="material" />
+        </mesh>
+      )}
       {/* Rod from surface to mast tip */}
       {mastOffsetFt > 0 && (
         <mesh position={[mx, surfY + mastOffsetFt / 2, mz]}>

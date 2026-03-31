@@ -114,8 +114,13 @@ export default function App() {
     setAppState('rooftop')
 
     try {
-      setLoading({ message: 'Converting far-end coordinates…' })
-      const nysBPoint = await toNys(values.lat, values.lon, values.alt_m)
+      let nysBPoint: [number, number, number]
+      if (values.far_end_nys) {
+        nysBPoint = values.far_end_nys
+      } else {
+        setLoading({ message: 'Converting far-end coordinates…' })
+        nysBPoint = await toNys(values.lat!, values.lon!, values.alt_m!)
+      }
 
       setLoading({ message: 'Loading rooftop sample points…' })
       const { sample_points: points, x_sw, y_sw } = await getSamplePoints(values.bin_id, {
