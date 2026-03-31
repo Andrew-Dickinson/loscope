@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import type { ReactNode } from 'react'
 
@@ -26,6 +26,13 @@ interface FormFieldValues {
   sample_spacing: string
 }
 
+interface GeoFeature {
+  properties: {
+    label: string
+    addendum?: { pad?: { bin?: string } }
+  }
+}
+
 const DEFAULT_VALUES: FormFieldValues = {
   bin_id: '1058335',
   lat: '40.815328384719656',
@@ -41,21 +48,85 @@ export default function InputForm({ onSubmit }: InputFormProps) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
+  // address autocomplete state
+  const [addressQuery, setAddressQuery] = useState('')
+  const [suggestions, setSuggestions] = useState<GeoFeature[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [binFromAddress, setBinFromAddress] = useState<string | null>(null)
+  const [selectedLabel, setSelectedLabel] = useState<string | null>(null)
+  const [binMode, setBinMode] = useState(false)
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const handleAddressInput = (e: ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value
+    setAddressQuery(query)
+    setBinFromAddress(null)
+    setSelectedLabel(null)
+
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+
+    if (query.length < 3) {
+      setSuggestions([])
+      setShowSuggestions(false)
+      return
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `https://geosearch.planninglabs.nyc/v2/autocomplete?text=${encodeURIComponent(query)}`
+        )
+        const data = await res.json()
+        const features: GeoFeature[] = (data.features ?? []).filter(
+          (f: GeoFeature) => f.properties.addendum?.pad?.bin
+        )
+        setSuggestions(features)
+        setShowSuggestions(features.length > 0)
+      } catch {
+        // ignore network errors
+      }
+    }, 250)
+  }
+
+  const selectSuggestion = (feature: GeoFeature) => {
+    const bin = feature.properties.addendum!.pad!.bin!
+    setBinFromAddress(bin)
+    setSelectedLabel(feature.properties.label)
+    setAddressQuery(feature.properties.label)
+    setShowSuggestions(false)
+  }
+
   const set = (field: keyof FormFieldValues) => (e: ChangeEvent<HTMLInputElement>) =>
     setValues(v => ({ ...v, [field]: e.target.value }))
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
-    const { bin_id, lat, lon, alt_m, frequency_ghz, mast_offset_ft, sample_spacing } = values
-    if (!bin_id.trim()) { setError('BIN is required'); return }
+    const effectiveBin = binMode ? values.bin_id.trim() : (binFromAddress ?? '')
+    if (!effectiveBin) {
+      setError(binMode ? 'BIN is required' : 'Select a building from the address search')
+      return
+    }
+    const { lat, lon, alt_m, frequency_ghz, mast_offset_ft, sample_spacing } = values
     const latF = parseFloat(lat), lonF = parseFloat(lon), altF = parseFloat(alt_m)
     if (isNaN(latF) || isNaN(lonF) || isNaN(altF)) { setError('Antenna coordinates are required'); return }
 
     setSubmitting(true)
     try {
       await onSubmit({
-        bin_id: bin_id.trim(),
+        bin_id: effectiveBin,
         lat: latF,
         lon: lonF,
         alt_m: altF,
@@ -76,10 +147,72 @@ export default function InputForm({ onSubmit }: InputFormProps) {
 
         <form onSubmit={handleSubmit} style={styles.form}>
           <Section label="Building">
-            <Field label="BIN" hint="Building Identification Number">
-              <input style={styles.input} placeholder="e.g. 1058335"
-                value={values.bin_id} onChange={set('bin_id')} disabled={submitting} />
-            </Field>
+            {!binMode ? (
+              <>
+                <Field label="Address">
+                  <div style={{ position: 'relative' }} ref={dropdownRef}>
+                    <input
+                      style={{
+                        ...styles.input,
+                        ...(binFromAddress ? styles.inputConfirmed : {}),
+                      }}
+                      placeholder="e.g. 120 Broadway, Manhattan"
+                      value={addressQuery}
+                      onChange={handleAddressInput}
+                      disabled={submitting}
+                      autoComplete="off"
+                    />
+                    {showSuggestions && (
+                      <div style={styles.dropdown}>
+                        {suggestions.map((f, i) => (
+                          <div
+                            key={i}
+                            style={styles.dropdownItem}
+                            onMouseDown={() => selectSuggestion(f)}
+                            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            {f.properties.label}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </Field>
+                {binFromAddress && (
+                  <div style={styles.binBadge}>
+                    BIN <span style={styles.binValue}>{binFromAddress}</span>
+                  </div>
+                )}
+                <div style={styles.darkPatternRow}>
+                  <button
+                    type="button"
+                    style={styles.darkPatternLink}
+                    onClick={() => setBinMode(true)}
+                    disabled={submitting}
+                  >
+                    Enter BIN directly
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <Field label="BIN" hint="Building Identification Number">
+                  <input style={styles.input} placeholder="e.g. 1058335"
+                    value={values.bin_id} onChange={set('bin_id')} disabled={submitting} />
+                </Field>
+                <div style={styles.darkPatternRow}>
+                  <button
+                    type="button"
+                    style={styles.darkPatternLink}
+                    onClick={() => { setBinMode(false); setAddressQuery(''); setBinFromAddress(null); setSelectedLabel(null) }}
+                    disabled={submitting}
+                  >
+                    Search by address instead
+                  </button>
+                </div>
+              </>
+            )}
           </Section>
 
           <Section label="Far-end Antenna">
@@ -205,6 +338,59 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '8px 10px',
     outline: 'none',
     transition: 'border-color 0.15s',
+    boxSizing: 'border-box',
+  },
+  inputConfirmed: {
+    borderColor: 'rgba(56,139,253,0.4)',
+  },
+  dropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    background: 'rgba(22,27,34,0.98)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderTop: 'none',
+    borderRadius: '0 0 6px 6px',
+    maxHeight: 220,
+    overflowY: 'auto',
+  },
+  dropdownItem: {
+    padding: '8px 10px',
+    fontSize: 12,
+    fontFamily: 'monospace',
+    color: '#c9d1d9',
+    cursor: 'pointer',
+    background: 'transparent',
+    transition: 'background 0.1s',
+    borderBottom: '1px solid rgba(255,255,255,0.04)',
+  },
+  binBadge: {
+    marginTop: 6,
+    fontSize: 11,
+    fontFamily: 'monospace',
+    color: '#484f58',
+  },
+  binValue: {
+    color: '#388bfd',
+    marginLeft: 4,
+  },
+  darkPatternRow: {
+    marginTop: 8,
+    display: 'flex',
+    justifyContent: 'flex-end',
+  },
+  darkPatternLink: {
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    cursor: 'pointer',
+    fontSize: 10,
+    fontFamily: 'monospace',
+    color: '#3d444d',
+    textDecoration: 'none',
+    letterSpacing: '0.02em',
   },
   error: {
     color: '#ff4444',
