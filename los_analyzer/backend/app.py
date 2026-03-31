@@ -53,6 +53,7 @@ from los_analyzer.backend.endpoints.analysis import * # noqa # pylint: disable=u
 from los_analyzer.backend.endpoints.rooftop import * # noqa # pylint: disable=unused-import
 from los_analyzer.backend.endpoints.tile_view import * # noqa # pylint: disable=unused-import
 from los_analyzer.backend.endpoints.coords import * # noqa # pylint: disable=unused-import
+from los_analyzer.backend.endpoints.meshdb import * # noqa # pylint: disable=unused-import
 
 if __name__ == "__main__":
     app.run()
