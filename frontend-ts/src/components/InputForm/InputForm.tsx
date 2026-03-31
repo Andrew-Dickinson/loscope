@@ -31,7 +31,7 @@ const DEFAULT_VALUES: FormFieldValues = {
   alt_m: '88.5',
   frequency_ghz: '5',
   mast_offset_ft: '4',
-  sample_spacing: '9',
+  sample_spacing: '15',
 }
 
 export default function InputForm({ onSubmit }: InputFormProps) {
@@ -172,20 +172,50 @@ export default function InputForm({ onSubmit }: InputFormProps) {
           </Section>
 
           <Section label="Link Parameters">
-            <div style={styles.row}>
-              <Field label="Frequency (GHz)">
-                <input style={styles.input} type="number" step="any" min="0.1" max="100"
-                  value={values.frequency_ghz} onChange={set('frequency_ghz')} disabled={submitting} />
-              </Field>
-              <Field label="Mast offset (ft)">
-                <input style={styles.input} type="number" step="any" min="0"
-                  value={values.mast_offset_ft} onChange={set('mast_offset_ft')} disabled={submitting} />
-              </Field>
-              <Field label="Sample spacing (ft)">
-                <input style={styles.input} type="number" step="1" min="1" max="50"
-                  value={values.sample_spacing} onChange={set('sample_spacing')} disabled={submitting} />
-              </Field>
+            <div style={{ marginBottom: 2 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                <span style={{ fontSize: 12, color: '#8b949e', fontFamily: 'monospace' }}>Sample spacing (ft)</span>
+                <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#8b949e' }}>{values.sample_spacing}</span>
+              </div>
+              <input
+                type="range" min={7} max={23} step={1}
+                value={values.sample_spacing}
+                onChange={set('sample_spacing')}
+                disabled={submitting}
+                style={{ width: '100%', cursor: 'pointer', accentColor: '#388bfd' }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                {[
+                  { v: 7,  label: 'High precision', sub: 'Slow' },
+                  { v: 15, label: 'Medium',         sub: ''     },
+                  { v: 23, label: 'Low precision',  sub: 'Fast' },
+                ].map(({ v, label, sub }) => (
+                  <div key={v} onClick={() => setValues(val => ({ ...val, sample_spacing: String(v) }))}
+                    style={{
+                      textAlign: v === 7 ? 'left' : v === 23 ? 'right' : 'center',
+                      fontSize: 10, fontFamily: 'monospace',
+                      color: parseInt(values.sample_spacing) === v ? '#388bfd' : '#3d444d',
+                      transition: 'color 0.15s',
+                      lineHeight: 1.4,
+                      cursor: 'pointer',
+                    }}>
+                    {label}{sub && <><br />{sub}</>}
+                  </div>
+                ))}
+              </div>
             </div>
+            <Advanced>
+              <div style={styles.row}>
+                <Field label="Frequency (GHz)">
+                  <input style={styles.input} type="number" step="any" min="0.1" max="100"
+                    value={values.frequency_ghz} onChange={set('frequency_ghz')} disabled={submitting} />
+                </Field>
+                <Field label="Mast offset (ft)">
+                  <input style={styles.input} type="number" step="any" min="0"
+                    value={values.mast_offset_ft} onChange={set('mast_offset_ft')} disabled={submitting} />
+                </Field>
+              </div>
+            </Advanced>
           </Section>
 
           {error && <p style={styles.error}>{error}</p>}
@@ -221,6 +251,23 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
         borderBottom: '1px solid rgba(255,255,255,0.06)',
       }}>{label}</div>
       {children}
+    </div>
+  )
+}
+
+function Advanced({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button type="button" onClick={() => setOpen(o => !o)} style={{
+        background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+        fontSize: 10, fontFamily: 'monospace', color: '#3d444d',
+        letterSpacing: '0.02em', display: 'flex', alignItems: 'center', gap: 4,
+      }}>
+        <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>›</span>
+        Advanced
+      </button>
+      {open && <div style={{ marginTop: 10 }}>{children}</div>}
     </div>
   )
 }
