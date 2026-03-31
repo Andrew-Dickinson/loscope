@@ -217,7 +217,7 @@ export default function InputForm({ onSubmit }: InputFormProps) {
                   onClick={() => setManualSampling(false)}>Use automatic sampling</button>
               ) : (
                 <button type="button" style={styles.darkPatternLink} disabled={submitting}
-                  onClick={() => setManualSampling(true)}>Manual sampling only</button>
+                  onClick={() => setManualSampling(true)}>Switch to Manual Sampling</button>
               )}
             </div>
             <Advanced>
