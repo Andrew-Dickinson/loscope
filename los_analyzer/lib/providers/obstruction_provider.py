@@ -3,6 +3,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from cachetools.func import lru_cache
 from tifffile import tifffile
 
 from los_analyzer.lib.obstructions.model import Obstruction
@@ -23,6 +24,7 @@ class CachingObstructionProvider(ReadThroughCache, ObstructionProvider):
     def __init__(self, upstream: AssetProvider, obs_dir: Path):
         super().__init__(upstream, obs_dir)
 
+    @lru_cache(maxsize=4096)
     def get_obstruction(self, obstruction_type: str, obstruction_id: str) -> Optional[Obstruction]:
         detail_path = self.get_from_fs_cache_or_upstream(
             ASSET_TYPE_OBSTRUCTION_DETAIL,
@@ -49,16 +51,26 @@ class CachingObstructionProvider(ReadThroughCache, ObstructionProvider):
             raster=raster,
         )
 
-    def obstruction_ids_for_tile_id(self, tile_id: str) -> Dict[str, List[str]]:
+    @lru_cache()
+    def _get_obstruction_index(self) -> Dict[str, Dict[str, List[str]]]:
         index_base_path = self.get_folder_from_fs_cache_or_upstream(ASSET_TYPE_OBSTRUCTION_INDEXES, "_indexes")
 
         if not index_base_path:
             raise FileNotFoundError("We need to have access to obstruction indexes to find relevant obstruction IDs")
 
-        obstructions_by_type = defaultdict(list)
+        obstructions_by_type_and_tile: Dict[str, Dict[str, List[str]]] = {}
         for index_path in sorted(index_base_path.glob("*.json")):
             obs_type = index_path.name.removesuffix(".json")
-            index = json.loads(index_path.read_text())
+            obstructions_by_type_and_tile[obs_type] = json.loads(index_path.read_text())
+
+        return obstructions_by_type_and_tile
+
+    @lru_cache(maxsize=4096)
+    def obstruction_ids_for_tile_id(self, tile_id: str) -> Dict[str, List[str]]:
+        obstruction_index = self._get_obstruction_index()
+
+        obstructions_by_type = defaultdict(list)
+        for obs_type, index in obstruction_index.items():
             tile_obstructions = index.get(tile_id)
             if tile_obstructions:
                 obstructions_by_type[obs_type].extend(tile_obstructions)

@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+from cachetools.func import lru_cache
 from tifffile import tifffile
 
 from los_analyzer.lib.preprocessing.tile import TileData
@@ -21,6 +22,7 @@ class CachingTileProvider(ReadThroughCache, TileProvider):
     def __init__(self, upstream: AssetProvider, tile_dir: Path):
         super().__init__(upstream, tile_dir)
 
+    @lru_cache(maxsize=1024)
     def get_tile(self, tile_id: str) -> Optional[TileData]:
         tiff_file_name = f"{tile_id}.tif"
         tile_path = self.get_from_fs_cache_or_upstream(ASSET_TYPE_TERRAIN_TIFF, tiff_file_name)
