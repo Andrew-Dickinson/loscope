@@ -30,8 +30,8 @@ class CachingTileProvider(ReadThroughCache, TileProvider):
             # As an optimization, we chose not to store tiles which are all zeros, but analyses may request these
              # TODO: Warn the user for the case where their analysis is trying to query a tile outside the city
              #     (might require an extra lookup here to see if the tile ID falls outside some kind of index)
-             _write_empty_tile(tile_path)
-             return tile_path
+            tile_path = self._cache_dir / tiff_file_name
+            _write_empty_tile(tile_path)
 
         raster = tifffile.imread(tile_path)
         x_offset, y_offset = tile_id_to_offset(tile_id)
