@@ -234,15 +234,20 @@ def get_integer_grid_within_bounds(bounds: tuple[float, float]):
 def normalize_ellipse(C_conic_section: np.array) -> tuple[np.array, tuple[float, float]]:
     ellipse_offset_homogenous = np.linalg.inv(C_conic_section)[:, 2]
     ellipse_offset = tuple(ellipse_offset_homogenous[:2] / ellipse_offset_homogenous[2])
+    u, v = ellipse_offset
 
-    B_ellipse_normalization = np.array([
-        [1, 0, ellipse_offset[0]],
-        [0, 1, ellipse_offset[1]],
-        [0, 0, 1]
-    ])
+    a = C_conic_section[0, 0]
+    b = C_conic_section[1, 0]
+    c = C_conic_section[1, 1]
+    e = C_conic_section[2, 0]
+    g = C_conic_section[2, 1]
+    f = C_conic_section[2, 2]
 
-    # TODO: Maybe we don't need to do this whole matrix computation, we can use a formula for f in terms of a,b,c
-    return np.linalg.matrix_transpose(B_ellipse_normalization) @ C_conic_section @ B_ellipse_normalization, ellipse_offset
+    return  np.array([
+        [a, b, 0],
+        [b, c, 0],
+        [0, 0, u * (a*u + 2*b*v + 2*e) + v * (c*v + 2*g) + f]
+    ]), (u, v)
 
 
 def compute_ellipse_x_bounds(C_ellipse_conic_section_norm: np.array) -> tuple[float, float]:
