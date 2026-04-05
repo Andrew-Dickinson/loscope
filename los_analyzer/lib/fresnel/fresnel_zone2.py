@@ -7,8 +7,7 @@ import numpy as np
 
 from math import sqrt, ceil, floor
 
-from los_analyzer.lib.preprocessing.tile_id import TILE_SIDE_USFT
-
+OFFSET_BUFFER = 500
 UINT16_MAX = 2**16 -  1
 SPEED_OF_LIGHT_M_S = 299_792_458
 USFT_PER_METER = 1 / 0.3048006096
@@ -106,7 +105,7 @@ def compute_fresnel_zone(
     # Construct output containers
     max_width = abs(ceil(2 * semi_minor / angle_context.sin_theta)) + 1
     output_height = y_vals.shape[0]
-    base_offsets = floor(np.min([point_a_nys[0], point_b_nys[0]]) - semi_minor - TILE_SIDE_USFT), y_vals[0]
+    base_offsets = floor(np.min([point_a_nys[0], point_b_nys[0]]) - semi_minor - OFFSET_BUFFER), y_vals[0]
     aggregated_offsets = np.zeros((output_height,), dtype=np.uint32)
     aggregated_widths = np.zeros((output_height,), dtype=np.uint32)
     aggregated_upper = np.zeros((output_height,  max_width), dtype=np.float64)
