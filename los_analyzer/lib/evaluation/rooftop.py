@@ -18,7 +18,7 @@ from los_analyzer.lib.fresnel.fresnel_zone2 import compute_fresnel_zone, Fresnel
 from los_analyzer.lib.providers.obstruction_provider import ObstructionProvider
 from los_analyzer.lib.providers.tile_provider import TileProvider
 from los_analyzer.lib.tiles.identify import identify_tiles
-from los_analyzer.lib.tiles.intersect import compute_intersection
+from los_analyzer.lib.tiles.intersect import compute_intersection, IntersectionGrid
 from los_analyzer.lib.tiles.load import load_terrain_grid
 
 
