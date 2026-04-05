@@ -1,4 +1,5 @@
 from math import atan, asin, tan, cos, sin, sqrt
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -238,3 +239,35 @@ def test_fresnel_zone_empty_x_grid():
     nys_b = translate_to_nys_plane(GPS_B)
     zone = compute_fresnel_zone(nys_a, nys_b, FREQUENCY_HZ, ALPHA)
     assert isinstance(zone, FresnelZone)
+
+
+# ---------------------------------------------------------------------------
+# Snapshot regression tests
+# Snapshots are stored in tests/fresnel/snapshots/ as .npz files.
+# Regenerate them by running: python tools/generate_fresnel_snapshots.py
+# ---------------------------------------------------------------------------
+
+SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
+
+from tests.fresnel.snapshot_cases import SNAPSHOT_CASES as _SNAPSHOT_CASES
+
+
+@pytest.mark.parametrize("name,pt_a,pt_b,freq", _SNAPSHOT_CASES)
+@pytest.mark.parametrize("alpha", [1.0, 0.6])
+def test_fresnel_zone_snapshot(name, pt_a, pt_b, freq, alpha):
+    """compute_fresnel_zone output must not change from the recorded snapshot."""
+    alpha_tag = f"alpha{alpha:.1f}".replace(".", "_")
+    snapshot_path = SNAPSHOT_DIR / f"{name}_{alpha_tag}.npz"
+
+    zone = compute_fresnel_zone(pt_a, pt_b, freq, alpha=alpha)
+    snap = np.load(snapshot_path)
+
+    # top/bottom are uint16 inches derived from float64 via * 12 + clip + cast,
+    # so allow ±1 inch tolerance for floating-point rounding differences.
+    np.testing.assert_allclose(zone.top,    snap["top"],    atol=1, rtol=0, err_msg=f"{name} alpha={alpha}: top mismatch")
+    np.testing.assert_allclose(zone.bottom, snap["bottom"], atol=1, rtol=0, err_msg=f"{name} alpha={alpha}: bottom mismatch")
+    # widths/offsets come from integer grid arithmetic — must be exact.
+    np.testing.assert_array_equal(zone.widths,  snap["widths"],  err_msg=f"{name} alpha={alpha}: widths mismatch")
+    np.testing.assert_array_equal(zone.offsets, snap["offsets"], err_msg=f"{name} alpha={alpha}: offsets mismatch")
+    assert zone.x_base_offset == int(snap["x_base_offset"]), f"{name} alpha={alpha}: x_base_offset mismatch"
+    assert zone.y_base_offset == int(snap["y_base_offset"]), f"{name} alpha={alpha}: y_base_offset mismatch"
