@@ -1,7 +1,7 @@
 use std::io::{Cursor, Read};
 use derive_new::new;
 use image::{DynamicImage};
-use crate::openjpg2k::decode_jp2_region;
+use crate::util::openjpg2k::decode_jp2_region;
 use crate::providers::asset_fetcher::{AssetType};
 use crate::providers::fs_cache::{AssetProvider};
 use crate::types::errors::AssetErr;

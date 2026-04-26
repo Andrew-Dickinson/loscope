@@ -1,19 +1,18 @@
 mod types;
 pub mod providers;
-pub mod env;
-pub mod openjpg2k;
+pub mod util;
 
 #[macro_use] extern crate rocket;
 
 use std::io::Cursor;
 use image::{EncodableLayout, ImageFormat};
 use rocket::http::{ContentType, Status};
-use rocket::request::{Outcome};
-use rocket::{State};
-use crate::providers::ortho_provider::{OrthoProvider};
-use crate::providers::{S3BackedProviders};
+use rocket::request::Outcome;
+use rocket::State;
+use crate::providers::ortho_provider::OrthoProvider;
+use crate::providers::S3BackedProviders;
 use crate::types::errors::{AssetErr, ParseErr};
-use crate::types::tiles::{TileId};
+use crate::types::tiles::TileId;
 
 #[get("/healthCheck")]
 fn index() -> &'static str {

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use derive_getters::Getters;
 use tokio::fs;
 use typed_path::Utf8UnixPathBuf;
-use crate::env::{expect_env, LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, LOS_ORTHOS_S3_PREFIX};
+use crate::util::env::{expect_env, LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, LOS_ORTHOS_S3_PREFIX};
 use crate::providers::asset_fetcher::{AssetType, S3AssetFetcher};
 use crate::providers::fs_cache::{AssetProvider, CachingAssetProvider};
 use crate::providers::ortho_provider::{CachingOrthoProvider};
@@ -17,14 +17,6 @@ pub mod asset_fetcher;
 pub struct Providers<T: AssetProvider> {
     ortho_provider: CachingOrthoProvider<T>
 }
-
-// impl<T: AssetProvider> Providers<T> {
-//     pub fn new(asset_provider: T) -> Self {
-//         Self {
-//             ortho_provider: CachingOrthoProvider::new(asset_provider)
-//         }
-//     }
-// }
 
 pub type S3BackedProviders = Providers<CachingAssetProvider<S3AssetFetcher>>;
 
