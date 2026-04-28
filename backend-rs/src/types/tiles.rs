@@ -1,7 +1,7 @@
 use std::iter::{repeat_n};
 use derive_getters::Getters;
-use crate::types::errors::ParseErr;
-use crate::types::errors::ParseErr::{InvalidLASTileId, InvalidSubgrid};
+use crate::types::errors::TileParseErr;
+use crate::types::errors::TileParseErr::{InvalidLASTileId, InvalidSubgrid};
 
 const TILE_ID_SEPARATOR: char = '_';
 const SUBGRID_ID_RADIX: u32 = 10;
@@ -30,7 +30,7 @@ pub struct TileId {
 }
 
 impl LASTileId {
-    pub fn parse(input_str: &str) -> Result<Self, ParseErr> {
+    pub fn parse(input_str: &str) -> Result<Self, TileParseErr> {
         if !input_str.chars().all(|c| c.is_ascii_digit()){
             return Err(InvalidLASTileId);
         }
@@ -92,7 +92,7 @@ impl SubgridId {
         SubgridId(x, y)
     }
 
-    pub fn parse(input_str: &str) -> Result<SubgridId, ParseErr> {
+    pub fn parse(input_str: &str) -> Result<SubgridId, TileParseErr> {
         if input_str.len() != 2 {
             return Err(InvalidSubgrid);
         }
@@ -125,10 +125,10 @@ impl SubgridId {
 }
 
 impl TileId {
-    pub fn parse(input_str: &str) -> Result<TileId, ParseErr> {
+    pub fn parse(input_str: &str) -> Result<TileId, TileParseErr> {
         let (las_tile_id_str, subgrid_id_str) = match input_str.find(TILE_ID_SEPARATOR) {
             Some(i) if i > 0 => (&input_str[..i], &input_str[(i + 1)..]),
-            _ => return Err(ParseErr::MissingSeparator)
+            _ => return Err(TileParseErr::MissingSeparator)
         };
 
         Ok(
@@ -345,12 +345,12 @@ mod tests {
 
     #[test]
     fn tile_id_missing_separator() {
-        assert!(matches!(TileId::parse("500300"), Err(ParseErr::MissingSeparator)));
+        assert!(matches!(TileId::parse("500300"), Err(TileParseErr::MissingSeparator)));
     }
 
     #[test]
     fn tile_id_separator_at_start() {
-        assert!(matches!(TileId::parse("_500300"), Err(ParseErr::MissingSeparator)));
+        assert!(matches!(TileId::parse("_500300"), Err(TileParseErr::MissingSeparator)));
     }
 
     #[test]

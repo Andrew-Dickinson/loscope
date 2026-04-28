@@ -1,7 +1,7 @@
 use std::num::ParseIntError;
 
 #[derive(Debug)]
-pub enum ParseErr {
+pub enum TileParseErr {
     MissingSeparator,
     InvalidSubgrid,
     InvalidLASTileId,
@@ -17,8 +17,8 @@ pub enum AssetErr {
     AssetContentError(String),
 }
 
-impl From<ParseIntError> for ParseErr {
+impl From<ParseIntError> for TileParseErr {
     fn from(e: ParseIntError) -> Self {
-        ParseErr::InvalidInt(e)
+        TileParseErr::InvalidInt(e)
     }
 }
