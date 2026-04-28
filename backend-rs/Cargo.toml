@@ -6,7 +6,8 @@ edition = "2024"
 [dependencies]
 derive-getters = "0.5.0"
 image = "0.25.10"
-rocket = "0.5.1"
+rocket = { version = "0.5.1", features = ["json"] }
+serde = "1.0.228"
 aws-config = { version= "1.8.16", features = ["behavior-version-latest", "credentials-login"] }
 aws-sdk-s3 = "1.111.0"
 tokio = { version = "1", features = ["full"] }
@@ -17,6 +18,9 @@ strum_macros = "0.28"
 derive-new = "0.7.0"
 scopeguard = "1.2.0"
 openjpeg-sys = "1.0.12"
+eproj = "0.0.1-alpha.12"
+approx = "0.5.1"
+approx-derive = "0.2.8"
 
 
 [dev-dependencies]
