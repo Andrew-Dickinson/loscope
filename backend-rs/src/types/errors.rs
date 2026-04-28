@@ -9,6 +9,9 @@ pub enum TileParseErr {
 }
 
 #[derive(Debug)]
+pub struct BINParseError(pub String);
+
+#[derive(Debug)]
 pub enum AssetErr {
     AssetNotFound(String),
     AssetDownloadError(String),
