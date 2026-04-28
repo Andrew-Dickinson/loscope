@@ -77,3 +77,72 @@ impl GPSCoords3 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nys2_from3_drops_altitude() {
+        let c3 = NYSCoords3::new(1000.0, 2000.0, 50.0);
+        let c2 = NYSCoords2::from3(&c3);
+        assert_eq!(*c2.easting(), 1000.0);
+        assert_eq!(*c2.northing(), 2000.0);
+    }
+
+    #[test]
+    fn nys3_from2_sets_altitude() {
+        let c2 = NYSCoords2::new(1000.0, 2000.0);
+        let c3 = NYSCoords3::from2(&c2, 75.5);
+        assert_eq!(*c3.easting(), 1000.0);
+        assert_eq!(*c3.northing(), 2000.0);
+        assert_eq!(*c3.alt_usft(), 75.5);
+    }
+
+    #[test]
+    fn nys_roundtrip_via_2() {
+        let original = NYSCoords3::new(123.4, 567.8, 99.9);
+        let c2 = NYSCoords2::from3(&original);
+        let restored = NYSCoords3::from2(&c2, *original.alt_usft());
+        assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn gps2_from3_drops_altitude() {
+        let c3 = GPSCoords3::new(40.7128, -74.0060, 10.0);
+        let c2 = GPSCoords2::from3(&c3);
+        assert_eq!(*c2.lat(), 40.7128);
+        assert_eq!(*c2.lon(), -74.0060);
+    }
+
+    #[test]
+    fn gps3_from2_sets_altitude() {
+        let c2 = GPSCoords2::new(40.7128, -74.0060);
+        let c3 = GPSCoords3::from2(&c2, 15.0);
+        assert_eq!(*c3.lat(), 40.7128);
+        assert_eq!(*c3.lon(), -74.0060);
+        assert_eq!(*c3.alt_m(), 15.0);
+    }
+
+    #[test]
+    fn gps_roundtrip_via_2() {
+        let original = GPSCoords3::new(40.7128, -74.0060, 22.5);
+        let c2 = GPSCoords2::from3(&original);
+        let restored = GPSCoords3::from2(&c2, *original.alt_m());
+        assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn nys3_from2_zero_altitude() {
+        let c2 = NYSCoords2::new(500.0, 1500.0);
+        let c3 = NYSCoords3::from2(&c2, 0.0);
+        assert_eq!(*c3.alt_usft(), 0.0);
+    }
+
+    #[test]
+    fn gps3_from2_zero_altitude() {
+        let c2 = GPSCoords2::new(34.0, -118.0);
+        let c3 = GPSCoords3::from2(&c2, 0.0);
+        assert_eq!(*c3.alt_m(), 0.0);
+    }
+}
