@@ -13,6 +13,9 @@ use crate::providers::ortho_provider::OrthoProvider;
 use crate::providers::S3BackedProviders;
 use crate::types::errors::{AssetErr, ParseErr};
 use crate::types::tiles::TileId;
+use types::coords::{GPSCoords3, NYSCoords3};
+use rocket::serde::json::Json;
+use crate::util::coord_conversion::{init_coord_converter_factory, with_coord_converter, CoordinateConverter};
 
 #[get("/healthCheck")]
 fn index() -> &'static str {
@@ -50,9 +53,24 @@ async fn get_terrain_ortho(
     Ok(JpegImage(jpeg_bytes))
 }
 
+
+#[post("/coords/toNys", format = "json", data = "<gps_coords>")]
+async fn gps_to_nys(
+    gps_coords: Json<GPSCoords3>
+) -> Result<Json<NYSCoords3>, Status> {
+    Ok(
+        Json::from(
+            with_coord_converter(
+                |converter| converter.to_nys_plane3(&gps_coords.0)
+            )
+        )
+    )
+}
+
 #[launch]
 async fn rocket() -> _ {
+    init_coord_converter_factory(|| CoordinateConverter::new());
     rocket::build()
         .manage(S3BackedProviders::new_with_s3_from_env().await)
-        .mount("/api", routes![index, get_terrain_ortho])
+        .mount("/api", routes![index, get_terrain_ortho, gps_to_nys])
 }
