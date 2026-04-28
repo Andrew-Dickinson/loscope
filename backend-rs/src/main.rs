@@ -18,7 +18,7 @@ use rocket::serde::json::Json;
 use crate::util::coord_conversion::{init_coord_converter_factory, with_coord_converter, CoordinateConverter};
 
 #[get("/healthCheck")]
-fn index() -> &'static str {
+fn health_check() -> &'static str {
     "Healthy"
 }
 
@@ -72,5 +72,5 @@ async fn rocket() -> _ {
     init_coord_converter_factory(|| CoordinateConverter::new());
     rocket::build()
         .manage(S3BackedProviders::new_with_s3_from_env().await)
-        .mount("/api", routes![index, get_terrain_ortho, gps_to_nys])
+        .mount("/api", routes![health_check, get_terrain_ortho, gps_to_nys])
 }
