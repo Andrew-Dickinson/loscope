@@ -1,4 +1,5 @@
 use std::num::ParseIntError;
+use rocket::http::Status;
 use strum_macros::Display;
 
 #[derive(Debug,Display)]
@@ -34,5 +35,15 @@ impl From<ParseIntError> for TileParseErr {
 impl From<tokio_rusqlite::Error> for ProviderInitErr {
     fn from(e: tokio_rusqlite::Error) -> Self {
         ProviderInitErr::RusqliteError(e)
+    }
+}
+impl From<AssetErr> for Status {
+    fn from(err: AssetErr) -> Self {
+        // println!("{err:?}");
+        match err {
+            AssetErr::AssetContentError(_) => Status::UnprocessableEntity,
+            AssetErr::AssetNotFound(_) => Status::NotFound,
+            _ => Status::InternalServerError
+        }
     }
 }
