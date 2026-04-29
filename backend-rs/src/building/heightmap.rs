@@ -35,6 +35,10 @@ impl BINId {
 
         Ok(BINId(bin_id.to_string()))
     }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 #[derive(Debug, new, Getters)]

@@ -21,7 +21,7 @@ fn health_check() -> &'static str {
 async fn rocket() -> _ {
     init_coord_converter_factory(|| CoordinateConverter::new());
     rocket::build()
-        .manage(Providers::new_with_s3_from_env().await)
+        .manage(Providers::new_from_env().await.unwrap())
         .mount("/api", routes![health_check])
         .mount("/api/rooftop", routes![render_rooftop])
         .mount("/api/tileview", routes![get_terrain_ortho])

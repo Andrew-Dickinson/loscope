@@ -24,6 +24,9 @@ approx-derive = "0.2.8"
 array2d = "0.3.2"
 geo-types = "0.7.19"
 async-trait = "0.1"
+tokio-rusqlite = "0.7.0"
+#rusqlite = { version = "0.37.0", features = ["bundled"] }
+wkt = "0.14.0"
 
 
 [dev-dependencies]
