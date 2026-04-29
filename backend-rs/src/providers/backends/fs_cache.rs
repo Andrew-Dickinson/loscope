@@ -8,7 +8,7 @@ use crate::types::errors::AssetErr;
 #[async_trait]
 pub trait AssetProvider {
     // TODO: Strongly type asset_id?
-    async fn get_asset(&self, asset_type: &AssetType, asset_id: &str) -> Result<File, AssetErr>;
+    async fn get_asset(&self, asset_type: AssetType, asset_id: &str) -> Result<File, AssetErr>;
 }
 
 #[derive(new)]
@@ -22,7 +22,7 @@ impl<T> AssetProvider for CachingAssetProvider<T>
 where
     T: AssetFetcher + Send + Sync,
 {
-    async fn get_asset(&self, asset_type: &AssetType, asset_id: &str) -> Result<File, AssetErr> {
+    async fn get_asset(&self, asset_type: AssetType, asset_id: &str) -> Result<File, AssetErr> {
         let item_path_buf = self.cache_root.join(asset_type.as_ref()).join(asset_id);
         let item_path = item_path_buf.as_path();
 
@@ -71,7 +71,7 @@ mod tests {
 
     #[async_trait]
     impl AssetFetcher for MockAssetFetcher {
-        async fn fetch_asset(&self, _: &AssetType, _: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr> {
+        async fn fetch_asset(&self, _: AssetType, _: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr> {
             if self.should_succeed {
                 if let Some(parent) = local_path.parent() {
                     std::fs::create_dir_all(parent).unwrap();
@@ -105,7 +105,7 @@ mod tests {
             cache_root,
         );
 
-        let mut file = provider.get_asset(&AssetType::OrthoImage, "test.jpg").await.unwrap();
+        let mut file = provider.get_asset(AssetType::OrthoImage, "test.jpg").await.unwrap();
         assert_eq!(read_file_contents(&mut file), "cached-content");
     }
 
@@ -119,7 +119,7 @@ mod tests {
             cache_root.clone(),
         );
 
-        let mut file = provider.get_asset(&AssetType::OrthoImage, "test.jpg").await.unwrap();
+        let mut file = provider.get_asset(AssetType::OrthoImage, "test.jpg").await.unwrap();
         assert_eq!(read_file_contents(&mut file), "fetched-content");
 
         // File should now be present in the cache
@@ -136,7 +136,7 @@ mod tests {
             cache_root,
         );
 
-        let result = provider.get_asset(&AssetType::OrthoImage, "test.jpg").await;
+        let result = provider.get_asset(AssetType::OrthoImage, "test.jpg").await;
         assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
     }
 }

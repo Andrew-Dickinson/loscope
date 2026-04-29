@@ -25,7 +25,7 @@ pub struct CachingOrthoProvider  {
 impl OrthoProvider for CachingOrthoProvider {
     async fn get_ortho(&self, tile_id: &TileId) -> Result<DynamicImage, AssetErr> {
         let fname = tile_id.las_tile_id().ortho_fname();
-        let mut asset_handle = self.asset_provider.get_asset(&AssetType::OrthoImage, &fname).await?;
+        let mut asset_handle = self.asset_provider.get_asset(AssetType::OrthoImage, &fname).await?;
 
 
         let asset_size = asset_handle.metadata().or_else(
@@ -103,7 +103,7 @@ mod tests {
 
     #[async_trait]
     impl AssetProvider for MockAssetProvider {
-        async fn get_asset(&self, _: &AssetType, _: &str) -> Result<File, AssetErr> {
+        async fn get_asset(&self, _: AssetType, _: &str) -> Result<File, AssetErr> {
             match &self.result {
                 Ok(path) => File::open(path).map_err(|e| AssetErr::LocalFileSystemError(e.to_string())),
                 Err(AssetErr::AssetNotFound(msg)) => Err(AssetErr::AssetNotFound(msg.clone())),

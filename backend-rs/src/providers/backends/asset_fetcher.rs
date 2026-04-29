@@ -7,10 +7,10 @@ use aws_sdk_s3::operation::get_object::GetObjectError;
 use derive_new::new;
 use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
 use crate::types::errors::AssetErr;
-use strum_macros::{AsRefStr};
+use strum_macros::{AsRefStr, Display};
 use tokio::fs;
 
-#[derive(Debug, Hash, Eq, PartialEq, AsRefStr)]
+#[derive(Debug, Hash, Eq, PartialEq, AsRefStr, Display, Copy, Clone)]
 pub enum AssetType {
     OrthoImage
 }
@@ -19,7 +19,7 @@ pub enum AssetType {
 pub trait AssetFetcher {
     /// Downloads the asset from the specified remote_path of the specified asset type to the
     /// specified local path, if local_path is not successfully populated, returns Err(AssetErr)
-    async fn fetch_asset(&self, asset_type: &AssetType, remote_path: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr>;
+    async fn fetch_asset(&self, asset_type: AssetType, remote_path: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr>;
 }
 
 #[derive(new)]
@@ -31,7 +31,7 @@ pub struct S3AssetFetcher {
 
 #[async_trait]
 impl AssetFetcher for S3AssetFetcher {
-    async fn fetch_asset(&self, asset_type: &AssetType, remote_path: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr> {
+    async fn fetch_asset(&self, asset_type: AssetType, remote_path: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr> {
         let local_path_parent = local_path.parent().ok_or(
             AssetErr::LocalFileSystemError(format!("Expected {local_path:?} to have valid parent"))
         )?;
@@ -147,7 +147,7 @@ mod tests {
         });
 
         let result = fetcher.fetch_asset(
-            &AssetType::OrthoImage,
+            AssetType::OrthoImage,
             &Utf8UnixPath::new("photo.jpg"),
             &temp_ortho_image_path,
         ).await;
@@ -172,7 +172,7 @@ mod tests {
         });
 
         let result = fetcher.fetch_asset(
-            &AssetType::OrthoImage,
+            AssetType::OrthoImage,
             &Utf8UnixPath::new("photo.jpg"),
             &temp_ortho_image_path,
         ).await;
@@ -192,7 +192,7 @@ mod tests {
         });
 
         let result = fetcher.fetch_asset(
-            &AssetType::OrthoImage,
+            AssetType::OrthoImage,
             &Utf8UnixPath::new("photo.jpg"),
             &temp_ortho_image_path,
         ).await;
@@ -211,7 +211,7 @@ mod tests {
         );
 
         let result = fetcher.fetch_asset(
-            &AssetType::OrthoImage,
+            AssetType::OrthoImage,
             &Utf8UnixPath::new("photo.jpg"),
             &PathBuf::from("/nonexistent-not-a-real-directory-dont-create-me/photo.jpg"),
         ).await;
