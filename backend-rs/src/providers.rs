@@ -6,19 +6,17 @@ use typed_path::Utf8UnixPathBuf;
 use crate::util::env::{expect_env, LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, LOS_ORTHOS_S3_PREFIX};
 use backends::asset_fetcher::{AssetType, S3AssetFetcher};
 use backends::fs_cache::{AssetProvider, CachingAssetProvider};
-use crate::providers::ortho_provider::CachingOrthoProvider;
+use crate::providers::ortho_provider::{CachingOrthoProvider, OrthoProvider};
 
 pub mod ortho_provider;
 pub mod backends;
 
 #[derive(Getters)]
-pub struct Providers<T: AssetProvider + Send + Sync> {
-    ortho_provider: CachingOrthoProvider<T>
+pub struct Providers {
+    ortho_provider: Box<dyn OrthoProvider + Send + Sync>,
 }
 
-pub type S3BackedProviders = Providers<CachingAssetProvider<S3AssetFetcher>>;
-
-impl S3BackedProviders {
+impl Providers {
     pub async fn new_with_s3_from_env() -> Self {
         let prefix_map = HashMap::from([
             (AssetType::OrthoImage, Utf8UnixPathBuf::from(expect_env(LOS_ORTHOS_S3_PREFIX))),
@@ -34,7 +32,7 @@ impl S3BackedProviders {
         let asset_fetcher = S3AssetFetcher::new(s3_client, bucket, prefix_map);
         let asset_provider = CachingAssetProvider::new(asset_fetcher, cache_root);
         Self {
-            ortho_provider: CachingOrthoProvider::new(asset_provider)
+            ortho_provider: Box::new(CachingOrthoProvider::new(Box::new(asset_provider))),
         }
     }
 }

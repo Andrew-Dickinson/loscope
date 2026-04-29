@@ -9,7 +9,7 @@ pub mod building;
 use crate::endpoints::coords::gps_to_nys;
 use crate::endpoints::rooftop::render_rooftop;
 use crate::endpoints::tileview::get_terrain_ortho;
-use crate::providers::S3BackedProviders;
+use crate::providers::Providers;
 use crate::util::coord_conversion::{init_coord_converter_factory, CoordinateConverter};
 
 #[get("/healthCheck")]
@@ -21,7 +21,7 @@ fn health_check() -> &'static str {
 async fn rocket() -> _ {
     init_coord_converter_factory(|| CoordinateConverter::new());
     rocket::build()
-        .manage(S3BackedProviders::new_with_s3_from_env().await)
+        .manage(Providers::new_with_s3_from_env().await)
         .mount("/api", routes![health_check])
         .mount("/api/rooftop", routes![render_rooftop])
         .mount("/api/tileview", routes![get_terrain_ortho])

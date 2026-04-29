@@ -17,15 +17,12 @@ pub trait OrthoProvider {
 
 
 #[derive(new)]
-pub struct CachingOrthoProvider<T: AssetProvider + Send + Sync>  {
-    asset_provider: T,
+pub struct CachingOrthoProvider  {
+    asset_provider: Box<dyn AssetProvider + Send + Sync>,
 }
 
 #[async_trait]
-impl<T> OrthoProvider for CachingOrthoProvider<T>
-where
-    T: AssetProvider + Send + Sync,
-{
+impl OrthoProvider for CachingOrthoProvider {
     async fn get_ortho(&self, tile_id: &TileId) -> Result<DynamicImage, AssetErr> {
         let fname = tile_id.las_tile_id().ortho_fname();
         let mut asset_handle = self.asset_provider.get_asset(&AssetType::OrthoImage, &fname).await?;
@@ -180,7 +177,9 @@ mod tests {
         let jp2_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/resources/002205.jp2");
 
-        let provider = CachingOrthoProvider::new(MockAssetProvider::returning_file(jp2_path));
+        let provider = CachingOrthoProvider::new(
+            Box::new(MockAssetProvider::returning_file(jp2_path))
+        );
         let result = provider.get_ortho(&tile_002205()).await;
         assert!(result.is_ok(), "expected Ok, got {result:?}");
         let result = result.unwrap();
@@ -191,7 +190,9 @@ mod tests {
     #[tokio::test]
     async fn get_ortho_propagates_asset_not_found() {
         let provider = CachingOrthoProvider::new(
-            MockAssetProvider::returning_err(AssetErr::AssetNotFound("mock: not found".into()))
+            Box::new(
+                MockAssetProvider::returning_err(AssetErr::AssetNotFound("mock: not found".into()))
+            )
         );
         let result = provider.get_ortho(&tile_002205()).await;
         assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
@@ -203,7 +204,11 @@ mod tests {
         let bad_path = temp_dir.as_path_untracked().join("bad.jp2");
         File::create(&bad_path).unwrap().write_all(b"not-an-image").unwrap();
 
-        let provider = CachingOrthoProvider::new(MockAssetProvider::returning_file(bad_path));
+        let provider = CachingOrthoProvider::new(
+            Box::new(
+                MockAssetProvider::returning_file(bad_path)
+            )
+        );
         let result = provider.get_ortho(&tile_002205()).await;
         assert!(matches!(result, Err(AssetErr::AssetContentError(_))));
     }

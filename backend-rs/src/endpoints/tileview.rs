@@ -3,7 +3,7 @@ use rocket::State;
 use rocket::http::Status;
 use image::ImageFormat;
 use crate::providers::ortho_provider::OrthoProvider;
-use crate::providers::S3BackedProviders;
+use crate::providers::Providers;
 use crate::types::errors::AssetErr;
 use crate::types::tiles::TileId;
 
@@ -14,7 +14,7 @@ pub struct JpegImage(Vec<u8>);
 #[get("/terrain/orthoImage/<tile_id>")]
 pub async fn get_terrain_ortho(
     tile_id: &str,
-    providers: &State<S3BackedProviders>
+    providers: &State<Providers>
 ) -> Result<JpegImage, Status> {
     // TODO: Would it be better to use a CDN style direct browser file access for this?
     //   Especially since the requests will be balanced across many workers, which may or may
