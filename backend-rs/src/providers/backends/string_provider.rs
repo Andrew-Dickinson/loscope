@@ -24,6 +24,13 @@ impl NYCDOBSqliteStringProvider {
     }
 }
 
+#[cfg(test)]
+impl NYCDOBSqliteStringProvider {
+    fn with_connection(conn: Connection) -> Self {
+        NYCDOBSqliteStringProvider { db_connection: conn }
+    }
+}
+
 #[async_trait]
 impl StringProvider for NYCDOBSqliteStringProvider {
     async fn get_string(&self, asset_type: AssetType, identifier: &str) -> Result<String, AssetErr> {
@@ -75,5 +82,72 @@ impl StringProvider for NYCDOBSqliteStringProvider {
                 format!("Error utilizing db_connection while getting footprint for {identifier:?}: {err}")
             ))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE_WKT: &str = "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))";
+
+    async fn make_provider(rows: &[(&str, &str)]) -> NYCDOBSqliteStringProvider {
+        let conn = Connection::open(":memory:").await.unwrap();
+        conn.call(|c| {
+            c.execute_batch(
+                "CREATE TABLE building_footprints (bin TEXT, the_geom TEXT)"
+            )
+        }).await.unwrap();
+
+        for (bin, geom) in rows {
+            let bin = bin.to_string();
+            let geom = geom.to_string();
+            conn.call(move |c| {
+                c.execute(
+                    "INSERT INTO building_footprints (bin, the_geom) VALUES (?1, ?2)",
+                    rusqlite::params![bin, geom],
+                )
+            }).await.unwrap();
+        }
+
+        NYCDOBSqliteStringProvider::with_connection(conn)
+    }
+
+    #[tokio::test]
+    async fn returns_wkt_for_known_bin() {
+        let provider = make_provider(&[("1000001", SAMPLE_WKT)]).await;
+        let result = provider.get_string(AssetType::BuildingFootprintWKT, "1000001").await;
+        assert_eq!(result.unwrap(), SAMPLE_WKT);
+    }
+
+    #[tokio::test]
+    async fn returns_not_found_for_missing_bin() {
+        let provider = make_provider(&[]).await;
+        let result = provider.get_string(AssetType::BuildingFootprintWKT, "1000001").await;
+        assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn returns_content_error_for_duplicate_bin() {
+        let provider = make_provider(&[
+            ("1000001", SAMPLE_WKT),
+            ("1000001", "POLYGON((2 2, 3 2, 3 3, 2 3, 2 2))"),
+        ]).await;
+        let result = provider.get_string(AssetType::BuildingFootprintWKT, "1000001").await;
+        assert!(matches!(result, Err(AssetErr::AssetContentError(_))));
+    }
+
+    #[tokio::test]
+    async fn returns_unsupported_type_error_for_non_footprint_asset() {
+        let provider = make_provider(&[]).await;
+        let result = provider.get_string(AssetType::OrthoImage, "1000001").await;
+        assert!(matches!(result, Err(AssetErr::UnsupportedAssetType(_))));
+    }
+
+    #[tokio::test]
+    async fn does_not_return_row_for_different_bin() {
+        let provider = make_provider(&[("2000001", SAMPLE_WKT)]).await;
+        let result = provider.get_string(AssetType::BuildingFootprintWKT, "1000001").await;
+        assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
     }
 }
