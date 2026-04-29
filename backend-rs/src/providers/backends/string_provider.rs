@@ -33,6 +33,10 @@ impl StringProvider for NYCDOBSqliteStringProvider {
             ))
         }
 
+        // The below code is all super BuildingFootprintWKT specific, but we Err-ed above in
+        // all other cases, so this is fine for now. If we add other types here this should
+        // definitely at least go in a helper
+
         // BINs are small <10B and inexpensive to clone
         let bin_id = String::from(identifier);
 
@@ -53,7 +57,7 @@ impl StringProvider for NYCDOBSqliteStringProvider {
                     | rusqlite::Error::InvalidColumnName(_) => Err(AssetErr::AssetContentError(
                         format!("Invalid footprint database content for {bin_id:?}: {err}")
                     )),
-                    rusqlite::Error::QueryReturnedNoRows => Err(AssetErr::AssetDownloadError(
+                    rusqlite::Error::QueryReturnedNoRows => Err(AssetErr::AssetNotFound(
                         format!("{bin_id:?} not found in database")
                     )),
                     rusqlite::Error::QueryReturnedMoreThanOneRow =>
