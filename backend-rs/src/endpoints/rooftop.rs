@@ -1,11 +1,8 @@
-use rocket::serde::json::Json;
 use rocket::http::Status;
 use rocket::State;
 use crate::building::heightmap::BINId;
 use crate::providers::S3BackedProviders;
-use crate::types::coords::{GPSCoords3, NYSCoords3};
-use crate::types::tiles::TileId;
-use crate::util::coord_conversion::with_coord_converter;
+use crate::types::coords::{NYSCoords3};
 
 #[derive(Responder)]
 #[response(status = 200, content_type = "model/obj")]

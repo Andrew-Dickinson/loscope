@@ -1,8 +1,5 @@
-use std::ops::Deref;
-use std::sync::Arc;
 use derive_getters::Getters;
 use derive_new::new;
-use eproj::{Coordinate3, Projector, SpatialReferenceIdentifier};
 use approx_derive::AbsDiffEq;
 use serde::{Serialize,Deserialize};
 

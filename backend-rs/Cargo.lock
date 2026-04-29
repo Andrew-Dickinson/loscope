@@ -1619,6 +1619,7 @@ dependencies = [
  "approx",
  "approx-derive",
  "array2d",
+ "async-trait",
  "aws-config",
  "aws-sdk-s3",
  "aws-smithy-mocks",

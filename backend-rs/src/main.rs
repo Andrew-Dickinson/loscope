@@ -10,7 +10,7 @@ use crate::endpoints::coords::gps_to_nys;
 use crate::endpoints::rooftop::render_rooftop;
 use crate::endpoints::tileview::get_terrain_ortho;
 use crate::providers::S3BackedProviders;
-use crate::util::coord_conversion::{init_coord_converter_factory, with_coord_converter, CoordinateConverter};
+use crate::util::coord_conversion::{init_coord_converter_factory, CoordinateConverter};
 
 #[get("/healthCheck")]
 fn health_check() -> &'static str {

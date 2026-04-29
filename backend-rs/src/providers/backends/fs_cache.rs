@@ -2,23 +2,25 @@ use std::fs::File;
 use std::path::PathBuf;
 use derive_new::new;
 use typed_path::{Utf8UnixPath};
-use crate::providers::asset_fetcher::{AssetFetcher, AssetType};
+use crate::providers::backends::asset_fetcher::{AssetFetcher, AssetType};
 use crate::types::errors::AssetErr;
 
+#[async_trait]
 pub trait AssetProvider {
     // TODO: Strongly type asset_id?
     async fn get_asset(&self, asset_type: &AssetType, asset_id: &str) -> Result<File, AssetErr>;
 }
 
 #[derive(new)]
-pub struct CachingAssetProvider<T: AssetFetcher> {
+pub struct CachingAssetProvider<T: AssetFetcher + Send + Sync> {
     upstream_fetcher: T,
     cache_root: PathBuf,
 }
 
+#[async_trait]
 impl<T> AssetProvider for CachingAssetProvider<T>
 where
-    T: AssetFetcher,
+    T: AssetFetcher + Send + Sync,
 {
     async fn get_asset(&self, asset_type: &AssetType, asset_id: &str) -> Result<File, AssetErr> {
         let item_path_buf = self.cache_root.join(asset_type.as_ref()).join(asset_id);
@@ -67,6 +69,7 @@ mod tests {
         should_succeed: bool,
     }
 
+    #[async_trait]
     impl AssetFetcher for MockAssetFetcher {
         async fn fetch_asset(&self, _: &AssetType, _: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr> {
             if self.should_succeed {

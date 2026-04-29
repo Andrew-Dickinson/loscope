@@ -4,17 +4,15 @@ use derive_getters::Getters;
 use tokio::fs;
 use typed_path::Utf8UnixPathBuf;
 use crate::util::env::{expect_env, LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, LOS_ORTHOS_S3_PREFIX};
-use crate::providers::asset_fetcher::{AssetType, S3AssetFetcher};
-use crate::providers::fs_cache::{AssetProvider, CachingAssetProvider};
-use crate::providers::ortho_provider::{CachingOrthoProvider};
+use backends::asset_fetcher::{AssetType, S3AssetFetcher};
+use backends::fs_cache::{AssetProvider, CachingAssetProvider};
+use crate::providers::ortho_provider::CachingOrthoProvider;
 
 pub mod ortho_provider;
-pub mod fs_cache;
-pub mod asset_fetcher;
-
+pub mod backends;
 
 #[derive(Getters)]
-pub struct Providers<T: AssetProvider> {
+pub struct Providers<T: AssetProvider + Send + Sync> {
     ortho_provider: CachingOrthoProvider<T>
 }
 

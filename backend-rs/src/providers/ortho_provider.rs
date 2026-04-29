@@ -1,29 +1,30 @@
-use std::io::{Cursor, Read};
+use std::io::{Read};
 use derive_new::new;
 use image::{DynamicImage};
 use crate::util::openjpg2k::decode_jp2_region;
-use crate::providers::asset_fetcher::{AssetType};
-use crate::providers::fs_cache::{AssetProvider};
+use crate::providers::backends::asset_fetcher::{AssetType};
+use crate::providers::backends::fs_cache::{AssetProvider};
 use crate::types::errors::AssetErr;
 use crate::types::tiles::{TileId, LAS_TILE_SIDE_LENGTH_USFT};
 
 const ORTHO_IMAGE_SIZE_PIXELS: u16 = 5000;
 const ORTHO_SCALE_PX_PER_USFT: u8 = 2;
 
+#[async_trait]
 pub trait OrthoProvider {
     async fn get_ortho(&self, tile_id: &TileId) -> Result<DynamicImage, AssetErr>;
 }
 
 
 #[derive(new)]
-pub struct CachingOrthoProvider<T: AssetProvider>  {
+pub struct CachingOrthoProvider<T: AssetProvider + Send + Sync>  {
     asset_provider: T,
 }
 
-
+#[async_trait]
 impl<T> OrthoProvider for CachingOrthoProvider<T>
 where
-    T: AssetProvider,
+    T: AssetProvider + Send + Sync,
 {
     async fn get_ortho(&self, tile_id: &TileId) -> Result<DynamicImage, AssetErr> {
         let fname = tile_id.las_tile_id().ortho_fname();
@@ -103,6 +104,7 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl AssetProvider for MockAssetProvider {
         async fn get_asset(&self, _: &AssetType, _: &str) -> Result<File, AssetErr> {
             match &self.result {

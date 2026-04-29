@@ -23,6 +23,7 @@ approx = "0.5.1"
 approx-derive = "0.2.8"
 array2d = "0.3.2"
 geo-types = "0.7.19"
+async-trait = "0.1"
 
 
 [dev-dependencies]

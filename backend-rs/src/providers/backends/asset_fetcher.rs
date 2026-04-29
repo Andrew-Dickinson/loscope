@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use derive_new::new;
-use rocket::futures::TryFutureExt;
 use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
 use crate::types::errors::AssetErr;
 use strum_macros::{AsRefStr};
@@ -16,6 +15,7 @@ pub enum AssetType {
     OrthoImage
 }
 
+#[async_trait]
 pub trait AssetFetcher {
     /// Downloads the asset from the specified remote_path of the specified asset type to the
     /// specified local path, if local_path is not successfully populated, returns Err(AssetErr)
@@ -29,6 +29,7 @@ pub struct S3AssetFetcher {
     asset_type_prefixes: HashMap<AssetType, Utf8UnixPathBuf>,
 }
 
+#[async_trait]
 impl AssetFetcher for S3AssetFetcher {
     async fn fetch_asset(&self, asset_type: &AssetType, remote_path: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr> {
         let local_path_parent = local_path.parent().ok_or(
