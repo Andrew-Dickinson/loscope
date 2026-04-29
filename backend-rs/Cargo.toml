@@ -27,6 +27,7 @@ async-trait = "0.1"
 tokio-rusqlite = "0.7.0"
 #rusqlite = { version = "0.37.0", features = ["bundled"] }
 wkt = "0.14.0"
+arrayvec = "0.7.6"
 
 
 [dev-dependencies]

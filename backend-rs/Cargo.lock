@@ -1640,6 +1640,7 @@ dependencies = [
  "approx",
  "approx-derive",
  "array2d",
+ "arrayvec",
  "async-trait",
  "aws-config",
  "aws-sdk-s3",

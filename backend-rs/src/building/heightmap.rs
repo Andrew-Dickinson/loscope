@@ -1,22 +1,23 @@
 use derive_getters::Getters;
 use derive_new::new;
 use array2d::{Array2D};
+use arrayvec::ArrayString;
 use geo_types::Polygon;
 use crate::types::coords::NYSCoords2;
 use crate::types::errors::BINParseError;
 
 
-const BIN_LENGTH_CHARS: u8 = 7;
+const BIN_LENGTH_CHARS: usize = 7;
 const PERMITTED_BIN_FIRST_CHAR: &[u8] = &[1, 2, 3, 4, 5];
 
 #[derive(Debug)]
-pub struct BINId(String);
+pub struct BINId(ArrayString<BIN_LENGTH_CHARS>);
 
 impl BINId {
     pub fn parse(bin_id: &str) -> Result<BINId, BINParseError> {
         let chars: Vec<char> = bin_id.chars().collect();
 
-        if chars.len() != BIN_LENGTH_CHARS as usize {
+        if chars.len() != BIN_LENGTH_CHARS {
             return Err(BINParseError(format!("Invalid BIN ID: {bin_id}. Expected {BIN_LENGTH_CHARS} chars")));
         }
 
@@ -33,7 +34,9 @@ impl BINId {
             }
         }
 
-        Ok(BINId(bin_id.to_string()))
+        // Safety: The below .unwrap() is safe because we validate chars.len() == BIN_LENGTH_CHARS
+        // above, and BINId.0 is of type ArrayString<BIN_LENGTH_CHARS>
+        Ok(BINId(ArrayString::from(bin_id).unwrap()))
     }
 
     pub fn as_str(&self) -> &str {
