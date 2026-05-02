@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::io::{Read};
 use std::sync::Arc;
 use derive_new::new;
@@ -46,10 +47,10 @@ impl OrthoProvider for CachingOrthoProvider {
         let bounds = to_ortho_bounds(tile_id.subgrid_id().relative_bounds());
         let rgba_img = decode_jp2_region(
             asset_buf,
-            bounds.0 as i32,
-            bounds.1 as i32,
-            bounds.2 as i32,
-            bounds.3 as i32
+            bounds.0.into(),
+            bounds.1.into(),
+            bounds.2.into(),
+            bounds.3.into()
         ).or_else(
             |read_err| Err(AssetErr::AssetContentError(
                 format!("Unable to read content from asset {fname}: {read_err}")
@@ -60,23 +61,24 @@ impl OrthoProvider for CachingOrthoProvider {
 }
 
 fn to_ortho_bounds(usft_sw_rel_bounds: (u16, u16, u16, u16)) -> (u16, u16, u16, u16){
+    let ortho_scale_px_per_usft_u16: u16 = ORTHO_SCALE_PX_PER_USFT.into();
     let top_left = (
-        usft_sw_rel_bounds.0 * ORTHO_SCALE_PX_PER_USFT as u16,
+        usft_sw_rel_bounds.0 * ortho_scale_px_per_usft_u16,
         // Convert SW (bottom right) offset to top left instead. Double subtract is
         // to both move the coordinate reference point to the top left of the LAS tile,
         // and also refer to the top left corner of the subgrid square
         // (relative_bounds() returns the SW corner of the subgrid tile, relative to the
         // SW corner of the LAS tile)
         (LAS_TILE_SIDE_LENGTH_USFT - usft_sw_rel_bounds.3 - usft_sw_rel_bounds.1)
-            * ORTHO_SCALE_PX_PER_USFT as u16
+            * ortho_scale_px_per_usft_u16
     );
 
     // Convert from x,y,w,h to x0,y0,x1,y1
     (
         top_left.0,
         top_left.1,
-        top_left.0 + usft_sw_rel_bounds.2 * ORTHO_SCALE_PX_PER_USFT as u16,
-        top_left.1 + usft_sw_rel_bounds.3 * ORTHO_SCALE_PX_PER_USFT as u16
+        top_left.0 + usft_sw_rel_bounds.2 * ortho_scale_px_per_usft_u16,
+        top_left.1 + usft_sw_rel_bounds.3 * ortho_scale_px_per_usft_u16
     )
 }
 

@@ -51,8 +51,10 @@ impl LASTileId {
             easting_base += EASTING_BASE_ROLLOVER_POINT;
         }
 
-        if    !PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((northing_base % 10) as u8))
-            || !PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((easting_base % 10) as u8)) {
+        // Safety: the below unwraps() will never panic, because the outcome of % 10 will always
+        // fit into a u8
+        if    !PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((northing_base % 10).try_into().unwrap()))
+            || !PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((easting_base % 10).try_into().unwrap())) {
             return Err(InvalidLASTileId);
         }
 
@@ -106,18 +108,23 @@ impl SubgridId {
         let subgrid_x = subgrid_x_char.to_digit(SUBGRID_ID_RADIX).ok_or(InvalidSubgrid)?;
         let subgrid_y = subgrid_y_char.to_digit(SUBGRID_ID_RADIX).ok_or(InvalidSubgrid)?;
 
-        if subgrid_x >= SUBGRID_TILES_PER_SIDE as u32 || subgrid_y >= SUBGRID_TILES_PER_SIDE as u32 {
+        let side_len_u32: u32 = SUBGRID_TILES_PER_SIDE.into();
+        if subgrid_x >= side_len_u32 || subgrid_y >= side_len_u32 {
             return Err(InvalidSubgrid);
         }
 
-        Ok(SubgridId::new(subgrid_x as u8, subgrid_y as u8))
+        // Safety: the unwrap() calls below are safe because SUBGRID_TILES_PER_SIDE << max(u8)
+        // and we just validated these are both < SUBGRID_TILES_PER_SIDE
+        Ok(SubgridId::new(subgrid_x.try_into().unwrap(), subgrid_y.try_into().unwrap()))
     }
 
     // Returns the X, Y, W, H in usft relative to the SW corner of the tile
     pub fn relative_bounds(&self) -> (u16, u16, u16, u16) {
+        let e_u16: u16 = self.0.into();
+        let n_u16: u16 = self.1.into();
         (
-            self.0 as u16 * SUBGRID_TILE_SIDE_LENGTH_USFT,
-            self.1 as u16 * SUBGRID_TILE_SIDE_LENGTH_USFT,
+            e_u16 * SUBGRID_TILE_SIDE_LENGTH_USFT,
+            n_u16 * SUBGRID_TILE_SIDE_LENGTH_USFT,
             SUBGRID_TILE_SIDE_LENGTH_USFT,
             SUBGRID_TILE_SIDE_LENGTH_USFT
         )
