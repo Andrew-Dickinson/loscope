@@ -21,7 +21,7 @@ pub async fn get_terrain_ortho(
     //   not have shared cache storage
     let Ok(tile_id) = TileId::parse(&tile_id) else { return Err(Status::BadRequest) };
 
-    let ortho_img = providers.ortho_provider().get_ortho(&tile_id).await?;
+    let ortho_img = providers.ortho_provider().get_ortho(tile_id).await?;
 
     let mut jpeg_bytes: Vec<u8> = Vec::new();
     ortho_img.write_to(&mut Cursor::new(&mut jpeg_bytes), ImageFormat::Jpeg).unwrap();

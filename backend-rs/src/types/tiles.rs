@@ -14,16 +14,16 @@ const EASTING_BASE_ROLLOVER_POINT: u16 = 1000;
 const EASTING_BASE_ROLLOVER_BOUND: u16 = EASTING_BASE_ROLLOVER_POINT / 2;
 const PERMITTED_LAS_ID_COMPONENT_MODULI: &[u8] = &[0, 2, 5, 7];
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 // Easting, Northing coordinates (in NYS LI plane) (units of 1000 usft)
 pub struct LASTileId(u16, u16);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 // X, Y (Easting, Northing in units of 500 usft) offset from the SW corner of
 // the associated LAS tile
 pub struct SubgridId(u8, u8);
 
-#[derive(Debug, Getters)]
+#[derive(Debug, Getters, Clone, Copy)]
 pub struct TileId {
     las_tile_id: LASTileId,
     subgrid_id: SubgridId,

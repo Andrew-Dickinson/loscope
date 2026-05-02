@@ -12,7 +12,7 @@ const ORTHO_SCALE_PX_PER_USFT: u8 = 2;
 
 #[async_trait]
 pub trait OrthoProvider {
-    async fn get_ortho(&self, tile_id: &TileId) -> Result<DynamicImage, AssetErr>;
+    async fn get_ortho(&self, tile_id: TileId) -> Result<DynamicImage, AssetErr>;
 }
 
 
@@ -23,7 +23,7 @@ pub struct CachingOrthoProvider  {
 
 #[async_trait]
 impl OrthoProvider for CachingOrthoProvider {
-    async fn get_ortho(&self, tile_id: &TileId) -> Result<DynamicImage, AssetErr> {
+    async fn get_ortho(&self, tile_id: TileId) -> Result<DynamicImage, AssetErr> {
         let fname = tile_id.las_tile_id().ortho_fname();
         let mut asset_handle = self.asset_provider.get_asset(AssetType::OrthoImage, &fname).await?;
 
@@ -180,7 +180,7 @@ mod tests {
         let provider = CachingOrthoProvider::new(
             Box::new(MockAssetProvider::returning_file(jp2_path))
         );
-        let result = provider.get_ortho(&tile_002205()).await;
+        let result = provider.get_ortho(tile_002205()).await;
         assert!(result.is_ok(), "expected Ok, got {result:?}");
         let result = result.unwrap();
         assert_eq!(result.width(), 1000);
@@ -194,7 +194,7 @@ mod tests {
                 MockAssetProvider::returning_err(AssetErr::AssetNotFound("mock: not found".into()))
             )
         );
-        let result = provider.get_ortho(&tile_002205()).await;
+        let result = provider.get_ortho(tile_002205()).await;
         assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
     }
 
@@ -209,7 +209,7 @@ mod tests {
                 MockAssetProvider::returning_file(bad_path)
             )
         );
-        let result = provider.get_ortho(&tile_002205()).await;
+        let result = provider.get_ortho(tile_002205()).await;
         assert!(matches!(result, Err(AssetErr::AssetContentError(_))));
     }
 }
