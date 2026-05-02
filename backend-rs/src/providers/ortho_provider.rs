@@ -104,6 +104,10 @@ mod tests {
 
     #[async_trait]
     impl AssetProvider for MockAssetProvider {
+        fn get_local_asset_path(&self, asset_type: AssetType, asset_id: &str) -> PathBuf {
+            panic!("Not implemented")
+        }
+
         async fn get_asset(&self, _: AssetType, _: &str) -> Result<File, AssetErr> {
             match &self.result {
                 Ok(path) => File::open(path).map_err(|e| AssetErr::LocalFileSystemError(e.to_string())),

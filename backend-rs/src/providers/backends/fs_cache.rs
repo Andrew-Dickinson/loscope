@@ -9,6 +9,7 @@ use crate::types::errors::AssetErr;
 pub trait AssetProvider {
     // TODO: Strongly type asset_id?
     async fn get_asset(&self, asset_type: AssetType, asset_id: &str) -> Result<File, AssetErr>;
+    fn get_local_asset_path(&self, asset_type: AssetType, asset_id: &str) -> PathBuf;
 }
 
 #[derive(new)]
@@ -19,6 +20,10 @@ pub struct CachingAssetProvider {
 
 #[async_trait]
 impl AssetProvider for CachingAssetProvider {
+    fn get_local_asset_path<'a>(&self, asset_type: AssetType, asset_id: &'a str) -> PathBuf {
+        self.cache_root.join(asset_type.as_ref()).join(asset_id)
+    }
+
     async fn get_asset(&self, asset_type: AssetType, asset_id: &str) -> Result<File, AssetErr> {
         let item_path_buf = self.cache_root.join(asset_type.as_ref()).join(asset_id);
         let item_path = item_path_buf.as_path();
