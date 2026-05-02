@@ -1,4 +1,5 @@
 use std::io::{Read};
+use std::sync::Arc;
 use derive_new::new;
 use image::{DynamicImage};
 use crate::util::openjpg2k::decode_jp2_region;
@@ -18,7 +19,7 @@ pub trait OrthoProvider {
 
 #[derive(new)]
 pub struct CachingOrthoProvider  {
-    asset_provider: Box<dyn AssetProvider + Send + Sync>,
+    asset_provider: Arc<dyn AssetProvider + Send + Sync>,
 }
 
 #[async_trait]
@@ -178,7 +179,7 @@ mod tests {
             .join("tests/resources/002205.jp2");
 
         let provider = CachingOrthoProvider::new(
-            Box::new(MockAssetProvider::returning_file(jp2_path))
+            Arc::new(MockAssetProvider::returning_file(jp2_path))
         );
         let result = provider.get_ortho(tile_002205()).await;
         assert!(result.is_ok(), "expected Ok, got {result:?}");
@@ -190,7 +191,7 @@ mod tests {
     #[tokio::test]
     async fn get_ortho_propagates_asset_not_found() {
         let provider = CachingOrthoProvider::new(
-            Box::new(
+            Arc::new(
                 MockAssetProvider::returning_err(AssetErr::AssetNotFound("mock: not found".into()))
             )
         );
@@ -205,7 +206,7 @@ mod tests {
         File::create(&bad_path).unwrap().write_all(b"not-an-image").unwrap();
 
         let provider = CachingOrthoProvider::new(
-            Box::new(
+            Arc::new(
                 MockAssetProvider::returning_file(bad_path)
             )
         );

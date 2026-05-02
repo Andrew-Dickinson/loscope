@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use derive_getters::Getters;
 use tokio::fs;
 use typed_path::Utf8UnixPathBuf;
@@ -37,12 +38,17 @@ impl Providers {
         // TODO: This is loosely coupled to S3, which is intentional. We want to swap the asset
         //       fetcher used in prod to something that uses generic HTTP, probably pointed at
         //       something mesh-internal
-        let asset_fetcher = S3AssetFetcher::new(s3_client, bucket, prefix_map);
-        let asset_provider = CachingAssetProvider::new(asset_fetcher, cache_root);
+        let asset_fetcher = Box::new(
+            S3AssetFetcher::new(s3_client.clone(), bucket, prefix_map)
+        );
+
+        let asset_provider: Arc<dyn AssetProvider + Send + Sync> = Arc::new(
+            CachingAssetProvider::new(asset_fetcher, cache_root)
+        );
 
         Ok(
             Self {
-                ortho_provider: Box::new(CachingOrthoProvider::new(Box::new(asset_provider))),
+                ortho_provider: Box::new(CachingOrthoProvider::new(Arc::clone(&asset_provider))),
 
                 // TODO: We probably don't want to bundle the 0.5-6.0 GB sqlite db with our builds
                 //       or dynamically fetch it at runtime either, this should probably get reworked

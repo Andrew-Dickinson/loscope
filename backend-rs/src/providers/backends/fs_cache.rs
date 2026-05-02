@@ -12,16 +12,13 @@ pub trait AssetProvider {
 }
 
 #[derive(new)]
-pub struct CachingAssetProvider<T: AssetFetcher + Send + Sync> {
-    upstream_fetcher: T,
+pub struct CachingAssetProvider {
+    upstream_fetcher: Box<dyn AssetFetcher + Send + Sync>,
     cache_root: PathBuf,
 }
 
 #[async_trait]
-impl<T> AssetProvider for CachingAssetProvider<T>
-where
-    T: AssetFetcher + Send + Sync,
-{
+impl AssetProvider for CachingAssetProvider {
     async fn get_asset(&self, asset_type: AssetType, asset_id: &str) -> Result<File, AssetErr> {
         let item_path_buf = self.cache_root.join(asset_type.as_ref()).join(asset_id);
         let item_path = item_path_buf.as_path();
@@ -101,7 +98,7 @@ mod tests {
 
         // Fetcher always errors — success proves it was never called
         let provider = CachingAssetProvider::new(
-            MockAssetFetcher { should_succeed: false },
+            Box::new(MockAssetFetcher { should_succeed: false }),
             cache_root,
         );
 
@@ -115,7 +112,7 @@ mod tests {
         let cache_root = temp_dir.as_path_untracked().to_path_buf();
 
         let provider = CachingAssetProvider::new(
-            MockAssetFetcher { should_succeed: true },
+            Box::new(MockAssetFetcher { should_succeed: true }),
             cache_root.clone(),
         );
 
@@ -132,7 +129,7 @@ mod tests {
         let cache_root = temp_dir.as_path_untracked().to_path_buf();
 
         let provider = CachingAssetProvider::new(
-            MockAssetFetcher { should_succeed: false },
+            Box::new(MockAssetFetcher { should_succeed: false }),
             cache_root,
         );
 
