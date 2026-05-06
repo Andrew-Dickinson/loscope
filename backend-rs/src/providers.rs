@@ -8,18 +8,21 @@ use crate::util::env::{expect_env, LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, 
 use backends::asset_fetcher::{AssetType, S3AssetFetcher};
 use backends::fs_cache::{AssetProvider, CachingAssetProvider};
 use crate::providers::backends::string_provider::NYCDOBSqliteStringProvider;
+use crate::providers::elevation_tile_provider::{CachingElevationTileProvider, ElevationTileProvider};
 use crate::providers::footprint_provider::{FootprintProvider, StringBackedFootprintProvider};
 use crate::providers::ortho_provider::{CachingOrthoProvider, OrthoProvider};
 use crate::types::errors::ProviderInitErr;
 
 pub mod ortho_provider;
+pub mod elevation_tile_provider;
 pub mod footprint_provider;
 pub mod backends;
 
 #[derive(Getters)]
 pub struct Providers {
     ortho_provider: Box<dyn OrthoProvider + Send + Sync>,
-    footprint_provider: Box<dyn FootprintProvider + Send + Sync>
+    footprint_provider: Box<dyn FootprintProvider + Send + Sync>,
+    elevation_tile_provider: Box<dyn ElevationTileProvider + Send + Sync>
 }
 
 impl Providers {
@@ -49,6 +52,7 @@ impl Providers {
         Ok(
             Self {
                 ortho_provider: Box::new(CachingOrthoProvider::new(Arc::clone(&asset_provider))),
+                elevation_tile_provider: Box::new(CachingElevationTileProvider::new(Arc::clone(&asset_provider))),
 
                 // TODO: We probably don't want to bundle the 0.5-6.0 GB sqlite db with our builds
                 //       or dynamically fetch it at runtime either, this should probably get reworked

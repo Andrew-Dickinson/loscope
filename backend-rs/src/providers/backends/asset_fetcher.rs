@@ -13,6 +13,7 @@ use tokio::fs;
 #[derive(Debug, Hash, Eq, PartialEq, AsRefStr, Display, Copy, Clone)]
 pub enum AssetType {
     OrthoImage,
+    ElevationTile,
     BuildingFootprintWKT
 }
 
