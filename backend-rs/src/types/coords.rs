@@ -6,6 +6,10 @@ use serde::{Serialize,Deserialize};
 pub const MIN_NYS_COORD_VALUE: f64 = 0.0;
 pub const MAX_NYS_COORD_VALUE: f64 = 2_000_000.0;
 
+enum CoordError {
+    ExceedsBound
+}
+
 #[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize)]
 pub struct GPSCoords3 {
    lat: f64,
@@ -79,7 +83,7 @@ impl GPSCoords3 {
 }
 
 pub fn valid_nys_coordinate(coord: f64) -> bool {
-    coord < MIN_NYS_COORD_VALUE || coord > MAX_NYS_COORD_VALUE
+    coord >= MIN_NYS_COORD_VALUE && coord <= MAX_NYS_COORD_VALUE
 }
 
 #[cfg(test)]
@@ -148,5 +152,35 @@ mod tests {
         let c2 = GPSCoords2::new(34.0, -118.0);
         let c3 = GPSCoords3::from2(&c2, 0.0);
         assert_eq!(*c3.alt_m(), 0.0);
+    }
+
+    // --- valid_nys_coordinate ---
+
+    #[test]
+    fn valid_nys_coordinate_min_boundary() {
+        assert!(valid_nys_coordinate(MIN_NYS_COORD_VALUE));
+    }
+
+    #[test]
+    fn valid_nys_coordinate_max_boundary() {
+        assert!(valid_nys_coordinate(MAX_NYS_COORD_VALUE));
+    }
+
+    #[test]
+    fn valid_nys_coordinate_interior() {
+        assert!(valid_nys_coordinate(1_000_000.0));
+        assert!(valid_nys_coordinate(500_000.0));
+    }
+
+    #[test]
+    fn valid_nys_coordinate_below_min() {
+        assert!(!valid_nys_coordinate(MIN_NYS_COORD_VALUE - 1.0));
+        assert!(!valid_nys_coordinate(-1.0));
+    }
+
+    #[test]
+    fn valid_nys_coordinate_above_max() {
+        assert!(!valid_nys_coordinate(MAX_NYS_COORD_VALUE + 1.0));
+        assert!(!valid_nys_coordinate(3_000_000.0));
     }
 }
