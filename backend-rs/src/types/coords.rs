@@ -3,6 +3,9 @@ use derive_new::new;
 use approx_derive::AbsDiffEq;
 use serde::{Serialize,Deserialize};
 
+pub const MIN_NYS_COORD_VALUE: f64 = 0.0;
+pub const MAX_NYS_COORD_VALUE: f64 = 2_000_000.0;
+
 #[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize)]
 pub struct GPSCoords3 {
    lat: f64,
@@ -73,6 +76,10 @@ impl GPSCoords3 {
             alt_m: alt,
         }
     }
+}
+
+pub fn valid_nys_coordinate(coord: f64) -> bool {
+    coord < MIN_NYS_COORD_VALUE || coord > MAX_NYS_COORD_VALUE
 }
 
 #[cfg(test)]

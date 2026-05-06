@@ -1,5 +1,8 @@
+use std::fmt::{Display, Formatter};
 use std::iter::{repeat_n};
 use derive_getters::Getters;
+use geo::{polygon, Polygon};
+use crate::types::coords::{valid_nys_coordinate, NYSCoords2};
 use crate::types::errors::TileParseErr;
 use crate::types::errors::TileParseErr::{InvalidLASTileId, InvalidSubgrid};
 
@@ -7,12 +10,14 @@ const TILE_ID_SEPARATOR: char = '_';
 const SUBGRID_ID_RADIX: u32 = 10;
 
 const SUBGRID_TILES_PER_SIDE: u8 = 5;
-const SUBGRID_TILE_SIDE_LENGTH_USFT: u16 = 500;
+pub const SUBGRID_TILE_SIDE_LENGTH_USFT: u16 = 500;
 pub const LAS_TILE_SIDE_LENGTH_USFT: u16 = 2500;
 
 const EASTING_BASE_ROLLOVER_POINT: u16 = 1000;
 const EASTING_BASE_ROLLOVER_BOUND: u16 = EASTING_BASE_ROLLOVER_POINT / 2;
 const PERMITTED_LAS_ID_COMPONENT_MODULI: &[u8] = &[0, 2, 5, 7];
+
+const LAS_ID_UNIT_MUTIPLIER_TO_COORD: u16 = 1000;
 
 #[derive(Debug, Clone, Copy)]
 // Easting, Northing coordinates (in NYS LI plane) (units of 1000 usft)
@@ -30,6 +35,28 @@ pub struct TileId {
 }
 
 impl LASTileId {
+
+    pub fn new(easting_base: u16, northing_base: u16) -> Self {
+        // Safety: the below unwraps() will never panic, because the outcome of % 10 will always
+        // fit into a u8
+        assert!(PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((northing_base % 10).try_into().unwrap())),
+                "Northing base % 10 must be one of PERMITTED_LAS_ID_COMPONENT_MODULI");
+        assert!(PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((easting_base % 10).try_into().unwrap())),
+                "Easting base % 10 must be one of PERMITTED_LAS_ID_COMPONENT_MODULI");
+
+        let res = LASTileId(easting_base, northing_base);
+        let corner_coords = res.get_sw_corner();
+
+        assert!(valid_nys_coordinate(*corner_coords.northing()),
+                "Northing must have a value which places the tile between \
+                MIN_NYS_COORD_VALUE and MAX_NYS_COORD_VALUE");
+        assert!(valid_nys_coordinate(*corner_coords.easting()),
+                "Easting must have a value which places the tile between \
+                MIN_NYS_COORD_VALUE and MAX_NYS_COORD_VALUE");
+
+        res
+    }
+
     pub fn parse(input_str: &str) -> Result<Self, TileParseErr> {
         if !input_str.chars().all(|c| c.is_ascii_digit()){
             return Err(InvalidLASTileId);
@@ -57,8 +84,8 @@ impl LASTileId {
             || !PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((easting_base % 10).try_into().unwrap())) {
             return Err(InvalidLASTileId);
         }
-
-        Ok(LASTileId(easting_base, northing_base))
+            
+        Ok(LASTileId::new(easting_base, northing_base))
     }
 
     fn easting_id(&self) -> u16 {
@@ -69,21 +96,51 @@ impl LASTileId {
         id
     }
 
-    pub fn id(&self) -> String {
+    pub fn ortho_fname(&self) -> String {
+        const ZFILL_TO_LENGTH: usize = 6;
+        let id_base = self.to_string();
+        let padding: String = repeat_n('0', ZFILL_TO_LENGTH - id_base.len()).collect();
+        format!("{padding}{id_base}.jp2")
+    }
+
+    pub fn get_sw_corner(&self) -> NYSCoords2 {
+        NYSCoords2::new(
+            Self::component_to_usft(self.0),
+            Self::component_to_usft(self.1),
+        )
+    }
+
+    // IDs ending in 2 or 7 are truncated and sit 500 usft past a round 1000-usft boundary to land
+    // on the 2500-usft tile grid: 0→0, 2→2500, 5→5000, 7→7500, 10→10000, …
+    fn component_to_usft(component: u16) -> f64 {
+        let base = f64::from(component) * f64::from(LAS_ID_UNIT_MUTIPLIER_TO_COORD);
+        if component % 10 == 2 || component % 10 == 7 { base + 500.0 } else { base }
+    }
+
+    // Inverse of component_to_usft: returns the component whose tile SW corner is at or
+    // below `usft`. Tiles repeat every 2500 usft in a 4-step cycle (→ mod 0, 2, 5, 7).
+    fn usft_to_component(usft: f64) -> u16 {
+        let tile_block = (usft / f64::from(LAS_TILE_SIDE_LENGTH_USFT)).floor() as u64;
+        let major = tile_block / 4;
+        let remainder: u64 = match tile_block % 4 {
+            0 => 0,
+            1 => 2,
+            2 => 5,
+            _ => 7,
+        };
+        (major * 10 + remainder) as u16
+    }
+}
+
+impl Display for LASTileId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let easting_id = self.easting_id();
         let northing_id = self.1;
         if easting_id == 0 {
-            northing_id.to_string()
+            write!(f, "{}", northing_id)
         } else {
-            format!("{easting_id}{northing_id:03}")
+            write!(f, "{easting_id}{northing_id:03}")
         }
-    }
-
-    pub fn ortho_fname(&self) -> String {
-        const ZFILL_TO_LENGTH: usize = 6;
-        let id_base = self.id().to_string();
-        let padding: String = repeat_n('0', ZFILL_TO_LENGTH - id_base.len()).collect();
-        format!("{padding}{id_base}.jp2")
     }
 }
 
@@ -131,6 +188,12 @@ impl SubgridId {
     }
 }
 
+impl Display for SubgridId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.0, self.1)
+    }
+}
+
 impl TileId {
     pub fn parse(input_str: &str) -> Result<TileId, TileParseErr> {
         let (las_tile_id_str, subgrid_id_str) = match input_str.find(TILE_ID_SEPARATOR) {
@@ -144,6 +207,64 @@ impl TileId {
                 subgrid_id: SubgridId::parse(subgrid_id_str)?
             }
         )
+    }
+
+    pub fn tiff_fname(&self) -> String {
+        format!("{self}.tiff")
+    }
+
+    pub fn get_sw_corner(&self) -> NYSCoords2 {
+        let las_corner = self.las_tile_id.get_sw_corner();
+        let (offset_e, offset_n, _, _) = self.subgrid_id.relative_bounds();
+        let offset_e: f64 = offset_e.into();
+        let offset_n: f64 = offset_n.into();
+
+        NYSCoords2::new(
+            *las_corner.easting() + offset_e,
+            *las_corner.northing() + offset_n,
+        )
+    }
+
+    pub fn get_bounds(&self) -> Polygon {
+        let las_corner = self.las_tile_id.get_sw_corner();
+        let (offset_e, offset_n, height, width) = self.subgrid_id.relative_bounds();
+        let offset_e: f64 = offset_e.into();
+        let offset_n: f64 = offset_n.into();
+        let height: f64 = height.into();
+        let width: f64 = width.into();
+
+        let w = *las_corner.easting() + offset_e;
+        let s = *las_corner.northing() + offset_n;
+        let n = *las_corner.northing() + offset_n + height;
+        let e = *las_corner.easting() + offset_e + width;
+
+        polygon![(x: w, y: s), (x: w, y: n), (x: e, y: n), (x: e, y: s)]
+    }
+
+    pub fn from_contained_point(coords: NYSCoords2) -> Self {
+        let easting = *coords.easting();
+        let northing = *coords.northing();
+
+        let las_tile_id = LASTileId::new(
+            LASTileId::usft_to_component(easting),
+            LASTileId::usft_to_component(northing),
+        );
+
+        let las_sw = las_tile_id.get_sw_corner();
+        let offset_e = easting - *las_sw.easting();
+        let offset_n = northing - *las_sw.northing();
+
+        let subgrid_x = (offset_e / f64::from(SUBGRID_TILE_SIDE_LENGTH_USFT)).floor() as u8;
+        let subgrid_y = (offset_n / f64::from(SUBGRID_TILE_SIDE_LENGTH_USFT)).floor() as u8;
+
+        TileId { las_tile_id, subgrid_id: SubgridId::new(subgrid_x, subgrid_y) }
+    }
+}
+
+
+impl Display for TileId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}_{}", self.las_tile_id, self.subgrid_id)
     }
 }
 
@@ -199,11 +320,11 @@ mod tests {
 
     #[test]
     fn las_tile_id_parse_roundtrip() {
-        assert_eq!(LASTileId::parse("997125").unwrap().id(), "997125");
-        assert_eq!(LASTileId::parse("235125").unwrap().id(), "235125");
-        assert_eq!(LASTileId::parse("125").unwrap().id(), "125");
-        assert_eq!(LASTileId::parse("35125").unwrap().id(), "35125");
-        assert_eq!(LASTileId::parse("997005").unwrap().id(), "997005");
+        assert_eq!(LASTileId::parse("997125").unwrap().to_string(), "997125");
+        assert_eq!(LASTileId::parse("235125").unwrap().to_string(), "235125");
+        assert_eq!(LASTileId::parse("125").unwrap().to_string(), "125");
+        assert_eq!(LASTileId::parse("35125").unwrap().to_string(), "35125");
+        assert_eq!(LASTileId::parse("997005").unwrap().to_string(), "997005");
     }
 
     #[test]
@@ -368,5 +489,243 @@ mod tests {
     #[test]
     fn tile_id_invalid_subgrid_propagates() {
         assert!(matches!(TileId::parse("500300_55"), Err(InvalidSubgrid)));
+    }
+
+    // --- LASTileId::get_sw_corner ---
+
+    #[test]
+    fn las_tile_id_sw_corner_typical() {
+        let corner = LASTileId::parse("980170").unwrap().get_sw_corner();
+        assert_eq!(*corner.easting(), 980_000.0);
+        assert_eq!(*corner.northing(), 170_000.0);
+    }
+
+    #[test]
+    fn las_tile_id_sw_corner_short_id() {
+        let corner = LASTileId::parse("150").unwrap().get_sw_corner();
+        assert_eq!(*corner.easting(), 1_000_000.0);
+        assert_eq!(*corner.northing(), 150_000.0);
+    }
+
+    #[test]
+    fn las_tile_id_sw_corner_mid_offset_2() {
+        let corner = LASTileId::parse("2152").unwrap().get_sw_corner();
+        assert_eq!(*corner.easting(), 1_002_500.0);
+        assert_eq!(*corner.northing(), 152_500.0);
+    }
+
+    #[test]
+    fn las_tile_id_sw_corner_mid_offset_7() {
+        let corner = LASTileId::parse("987177").unwrap().get_sw_corner();
+        assert_eq!(*corner.easting(), 987_500.0);
+        assert_eq!(*corner.northing(), 177_500.0);
+    }
+
+    // --- Display for SubgridId ---
+
+    #[test]
+    fn subgrid_id_display() {
+        assert_eq!(SubgridId::new(0, 0).to_string(), "00");
+        assert_eq!(SubgridId::new(2, 3).to_string(), "23");
+        assert_eq!(SubgridId::new(4, 4).to_string(), "44");
+        assert_eq!(SubgridId::new(0, 4).to_string(), "04");
+    }
+
+    // --- Display for TileId ---
+
+    #[test]
+    fn tile_id_display_roundtrip() {
+        assert_eq!(TileId::parse("500300_23").unwrap().to_string(), "500300_23");
+        assert_eq!(TileId::parse("235_00").unwrap().to_string(), "235_00");
+        assert_eq!(TileId::parse("997005_44").unwrap().to_string(), "997005_44");
+        assert_eq!(TileId::parse("987177_42").unwrap().to_string(), "987177_42");
+    }
+
+    // --- TileId::tiff_fname ---
+
+    #[test]
+    fn tile_id_tiff_fname() {
+        assert_eq!(TileId::parse("500300_23").unwrap().tiff_fname(), "500300_23.tiff");
+        assert_eq!(TileId::parse("125_00").unwrap().tiff_fname(), "125_00.tiff");
+    }
+
+    // --- TileId::get_sw_corner ---
+
+    #[test]
+    fn tile_id_sw_corner_no_offset() {
+        // subgrid 00 → no offset, result equals LAS corner
+        let corner = TileId::parse("500300_00").unwrap().get_sw_corner();
+        assert_eq!(*corner.easting(), 500_000.0);
+        assert_eq!(*corner.northing(), 300_000.0);
+    }
+
+    #[test]
+    fn tile_id_sw_corner_with_offset() {
+        // LAS 500300 → base (500000, 300000); subgrid 23 → x=2,y=3 → offset (1000, 1500)
+        let corner = TileId::parse("500300_23").unwrap().get_sw_corner();
+        assert_eq!(*corner.easting(), 501_000.0);
+        assert_eq!(*corner.northing(), 301_500.0);
+    }
+
+
+    #[test]
+    fn las_tile_id_sw_corner_mid_offset_7_23() {
+        let corner = TileId::parse("987177_23").unwrap().get_sw_corner();
+        assert_eq!(*corner.easting(), 988_500.0);
+        assert_eq!(*corner.northing(), 179_000.0);
+    }
+
+    #[test]
+    fn tile_id_sw_corner_max_subgrid() {
+        // subgrid 44 → offset (2000, 2000)
+        let corner = TileId::parse("500300_44").unwrap().get_sw_corner();
+        assert_eq!(*corner.easting(), 502_000.0);
+        assert_eq!(*corner.northing(), 302_000.0);
+    }
+
+    // --- TileId::get_bounds ---
+
+    fn bounds_corners(bounds: &Polygon) -> [(f64, f64); 4] {
+        let coords: Vec<_> = bounds.exterior().coords().collect();
+        // polygon![(x: w, y: s), (x: w, y: n), (x: e, y: n), (x: e, y: s)] — closed ring
+        [(coords[0].x, coords[0].y), (coords[1].x, coords[1].y),
+         (coords[2].x, coords[2].y), (coords[3].x, coords[3].y)]
+    }
+
+    #[test]
+    fn tile_id_get_bounds_sw_subgrid() {
+        // LAS 500300, subgrid 00: tile from (500000, 300000) to (500500, 300500)
+        let corners = bounds_corners(&TileId::parse("500300_00").unwrap().get_bounds());
+        assert_eq!(corners[0], (500_000.0, 300_000.0)); // SW
+        assert_eq!(corners[1], (500_000.0, 300_500.0)); // NW
+        assert_eq!(corners[2], (500_500.0, 300_500.0)); // NE
+        assert_eq!(corners[3], (500_500.0, 300_000.0)); // SE
+    }
+
+    #[test]
+    fn tile_id_get_bounds_sw_subgrid_mid_offset_7_23() {
+        let corners = bounds_corners(&TileId::parse("987177_23").unwrap().get_bounds());
+        assert_eq!(corners[0], (988_500.0, 179_000.0)); // SW
+        assert_eq!(corners[1], (988_500.0, 179_500.0)); // NW
+        assert_eq!(corners[2], (989_000.0, 179_500.0)); // NE
+        assert_eq!(corners[3], (989_000.0, 179_000.0)); // SE
+    }
+
+    #[test]
+    fn tile_id_get_bounds_inner_subgrid() {
+        // LAS 500300, subgrid 23: SW=(501000, 301500), NE=(501500, 302000)
+        let corners = bounds_corners(&TileId::parse("500300_23").unwrap().get_bounds());
+        assert_eq!(corners[0], (501_000.0, 301_500.0)); // SW
+        assert_eq!(corners[1], (501_000.0, 302_000.0)); // NW
+        assert_eq!(corners[2], (501_500.0, 302_000.0)); // NE
+        assert_eq!(corners[3], (501_500.0, 301_500.0)); // SE
+    }
+
+    #[test]
+    fn tile_id_get_bounds_is_500_usft_square() {
+        // All subgrid tiles should be exactly 500×500 usft
+        for x in 0..5u8 {
+            for y in 0..5u8 {
+                let id = format!("500300_{x}{y}");
+                let bounds = TileId::parse(&id).unwrap().get_bounds();
+                let coords: Vec<_> = bounds.exterior().coords().collect();
+                let width = coords[2].x - coords[0].x;
+                let height = coords[1].y - coords[0].y;
+                assert_eq!((width, height), (500.0, 500.0), "failed for subgrid {x}{y}");
+            }
+        }
+    }
+
+    // --- TileId::from_contained_point ---
+
+    #[test]
+    fn from_contained_point_sw_corner() {
+        // SW corner of a tile belongs to that tile
+        let tile = TileId::parse("500300_23").unwrap();
+        let result = TileId::from_contained_point(tile.get_sw_corner());
+        assert_eq!(result.to_string(), "500300_23");
+    }
+
+    #[test]
+    fn from_contained_point_example() {
+        // SW corner of a tile belongs to that tile
+        let tile = TileId::parse("982182_00").unwrap();
+        let result = TileId::from_contained_point(NYSCoords2::new(982634.0, 182501.0));
+        assert_eq!(result.to_string(), "982182_00");
+    }
+
+    #[test]
+    fn from_contained_point_center() {
+        let tile = TileId::parse("500300_23").unwrap();
+        let sw = tile.get_sw_corner();
+        let center = NYSCoords2::new(*sw.easting() + 250.0, *sw.northing() + 250.0);
+        let result = TileId::from_contained_point(center);
+        assert_eq!(result.to_string(), "500300_23");
+    }
+
+    #[test]
+    fn from_contained_point_near_ne_corner() {
+        // A point 0.1 usft inside the NE corner is still in the same tile
+        let tile = TileId::parse("500300_23").unwrap();
+        let sw = tile.get_sw_corner();
+        let near_ne = NYSCoords2::new(*sw.easting() + 499.9, *sw.northing() + 499.9);
+        let result = TileId::from_contained_point(near_ne);
+        assert_eq!(result.to_string(), "500300_23");
+    }
+
+    #[test]
+    fn from_contained_point_east_boundary_crosses_to_next_subgrid() {
+        // E boundary of subgrid 23 is also the SW easting of subgrid 33
+        let sw_23 = TileId::parse("500300_23").unwrap().get_sw_corner();
+        let on_east = NYSCoords2::new(*sw_23.easting() + 500.0, *sw_23.northing() + 250.0);
+        let result = TileId::from_contained_point(on_east);
+        assert_eq!(result.to_string(), "500300_33");
+    }
+
+    #[test]
+    fn from_contained_point_north_boundary_crosses_to_next_subgrid() {
+        // N boundary of subgrid 23 is also the SW northing of subgrid 24
+        let sw_23 = TileId::parse("500300_23").unwrap().get_sw_corner();
+        let on_north = NYSCoords2::new(*sw_23.easting() + 250.0, *sw_23.northing() + 500.0);
+        let result = TileId::from_contained_point(on_north);
+        assert_eq!(result.to_string(), "500300_24");
+    }
+
+    #[test]
+    fn from_contained_point_crosses_las_boundary() {
+        // NE corner of the whole LAS tile 500300 (subgrid 44 NE = E 502500, N 302500)
+        // belongs to the next LAS tile easting (component 502, northing 302)
+        let sw_44 = TileId::parse("500300_44").unwrap().get_sw_corner();
+        let on_las_ne = NYSCoords2::new(*sw_44.easting() + 500.0, *sw_44.northing() + 250.0);
+        let result = TileId::from_contained_point(on_las_ne);
+        assert_eq!(result.to_string(), "502300_04");
+    }
+
+    #[test]
+    fn from_contained_point_mod7_tile() {
+        // Tile with components ending in 7 (component_to_usft adds 500)
+        let tile = TileId::parse("987177_00").unwrap();
+        let result = TileId::from_contained_point(tile.get_sw_corner());
+        assert_eq!(result.to_string(), "987177_00");
+    }
+
+    #[test]
+    fn from_contained_point_mod2_tile() {
+        let tile = TileId::parse("987172_24").unwrap();
+        let result = TileId::from_contained_point(tile.get_sw_corner());
+        assert_eq!(result.to_string(), "987172_24");
+    }
+
+    #[test]
+    fn from_contained_point_roundtrip_all_subgrids() {
+        // SW corner of every subgrid within a LAS tile maps back to that tile
+        for x in 0..5u8 {
+            for y in 0..5u8 {
+                let id = format!("500300_{x}{y}");
+                let tile = TileId::parse(&id).unwrap();
+                let result = TileId::from_contained_point(tile.get_sw_corner());
+                assert_eq!(result.to_string(), id, "failed for subgrid {x}{y}");
+            }
+        }
     }
 }
