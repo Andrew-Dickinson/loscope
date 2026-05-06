@@ -2,7 +2,7 @@ use derive_getters::Getters;
 use derive_new::new;
 use array2d::{Array2D};
 use arrayvec::ArrayString;
-use geo_types::Polygon;
+use geo::{Polygon, polygon, BooleanOps, Intersects};
 use crate::types::coords::NYSCoords2;
 use crate::types::errors::BINParseError;
 

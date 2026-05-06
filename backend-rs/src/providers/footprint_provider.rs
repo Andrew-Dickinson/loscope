@@ -1,5 +1,5 @@
 use derive_new::new;
-use geo_types::Polygon;
+use geo::{Polygon, polygon};
 use crate::building::heightmap::BINId;
 use crate::types::errors::AssetErr;
 use wkt::TryFromWkt;
