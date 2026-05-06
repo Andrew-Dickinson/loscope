@@ -24,7 +24,8 @@ impl BINId {
         let Some(first_digit) = chars[0].to_digit(10) else {
             return Err(BINParseError(format!("Invalid BIN ID: {bin_id}. All characters must be digits")));
         };
-        if !PERMITTED_BIN_FIRST_CHAR.contains(&(first_digit as u8)) {
+        // Safety: first_digit < 10, so it will always fit into a u8
+        if !PERMITTED_BIN_FIRST_CHAR.contains(&(first_digit.try_into().unwrap())) {
             return Err(BINParseError(format!("Invalid BIN ID: {bin_id}. First character must be one of {PERMITTED_BIN_FIRST_CHAR:?}")));
         };
 
