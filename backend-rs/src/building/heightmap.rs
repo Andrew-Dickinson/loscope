@@ -167,13 +167,10 @@ impl<'a> RooftopHeightMapFactory<'a> {
                 .assign(&*tile_contents.slice(s![tile_n_start..tile_n_end, tile_e_start..tile_e_end]));
         }
 
+        let buffered_footprint = footprint.buffer(0.5);
         let mask = Array2::<bool>::from_shape_fn(
             (output_h, output_w),
-            // XXX: the .buffer() call here is the most expensive thing this function does by a
-            // large margin, is there a cheaper way to do this? The problem we're solving is of
-            // integer-grid misalightment stuff, where a polygon might exclude border pixels
-            // incorrectly. Could we use a kernel convolution over mask to expand by 1-px instead?
-            |(x, y)| footprint.buffer(0.5)
+            |(x, y)| buffered_footprint
                 .contains(
                 // Unwraps are safe on all platforms where usize >= u32, as f64 is safe because
                 // this whole expression is bounded by get_intersecting_tiles' boundary validations
