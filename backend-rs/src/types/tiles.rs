@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::iter::{repeat_n};
 use derive_getters::Getters;
 use geo::{coord, Coord, Rect};
-use crate::types::coords::{valid_nys_coordinate, NYSCoords2};
+use crate::types::coords::{valid_nys_coordinate, NYSCoords2, MAX_NYS_COORD_VALUE};
 use crate::types::errors::TileParseErr;
 use crate::types::errors::TileParseErr::{InvalidLASTileId, InvalidSubgrid};
 
@@ -126,15 +126,22 @@ impl LASTileId {
     // Inverse of component_to_usft: returns the component whose tile SW corner is at or
     // below `usft`. Tiles repeat every 2500 usft in a 4-step cycle (→ mod 0, 2, 5, 7).
     fn usft_to_component(usft: f64) -> u16 {
-        let tile_block = (usft / f64::from(LAS_TILE_SIDE_LENGTH_USFT)).floor() as u64;
+        assert!(usft >= 0.0 && usft <= MAX_NYS_COORD_VALUE, "Invalid value for coord conversion {}", usft);
+        /// Safety: tile_block will not overflow, since due to the above
+        /// assertion, max(tile_block) is 800, and:
+        const _: () = assert!(
+            MAX_NYS_COORD_VALUE as u64 / LAS_TILE_SIDE_LENGTH_USFT as u64 <= 800,
+            "tile_block would overflow u16 below"
+        );
+        let tile_block = (usft / f64::from(LAS_TILE_SIDE_LENGTH_USFT)).floor() as u16;
         let major = tile_block / 4;
-        let remainder: u64 = match tile_block % 4 {
+        let remainder: u16 = match tile_block % 4 {
             0 => 0,
             1 => 2,
             2 => 5,
             _ => 7,
         };
-        (major * 10 + remainder) as u16
+        major * 10 + remainder
     }
 }
 
@@ -256,10 +263,14 @@ impl TileId {
         let offset_e = easting - *las_sw.easting();
         let offset_n = northing - *las_sw.northing();
 
-        let subgrid_x = (offset_e / f64::from(SUBGRID_TILE_SIDE_LENGTH_USFT)).floor() as u8;
-        let subgrid_y = (offset_n / f64::from(SUBGRID_TILE_SIDE_LENGTH_USFT)).floor() as u8;
+        let subgrid_x = (offset_e / f64::from(SUBGRID_TILE_SIDE_LENGTH_USFT)).floor();
+        let subgrid_y = (offset_n / f64::from(SUBGRID_TILE_SIDE_LENGTH_USFT)).floor();
 
-        TileId { las_tile_id, subgrid_id: SubgridId::new(subgrid_x, subgrid_y) }
+        // Safety: subgrid_x and subgrid_y are bounded to 2500.0/500.0 = 5, making the as
+        // coercions below safe
+        assert!(subgrid_y < 5.0);
+        assert!(subgrid_x < 5.0);
+        TileId { las_tile_id, subgrid_id: SubgridId::new(subgrid_x as u8, subgrid_y as u8) }
     }
 }
 
