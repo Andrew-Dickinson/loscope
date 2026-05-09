@@ -19,7 +19,7 @@ fn health_check() -> &'static str {
 
 #[launch]
 async fn rocket() -> _ {
-    init_coord_converter_factory(|| CoordinateConverter::new());
+    init_coord_converter_factory(CoordinateConverter::new);
     rocket::build()
         .manage(Providers::new_from_env().await.unwrap())
         .mount("/api", routes![health_check])

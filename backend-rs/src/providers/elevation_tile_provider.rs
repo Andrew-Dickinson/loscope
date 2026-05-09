@@ -44,10 +44,7 @@ impl ElevationTile {
             let width: usize = reader.dimensions()?.0.try_into()?;
             let height: usize = reader.dimensions()?.1.try_into()?;
 
-            // Safety: SUBGRID_TILE_SIDE_LENGTH_USFT will always fit in usize since usize
-            // is always >= u16
-            let subgrid_tile_side_length_usft_usize: usize = SUBGRID_TILE_SIDE_LENGTH_USFT
-                .try_into().unwrap();
+            let subgrid_tile_side_length_usft_usize: usize = SUBGRID_TILE_SIDE_LENGTH_USFT.into();
 
             if height != subgrid_tile_side_length_usft_usize || width != subgrid_tile_side_length_usft_usize {
                 return Err(Box::new(io::Error::new(
