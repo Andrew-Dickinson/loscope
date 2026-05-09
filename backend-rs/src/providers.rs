@@ -4,7 +4,7 @@ use std::sync::Arc;
 use derive_getters::Getters;
 use tokio::fs;
 use typed_path::Utf8UnixPathBuf;
-use crate::util::env::{expect_env, LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, LOS_ORTHOS_S3_PREFIX, NYC_DOB_SQLITE_DB_FILE};
+use crate::util::env::{expect_env, LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, LOS_ORTHOS_S3_PREFIX, LOS_TERRAIN_TILE_S3_PREFIX, NYC_DOB_SQLITE_DB_FILE};
 use backends::asset_fetcher::{AssetType, S3AssetFetcher};
 use backends::fs_cache::{AssetProvider, CachingAssetProvider};
 use crate::providers::backends::string_provider::NYCDOBSqliteStringProvider;
@@ -29,6 +29,7 @@ impl Providers {
     pub async fn new_from_env() -> Result<Self, ProviderInitErr> {
         let prefix_map = HashMap::from([
             (AssetType::OrthoImage, Utf8UnixPathBuf::from(expect_env(LOS_ORTHOS_S3_PREFIX))),
+            (AssetType::ElevationTile, Utf8UnixPathBuf::from(expect_env(LOS_TERRAIN_TILE_S3_PREFIX))),
         ]);
 
         let bucket = expect_env(LOS_ASSET_S3_BUCKET);
