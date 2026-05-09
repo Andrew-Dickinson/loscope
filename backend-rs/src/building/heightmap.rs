@@ -1,6 +1,6 @@
 use derive_getters::Getters;
 use derive_new::new;
-use array2d::{Array2D};
+use ndarray::{s, Array2, Zip};
 use arrayvec::ArrayString;
 use geo::{Polygon, polygon, BooleanOps, Intersects};
 use crate::types::coords::NYSCoords2;
@@ -53,12 +53,11 @@ pub struct RooftopHeightMap {
     // Values are in inches above the NY SP Long Island datum,
     // axes are [easting_local, northing_local] (add sw_offset to get global position)
     // Pixels outside the mask=true footprint are set to 0
-    heightmap: Array2D<u16>,
+    heightmap: Array2::<u16>,
 
     // A mask over the dimensions of heightmap, where true, the height is valid,
     // where false, it's not
-    // TODO: Is this memory efficient? Do we care?
-    mask: Array2D<bool>,
+    mask: Array2::<bool>,
 
     // The shape of the underlying building footprint in NY SP LI coordinates
     poly_nys: Polygon

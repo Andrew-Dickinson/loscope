@@ -21,7 +21,7 @@ openjpeg-sys = "1.0.12"
 eproj = "0.0.1-alpha.12"
 approx = "0.5.1"
 approx-derive = "0.2.8"
-array2d = "0.3.2"
+ndarray = "0.17.2"
 async-trait = "0.1"
 tokio-rusqlite = "0.7.0"
 #rusqlite = { version = "0.37.0", features = ["bundled"] }

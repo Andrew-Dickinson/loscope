@@ -1,8 +1,9 @@
 use std::fs::File;
 use std::io;
 use std::sync::Arc;
-use array2d::{Array2D, Error};
+use derive_getters::Getters;
 use derive_new::new;
+use ndarray::Array2;
 use tiff::decoder::{Decoder, DecodingResult};
 use tiff::encoder::{colortype, TiffEncoder};
 use tiff::TiffError;
@@ -12,23 +13,21 @@ use crate::providers::backends::fs_cache::AssetProvider;
 use crate::types::errors::AssetErr;
 use crate::types::tiles::{SubgridId, TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
 
-#[derive(Debug)]
+#[derive(Debug,Getters)]
 pub struct ElevationTile {
     id: TileId,
     // Values are in inches above the NY SP Long Island datum,
     // axes are [easting_local, northing_local] (add the sw corner coords from the
     // TileId to get the global position)
-    elevation_inches: Array2D<u16>
+    elevation_inches: Array2::<u16>
 }
 
 impl ElevationTile {
     pub fn new_empty(id: TileId) -> ElevationTile {
         ElevationTile {
             id,
-            elevation_inches: Array2D::filled_with(
-                0,
-                SUBGRID_TILE_SIDE_LENGTH_USFT.into(),
-                SUBGRID_TILE_SIDE_LENGTH_USFT.into()
+            elevation_inches: Array2::zeros(
+                (SUBGRID_TILE_SIDE_LENGTH_USFT.into(), SUBGRID_TILE_SIDE_LENGTH_USFT.into())
             )
         }
     }
@@ -38,7 +37,7 @@ impl ElevationTile {
 
         // We would love to use a try here to scope the ?s but it's only available in nightly,
         // so a closure it is
-        let inner = move || -> Result<Array2D<u16>, Box<dyn std::error::Error>> {
+        let inner = move || -> Result<Array2::<u16>, Box<dyn std::error::Error>> {
             let mut reader = Decoder::new(io)?;
             let image_data = reader.read_image()?;
             let width: usize = reader.dimensions()?.0.try_into()?;
@@ -60,7 +59,7 @@ impl ElevationTile {
             }
 
             if let DecodingResult::U16(image_data) = image_data {
-                Ok(Array2D::from_row_major(&*image_data, height, width)
+                Ok(Array2::from_shape_vec((height, width), image_data)
                     .or_else(|arr_err| Err(Box::new(arr_err)))?)
             } else {
                 Err(Box::new(io::Error::new(
@@ -84,7 +83,10 @@ impl ElevationTile {
         tiff.write_image::<colortype::Gray16>(
             SUBGRID_TILE_SIDE_LENGTH_USFT.into(),
             SUBGRID_TILE_SIDE_LENGTH_USFT.into(),
-            &self.elevation_inches.as_row_major()
+            // Safety: as_slice() is only None when elevation_inches is non-contiguous (impossible)
+            // or in non-standard order (also maybe impossible?, but definitely against convention)
+            &self.elevation_inches.as_slice().unwrap()
+
         )?;
         Ok(())
     }
@@ -160,14 +162,14 @@ mod tests {
     fn new_empty_has_correct_dimensions() {
         let tile = ElevationTile::new_empty(sample_tile_id());
         let side = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
-        assert_eq!(tile.elevation_inches.num_rows(), side);
-        assert_eq!(tile.elevation_inches.num_columns(), side);
+        assert_eq!(tile.elevation_inches.nrows(), side);
+        assert_eq!(tile.elevation_inches.ncols(), side);
     }
 
     #[test]
     fn new_empty_all_zeros() {
         let tile = ElevationTile::new_empty(sample_tile_id());
-        assert!(tile.elevation_inches.elements_row_major_iter().all(|&v| v == 0));
+        assert!(tile.elevation_inches.iter().all(|&v| v == 0));
     }
 
     // --- ElevationTile::read_from_tiff ---
@@ -183,8 +185,8 @@ mod tests {
         let file = File::open(sample_tif_path()).unwrap();
         let tile = ElevationTile::read_from_tiff(sample_tile_id(), file).unwrap();
         let side = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
-        assert_eq!(tile.elevation_inches.num_rows(), side);
-        assert_eq!(tile.elevation_inches.num_columns(), side);
+        assert_eq!(tile.elevation_inches.nrows(), side);
+        assert_eq!(tile.elevation_inches.ncols(), side);
     }
 
     #[test]
@@ -193,12 +195,12 @@ mod tests {
         // array[(r, c)] = raw_data[r * 500 + c].
         let file = File::open(sample_tif_path()).unwrap();
         let tile = ElevationTile::read_from_tiff(sample_tile_id(), file).unwrap();
-        assert_eq!(tile.elevation_inches.get(0, 0), Some(&210));
-        assert_eq!(tile.elevation_inches.get(499, 499), Some(&485));
-        assert_eq!(tile.elevation_inches.get(0, 499), Some(&113));
-        assert_eq!(tile.elevation_inches.get(499, 0), Some(&234));
-        assert_eq!(tile.elevation_inches.get(250, 250), Some(&108));
-        assert_eq!(tile.elevation_inches.get(100, 200), Some(&170));
+        assert_eq!(tile.elevation_inches.get((0, 0)), Some(&210));
+        assert_eq!(tile.elevation_inches.get((499, 499)), Some(&485));
+        assert_eq!(tile.elevation_inches.get((0, 499)), Some(&113));
+        assert_eq!(tile.elevation_inches.get((499, 0)), Some(&234));
+        assert_eq!(tile.elevation_inches.get((250, 250)), Some(&108));
+        assert_eq!(tile.elevation_inches.get((100, 200)), Some(&170));
     }
 
     #[test]
@@ -243,7 +245,7 @@ mod tests {
         original.write_to_tiff(File::create(&path).unwrap()).unwrap();
 
         let restored = ElevationTile::read_from_tiff(sample_tile_id(), File::open(&path).unwrap()).unwrap();
-        assert!(restored.elevation_inches.elements_row_major_iter().all(|&v| v == 0));
+        assert!(restored.elevation_inches.iter().all(|&v| v == 0));
     }
 
     #[test]
@@ -260,8 +262,8 @@ mod tests {
             sample_tile_id(), File::open(&path).unwrap()
         ).unwrap();
 
-        let orig_vals: Vec<u16> = original.elevation_inches.elements_row_major_iter().copied().collect();
-        let rest_vals: Vec<u16> = restored.elevation_inches.elements_row_major_iter().copied().collect();
+        let orig_vals: Vec<u16> = original.elevation_inches.iter().copied().collect();
+        let rest_vals: Vec<u16> = restored.elevation_inches.iter().copied().collect();
         assert_eq!(orig_vals, rest_vals);
     }
 
@@ -313,8 +315,8 @@ mod tests {
         assert!(result.is_ok(), "expected Ok, got {result:?}");
         let tile = result.unwrap();
         let side = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
-        assert_eq!(tile.elevation_inches.num_rows(), side);
-        assert_eq!(tile.elevation_inches.num_columns(), side);
+        assert_eq!(tile.elevation_inches.nrows(), side);
+        assert_eq!(tile.elevation_inches.ncols(), side);
     }
 
     #[tokio::test]
@@ -342,7 +344,7 @@ mod tests {
 
         assert!(result.is_ok(), "expected Ok, got {result:?}");
         let tile = result.unwrap();
-        assert!(tile.elevation_inches.elements_row_major_iter().all(|&v| v == 0));
+        assert!(tile.elevation_inches.iter().all(|&v| v == 0));
         assert!(cache_path.exists(), "empty tile should have been written to the cache path");
     }
 
