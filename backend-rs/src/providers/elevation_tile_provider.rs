@@ -13,7 +13,7 @@ use crate::providers::backends::fs_cache::AssetProvider;
 use crate::types::errors::AssetErr;
 use crate::types::tiles::{SubgridId, TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
 
-#[derive(Debug,Getters)]
+#[derive(new,Debug,Getters)]
 pub struct ElevationTile {
     id: TileId,
     // Values are in inches above the NY SP Long Island datum,
