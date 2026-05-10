@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn write_to_tiff_roundtrip_sample_file() {
         let temp = test_temp_dir!();
-        let path = temp.as_path_untracked().join("roundtrip.tiff");
+        let path = temp.as_path_untracked().join("roundtrip.tif");
 
         let original = ElevationTile::read_from_tiff(
             sample_tile_id(), File::open(sample_tif_path()).unwrap()

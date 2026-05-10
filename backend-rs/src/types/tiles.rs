@@ -223,7 +223,7 @@ impl TileId {
     }
 
     pub fn tiff_fname(&self) -> String {
-        format!("{self}.tiff")
+        format!("{self}.tif")
     }
 
     pub fn get_sw_corner(&self) -> NYSCoords2 {
@@ -558,8 +558,8 @@ mod tests {
 
     #[test]
     fn tile_id_tiff_fname() {
-        assert_eq!(TileId::parse("500300_23").unwrap().tiff_fname(), "500300_23.tiff");
-        assert_eq!(TileId::parse("125_00").unwrap().tiff_fname(), "125_00.tiff");
+        assert_eq!(TileId::parse("500300_23").unwrap().tiff_fname(), "500300_23.tif");
+        assert_eq!(TileId::parse("125_00").unwrap().tiff_fname(), "125_00.tif");
     }
 
     // --- TileId::get_sw_corner ---
