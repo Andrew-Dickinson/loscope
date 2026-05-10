@@ -127,7 +127,7 @@ impl<'a> RooftopHeightMapFactory<'a> {
         let output_h: usize = (poly_n - poly_s).try_into().unwrap();
         let output_w: usize = (poly_e - poly_w).try_into().unwrap();
 
-        let mut heightmap = Array2::<u16>::zeros((output_h, output_w));
+        let mut heightmap = Array2::<u16>::zeros((output_w, output_h));
 
         for tile_id in intersecting_tiles {
             // Compute intersection between tile data
@@ -135,41 +135,41 @@ impl<'a> RooftopHeightMapFactory<'a> {
             let (tile_w, tile_s) = tile_bounds.min().x_y();
             let (tile_e, tile_n) = tile_bounds.max().x_y();
 
-            let e_start = max(poly_w, tile_w);
-            let e_end = min(poly_e, tile_e);
+            let nys_w = max(poly_w, tile_w);
+            let nys_e = min(poly_e, tile_e);
 
-            if e_start >= e_end {
+            if nys_w >= nys_e {
                 continue;
             }
 
-            let n_start = max(poly_s, tile_s);
-            let n_end = min(poly_n, tile_n);
+            let nys_s = max(poly_s, tile_s);
+            let nys_n = min(poly_n, tile_n);
 
             // Compute relative location of intersection slice in output grid
             // Safety: these unwraps are safe on all platforms where usize >= u32
-            let out_e_start: usize = (e_start - poly_w).try_into().unwrap();
-            let out_e_end: usize = (e_end - poly_w).try_into().unwrap();
-            let out_n_start: usize = (n_start - poly_s).try_into().unwrap();
-            let out_n_end: usize = (n_end - poly_s).try_into().unwrap();
+            let out_x_start: usize = (nys_w - poly_w).try_into().unwrap();
+            let out_x_end: usize = (nys_e - poly_w).try_into().unwrap();
+            let out_y_start: usize = (nys_s - poly_s).try_into().unwrap();
+            let out_y_end: usize = (nys_n - poly_s).try_into().unwrap();
 
             // Compute relative location of intersection slice in tile grid
             // Safety: these unwraps are safe on all platforms where usize >= u32
-            let tile_e_start: usize = (e_start - tile_w).try_into().unwrap();
-            let tile_e_end: usize = (e_end - tile_w).try_into().unwrap();
-            let tile_n_start: usize = (n_start - tile_s).try_into().unwrap();
-            let tile_n_end: usize = (n_end - tile_s).try_into().unwrap();
+            let tile_x_start: usize = (nys_w - tile_w).try_into().unwrap();
+            let tile_x_end: usize = (nys_e - tile_w).try_into().unwrap();
+            let tile_y_start: usize = (nys_s - tile_s).try_into().unwrap();
+            let tile_y_end: usize = (nys_n - tile_s).try_into().unwrap();
 
             let tile = self.elevation_tile_provider.get_elevation_tile(tile_id).await?;
             let tile_contents = tile.elevation_inches();
 
             // Read the tile contents into the heightmap in the appropriate spot
-            heightmap.slice_mut(s![out_n_start..out_n_end, out_e_start..out_e_end])
-                .assign(&*tile_contents.slice(s![tile_n_start..tile_n_end, tile_e_start..tile_e_end]));
+            heightmap.slice_mut(s![out_x_start..out_x_end,out_y_start..out_y_end])
+                .assign(&*tile_contents.slice(s![tile_x_start..tile_x_end, tile_y_start..tile_y_end, ]));
         }
 
         let buffered_footprint = footprint.buffer(0.5);
         let mask = Array2::<bool>::from_shape_fn(
-            (output_h, output_w),
+            (output_w, output_h),
             |(x, y)| buffered_footprint
                 .contains(
                 // Unwraps are safe on all platforms where usize >= u32, as f64 is safe because
@@ -180,7 +180,7 @@ impl<'a> RooftopHeightMapFactory<'a> {
             )
         );
 
-        // TODO: Technically we could just output the original heightmap here instead of doing this
+        // Technically we could just output the original heightmap here instead of doing this
         //  O(N) overwrite, since callers aren't supposed to rely on the contents of
         //  anything where mask is false, but we're nice so we won't for now
         Zip::from(&mut heightmap)
