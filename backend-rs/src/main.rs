@@ -12,7 +12,7 @@ use crate::endpoints::tileview::get_terrain_ortho;
 use crate::providers::Providers;
 use crate::util::coord_conversion::{init_coord_converter_factory, CoordinateConverter};
 
-#[get("/healthCheck")]
+#[get("/healthcheck")]
 fn health_check() -> &'static str {
     "Healthy"
 }
