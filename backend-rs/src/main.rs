@@ -3,6 +3,7 @@ pub mod providers;
 pub mod util;
 pub mod endpoints;
 pub mod building;
+pub mod sample_points;
 
 #[macro_use] extern crate rocket;
 

@@ -2,6 +2,7 @@ use derive_getters::Getters;
 use derive_new::new;
 use approx_derive::AbsDiffEq;
 use serde::{Serialize,Deserialize};
+use crate::sample_points::point::EncodedPoint;
 
 pub const MIN_NYS_COORD_VALUE: f64 = 0.0;
 pub const MAX_NYS_COORD_VALUE: f64 = 2_000_000.0;
@@ -23,7 +24,7 @@ pub struct GPSCoords2 {
    lon: f64
 }
 
-#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize)]
+#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize, Clone)]
 pub struct NYSCoords3 {
     #[serde(rename = "nys_x")]
     easting: f64,
@@ -35,13 +36,21 @@ pub struct NYSCoords3 {
     alt_usft: f64
 }
 
-#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize)]
+#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize, Clone)]
 pub struct NYSCoords2 {
     #[serde(rename = "nys_x")]
     easting: f64,
 
     #[serde(rename = "nys_y")]
     northing: f64
+}
+
+
+#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize)]
+pub struct RelativeCoords3 {
+    x: f64,
+    y: f64,
+    alt_usft: f64
 }
 
 impl NYSCoords2 {
@@ -60,6 +69,21 @@ impl NYSCoords3 {
             northing: coords.northing,
             alt_usft: alt,
         }
+    }
+
+    pub fn relative_from_base(&self, sw_offset: &NYSCoords3) -> RelativeCoords3 {
+        RelativeCoords3::new(
+            sw_offset.easting - self.easting,
+            sw_offset.northing - self.northing,
+            sw_offset.alt_usft - self.alt_usft,
+        )
+    }
+
+    pub fn encoded_from_base(&self, sw_offset: &NYSCoords3) -> EncodedPoint {
+        EncodedPoint::new(
+            self.relative_from_base(sw_offset),
+            self.clone()
+        )
     }
 }
 
