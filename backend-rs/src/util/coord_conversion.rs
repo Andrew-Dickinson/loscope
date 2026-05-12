@@ -43,6 +43,8 @@ impl CoordinateConverter {
         // to callers (since this coordinate transform is essential to the functioning
         // of the application and there's nothing callers can do to fix these issues)
 
+        // TODO: Check calibration
+
         Self {
             nys_to_gps: Projector::new(
                 SpatialReferenceIdentifier::Epsg6539,

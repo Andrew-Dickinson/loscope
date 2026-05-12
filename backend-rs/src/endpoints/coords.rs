@@ -9,6 +9,7 @@ pub async fn gps_to_nys(
 ) -> Result<Json<NYSCoords3>, Status> {
     Ok(
         Json::from(
+            // TODO: Is there a safety hazard due to the unbounded nature of the inputs here?
             with_coord_converter(
                 |converter| converter.to_nys_plane3(&gps_coords.0)
             )
