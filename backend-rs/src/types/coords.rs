@@ -7,6 +7,9 @@ use crate::sample_points::point::EncodedPoint;
 pub const MIN_NYS_COORD_VALUE: f64 = 0.0;
 pub const MAX_NYS_COORD_VALUE: f64 = 2_000_000.0;
 
+pub const MIN_ALT_COORD_VALUE: f64 = -5000.0;
+pub const MAX_ALT_COORD_VALUE: f64 = 5000.0;
+
 enum CoordError {
     ExceedsBound
 }
@@ -60,6 +63,10 @@ impl NYSCoords2 {
             northing: coords.northing
         }
     }
+
+    pub fn valid(&self) -> bool {
+        valid_nys_coordinate(self.easting) && valid_nys_coordinate(self.northing)
+    }
 }
 
 impl NYSCoords3 {
@@ -69,6 +76,11 @@ impl NYSCoords3 {
             northing: coords.northing,
             alt_usft: alt,
         }
+    }
+
+    pub fn valid(&self) -> bool {
+        valid_nys_coordinate(self.easting) && valid_nys_coordinate(self.northing)
+            && valid_alt_coordinate(self.alt_usft)
     }
 
     pub fn relative_from_base(&self, sw_offset: &NYSCoords3) -> RelativeCoords3 {
@@ -108,6 +120,10 @@ impl GPSCoords3 {
 
 pub fn valid_nys_coordinate(coord: f64) -> bool {
     coord >= MIN_NYS_COORD_VALUE && coord <= MAX_NYS_COORD_VALUE
+}
+
+pub fn valid_alt_coordinate(coord: f64) -> bool {
+    coord >= MIN_ALT_COORD_VALUE && coord <= MAX_ALT_COORD_VALUE
 }
 
 #[cfg(test)]
