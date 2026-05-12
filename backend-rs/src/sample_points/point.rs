@@ -11,7 +11,7 @@ pub struct EncodedPoint {
     nys: NYSCoords3,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, new)]
 pub struct SamplePoint {
     sample_point: EncodedPoint,
     display_point: EncodedPoint,
