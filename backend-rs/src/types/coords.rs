@@ -73,9 +73,9 @@ impl NYSCoords3 {
 
     pub fn relative_from_base(&self, sw_offset: &NYSCoords3) -> RelativeCoords3 {
         RelativeCoords3::new(
-            sw_offset.easting - self.easting,
-            sw_offset.northing - self.northing,
-            sw_offset.alt_usft - self.alt_usft,
+            self.easting - sw_offset.easting,
+            self.northing - sw_offset.northing,
+            self.alt_usft - sw_offset.alt_usft,
         )
     }
 
