@@ -1,7 +1,7 @@
-use derive_new::new;
-use crate::types::coords::NYSCoords2;
+use rocket::serde::{Deserialize, Serialize};
 use crate::types::stairstep::StairStepGrid;
 
+#[derive(Serialize,Deserialize)]
 pub struct FresnelZonePoint(u16, u16);
 
 impl FresnelZonePoint {

@@ -11,7 +11,7 @@ use crate::types::tiles::TileId;
 const MIN_ANALYSIS_FREQUENCY: u64 = 1_000;
 const MAX_ANALYSIS_FREQUENCY: u64 = 200_000_000_000;
 
-#[derive(Serialize)]
+#[derive(Serialize,Deserialize)]
 pub enum ObstructionStatus {
     Unobstructed,
     PartiallyObstructed, // alpha=1.0 blocked, alpha=0.6 clear
@@ -20,6 +20,7 @@ pub enum ObstructionStatus {
 
 pub type IntersectionResult = StairStepGrid<FresnelZonePoint>;
 
+#[derive(Serialize,Deserialize)]
 pub struct ZoneEvaluation {
     zone: FresnelZone,
     intersection: IntersectionResult,
@@ -33,7 +34,7 @@ pub struct PointEvaluationInput {
     frequency_hz: u64,
 }
 
-#[derive(Serialize,new)]
+#[derive(Serialize,Deserialize,new,Getters)]
 pub struct PointEvaluationOutput {
     id: Uuid,
 
@@ -43,7 +44,7 @@ pub struct PointEvaluationOutput {
     result: ObstructionStatus,
 }
 
-#[derive(Getters)]
+#[derive(Getters,Serialize,Deserialize)]
 pub struct PointEvaluationResult {
     output: PointEvaluationOutput,
 
@@ -60,14 +61,6 @@ pub fn valid_analysis_frequency(frequency_hz: u64) -> bool {
 
 pub fn evaluate_points(eval_input: PointEvaluationInput) -> PointEvaluationResult {
     todo!()
-}
-
-pub fn evaluate_and_store(eval_input: PointEvaluationInput) -> PointEvaluationResult {
-    let result = evaluate_points(eval_input);
-
-    // TODO: Store result for later retrieval by ID
-
-    result
 }
 
 impl PointEvaluationResult {
