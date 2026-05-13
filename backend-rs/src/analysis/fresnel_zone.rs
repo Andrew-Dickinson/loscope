@@ -11,3 +11,4 @@ impl FresnelZonePoint {
 }
 
 pub type FresnelZone = StairStepGrid<FresnelZonePoint>;
+

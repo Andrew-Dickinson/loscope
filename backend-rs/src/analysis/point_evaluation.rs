@@ -1,5 +1,6 @@
 use derive_getters::Getters;
 use derive_new::new;
+use rocket::http::Status;
 use rocket::serde::{Deserialize, Serializer};
 use serde::Serialize;
 use uuid::Uuid;
@@ -12,10 +13,22 @@ const MIN_ANALYSIS_FREQUENCY: u64 = 1_000;
 const MAX_ANALYSIS_FREQUENCY: u64 = 200_000_000_000;
 
 #[derive(Serialize,Deserialize)]
-pub enum ObstructionStatus {
+pub enum ResultStatus {
     Unobstructed,
     PartiallyObstructed, // alpha=1.0 blocked, alpha=0.6 clear
     Obstructed, // alpha=0.6 blocked
+}
+
+#[derive(Serialize,Deserialize)]
+pub enum ObstructionTypes {
+    All,
+    Specific(Vec<Status>)
+}
+
+impl Default for ObstructionTypes {
+    fn default() -> ObstructionTypes {
+        ObstructionTypes::All
+    }
 }
 
 pub type IntersectionResult = StairStepGrid<FresnelZonePoint>;
@@ -32,6 +45,9 @@ pub struct PointEvaluationInput {
     point_a: NYSCoords3,
     point_b: NYSCoords3,
     frequency_hz: u64,
+
+    #[serde(default = "ObstructionTypes::default")]
+    obstruction_types: ObstructionTypes,
 }
 
 #[derive(Serialize,Deserialize,new,Getters)]
@@ -41,7 +57,7 @@ pub struct PointEvaluationOutput {
     #[serde(flatten)]
     input: PointEvaluationInput,
 
-    result: ObstructionStatus,
+    result: ResultStatus,
 }
 
 #[derive(Getters,Serialize,Deserialize)]
