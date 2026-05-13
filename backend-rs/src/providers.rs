@@ -8,7 +8,9 @@ use crate::util::env::{expect_env, LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, 
 use backends::asset_fetcher::{AssetType, S3AssetFetcher};
 use backends::fs_cache::{AssetProvider, CachingAssetProvider};
 use crate::providers::backends::string_provider::NYCDOBSqliteStringProvider;
+use crate::providers::backends::value_store::InMemoryValueStore;
 use crate::providers::elevation_tile_provider::{CachingElevationTileProvider, ElevationTileProvider};
+use crate::providers::evaluation_result_provider::PointEvaluationResultProvider;
 use crate::providers::footprint_provider::{FootprintProvider, StringBackedFootprintProvider};
 use crate::providers::ortho_provider::{CachingOrthoProvider, OrthoProvider};
 use crate::types::errors::ProviderInitErr;
@@ -17,12 +19,15 @@ pub mod ortho_provider;
 pub mod elevation_tile_provider;
 pub mod footprint_provider;
 pub mod backends;
+pub mod evaluation_result_provider;
 
 #[derive(Getters)]
 pub struct Providers {
     ortho_provider: Box<dyn OrthoProvider + Send + Sync>,
     footprint_provider: Box<dyn FootprintProvider + Send + Sync>,
-    elevation_tile_provider: Box<dyn ElevationTileProvider + Send + Sync>
+    elevation_tile_provider: Box<dyn ElevationTileProvider + Send + Sync>,
+
+    point_eval_result_provider: PointEvaluationResultProvider,
 }
 
 impl Providers {
@@ -66,7 +71,10 @@ impl Providers {
                             ).await?
                         ),
                     )
-                )
+                ),
+                point_eval_result_provider: PointEvaluationResultProvider::new(
+                    Box::new(InMemoryValueStore::new())
+                ),
             }
         )
     }

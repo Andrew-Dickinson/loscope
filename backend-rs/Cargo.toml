@@ -21,7 +21,7 @@ openjpeg-sys = "1.0.12"
 eproj = "0.0.1-alpha.12"
 approx = "0.5.1"
 approx-derive = "0.2.8"
-ndarray = "0.17.2"
+ndarray = { version = "0.17.2", features = ["serde"] }
 async-trait = "0.1"
 tokio-rusqlite = "0.7.0"
 #rusqlite = { version = "0.37.0", features = ["bundled"] }
@@ -32,6 +32,7 @@ geo = "0.33.1"
 async-fn-stream = "0.2.2"
 futures-util = "0.3.32"
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
+serde_cbor = "0.11.2"
 
 
 [dev-dependencies]
