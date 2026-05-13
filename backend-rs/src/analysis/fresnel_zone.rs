@@ -1,4 +1,6 @@
 use rocket::serde::{Deserialize, Serialize};
+use crate::analysis::point_evaluation::PointEvaluationInput;
+
 use crate::types::stairstep::StairStepGrid;
 
 #[derive(Serialize,Deserialize)]
@@ -12,3 +14,7 @@ impl FresnelZonePoint {
 
 pub type FresnelZone = StairStepGrid<FresnelZonePoint>;
 
+
+pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha: f64) -> FresnelZone {
+    todo!()
+}

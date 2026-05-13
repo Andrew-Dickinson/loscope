@@ -16,7 +16,11 @@ pub async fn point_analysis(
         return Err(Status::BadRequest);
     }
 
-    let result = evaluate_points(point_pair.into_inner());
+    let result = evaluate_points(
+        point_pair.into_inner(),
+        providers.elevation_tile_provider().as_ref()
+    );
+    
     providers.point_eval_result_provider().put(&result)
         .or_else(|err| Err(Status::InternalServerError))?;
 
