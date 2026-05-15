@@ -6,13 +6,8 @@ use crate::types::coords::NYSCoords2;
 use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::TileId;
 
-#[derive(new, Getters)]
-pub struct TerrainGrid {
-    terrain: StairStepGrid<u16>,
-    base_offset: NYSCoords2,
-    all_obstruction_ids: Vec<String> // TODO: Better type?
-}
 
+pub(crate) type TerrainGrid = StairStepGrid<u16>;
 
 pub fn get_intersecting_tiles(fresnel_zone: &FresnelZone) -> Vec<TileId> {
     todo!()

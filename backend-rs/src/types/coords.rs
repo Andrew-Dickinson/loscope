@@ -1,7 +1,8 @@
 use derive_getters::Getters;
 use derive_new::new;
 use approx_derive::AbsDiffEq;
-use serde::{Serialize,Deserialize};
+use geo::Point;
+use serde::{Serialize, Deserialize};
 use crate::sample_points::point::EncodedPoint;
 
 pub const MIN_NYS_COORD_VALUE: f64 = 0.0;
@@ -117,6 +118,26 @@ impl GPSCoords3 {
         }
     }
 }
+
+
+impl From<&NYSCoords3> for NYSCoords2 {
+    fn from(item: &NYSCoords3) -> Self {
+        NYSCoords2::from3(item)
+    }
+}
+
+impl From<&NYSCoords2> for Point {
+    fn from(item: &NYSCoords2) -> Self {
+        Point::new(item.easting, item.northing)
+    }
+}
+
+impl From<&NYSCoords3> for Point {
+    fn from(item: &NYSCoords3) -> Self {
+        Point::new(item.easting, item.northing)
+    }
+}
+
 
 pub fn valid_nys_coordinate(coord: f64) -> bool {
     coord >= MIN_NYS_COORD_VALUE && coord <= MAX_NYS_COORD_VALUE
