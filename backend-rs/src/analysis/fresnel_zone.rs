@@ -1,9 +1,10 @@
+use derive_more::From;
 use rocket::serde::{Deserialize, Serialize};
 use crate::analysis::point_evaluation::PointEvaluationInput;
 
 use crate::types::stairstep::StairStepGrid;
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize,Deserialize,From)]
 pub struct FresnelZonePoint(u16, u16);
 
 impl FresnelZonePoint {

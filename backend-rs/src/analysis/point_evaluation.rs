@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use derive_getters::Getters;
 use derive_new::new;
 use futures_util::StreamExt;
@@ -77,7 +78,7 @@ pub struct PointEvaluationResult {
     result_full: ZoneEvaluation,
     result_inner: ZoneEvaluation,
 
-    tiles: Vec<TileId>,
+    tiles: HashSet<TileId>,
 }
 
 pub fn valid_analysis_frequency(frequency_hz: u64) -> bool {

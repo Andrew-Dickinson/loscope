@@ -20,16 +20,16 @@ const PERMITTED_LAS_ID_COMPONENT_MODULI: &[u8] = &[0, 2, 5, 7];
 
 const LAS_ID_UNIT_MUTIPLIER_TO_COORD: u16 = 1000;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, Hash, PartialEq)]
 // Easting, Northing coordinates (in NYS LI plane) (units of 1000 usft)
 pub struct LASTileId(u16, u16);
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, Hash, PartialEq)]
 // X, Y (Easting, Northing in units of 500 usft) offset from the SW corner of
 // the associated LAS tile
 pub struct SubgridId(u8, u8);
 
-#[derive(Debug, Getters, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Getters, Clone, Copy, Serialize, Deserialize, Eq, Hash, PartialEq)]
 pub struct TileId {
     las_tile_id: LASTileId,
     subgrid_id: SubgridId,
