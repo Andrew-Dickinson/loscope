@@ -251,7 +251,7 @@ pub fn get_intersecting_tiles(poly_nys: &Polygon) -> Result<(Vec<TileId>, Rect),
             // TODO: Should we instead align e, n, s, w to the sw corners the tiles
             //  and then generate a grid that is perfectly on-center
             //  (thus only needing to call from_contained_point() once?)
-            let tile_id = TileId::from_contained_point(sample_point);
+            let tile_id = TileId::from_contained_point(&sample_point);
             if poly_nys.intersects(&tile_id.get_bounds().convert()) {
                 intersecting_tiles.push(tile_id);
             }

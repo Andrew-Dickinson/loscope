@@ -251,7 +251,7 @@ impl TileId {
         Rect::new(coord! {x: w, y: s}, coord! {x: e, y: n})
     }
 
-    pub fn from_contained_point(coords: NYSCoords2) -> Self {
+    pub fn from_contained_point(coords: &NYSCoords2) -> Self {
         let easting = *coords.easting();
         let northing = *coords.northing();
 
@@ -664,7 +664,7 @@ mod tests {
     fn from_contained_point_sw_corner() {
         // SW corner of a tile belongs to that tile
         let tile = TileId::parse("990200_23").unwrap();
-        let result = TileId::from_contained_point(tile.get_sw_corner());
+        let result = TileId::from_contained_point(&tile.get_sw_corner());
         assert_eq!(result.to_string(), "990200_23");
     }
 
@@ -672,7 +672,7 @@ mod tests {
     fn from_contained_point_example() {
         // SW corner of a tile belongs to that tile
         let tile = TileId::parse("982182_00").unwrap();
-        let result = TileId::from_contained_point(NYSCoords2::new(982634.0, 182501.0));
+        let result = TileId::from_contained_point(&NYSCoords2::new(982634.0, 182501.0));
         assert_eq!(result.to_string(), "982182_00");
     }
 
@@ -681,7 +681,7 @@ mod tests {
         let tile = TileId::parse("990200_23").unwrap();
         let sw = tile.get_sw_corner();
         let center = NYSCoords2::new(*sw.easting() + 250.0, *sw.northing() + 250.0);
-        let result = TileId::from_contained_point(center);
+        let result = TileId::from_contained_point(&center);
         assert_eq!(result.to_string(), "990200_23");
     }
 
@@ -691,7 +691,7 @@ mod tests {
         let tile = TileId::parse("990200_23").unwrap();
         let sw = tile.get_sw_corner();
         let near_ne = NYSCoords2::new(*sw.easting() + 499.9, *sw.northing() + 499.9);
-        let result = TileId::from_contained_point(near_ne);
+        let result = TileId::from_contained_point(&near_ne);
         assert_eq!(result.to_string(), "990200_23");
     }
 
@@ -700,7 +700,7 @@ mod tests {
         // E boundary of subgrid 23 is also the SW easting of subgrid 33
         let sw_23 = TileId::parse("990200_23").unwrap().get_sw_corner();
         let on_east = NYSCoords2::new(*sw_23.easting() + 500.0, *sw_23.northing() + 250.0);
-        let result = TileId::from_contained_point(on_east);
+        let result = TileId::from_contained_point(&on_east);
         assert_eq!(result.to_string(), "990200_33");
     }
 
@@ -709,7 +709,7 @@ mod tests {
         // N boundary of subgrid 23 is also the SW northing of subgrid 24
         let sw_23 = TileId::parse("990200_23").unwrap().get_sw_corner();
         let on_north = NYSCoords2::new(*sw_23.easting() + 250.0, *sw_23.northing() + 500.0);
-        let result = TileId::from_contained_point(on_north);
+        let result = TileId::from_contained_point(&on_north);
         assert_eq!(result.to_string(), "990200_24");
     }
 
@@ -717,7 +717,7 @@ mod tests {
     fn from_contained_point_crosses_las_boundary() {
         let sw_44 = TileId::parse("990200_44").unwrap().get_sw_corner();
         let on_las_ne = NYSCoords2::new(*sw_44.easting() + 500.0, *sw_44.northing() + 250.0);
-        let result = TileId::from_contained_point(on_las_ne);
+        let result = TileId::from_contained_point(&on_las_ne);
         assert_eq!(result.to_string(), "992200_04");
     }
 
@@ -725,14 +725,14 @@ mod tests {
     fn from_contained_point_mod7_tile() {
         // Tile with components ending in 7 (component_to_usft adds 500)
         let tile = TileId::parse("987177_00").unwrap();
-        let result = TileId::from_contained_point(tile.get_sw_corner());
+        let result = TileId::from_contained_point(&tile.get_sw_corner());
         assert_eq!(result.to_string(), "987177_00");
     }
 
     #[test]
     fn from_contained_point_mod2_tile() {
         let tile = TileId::parse("987172_24").unwrap();
-        let result = TileId::from_contained_point(tile.get_sw_corner());
+        let result = TileId::from_contained_point(&tile.get_sw_corner());
         assert_eq!(result.to_string(), "987172_24");
     }
 
@@ -743,7 +743,7 @@ mod tests {
             for y in 0..5u8 {
                 let id = format!("990200_{x}{y}");
                 let tile = TileId::parse(&id).unwrap();
-                let result = TileId::from_contained_point(tile.get_sw_corner());
+                let result = TileId::from_contained_point(&tile.get_sw_corner());
                 assert_eq!(result.to_string(), id, "failed for subgrid {x}{y}");
             }
         }
