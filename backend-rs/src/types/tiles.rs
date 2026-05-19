@@ -273,6 +273,31 @@ impl TileId {
         assert!(subgrid_x < 5.0);
         TileId { las_tile_id, subgrid_id: SubgridId::new(subgrid_x as u8, subgrid_y as u8) }
     }
+
+    pub fn from_adjacent_tile(starting: &TileId, offset: (isize, isize)) -> Self {
+        let starting_sw = starting.las_tile_id().get_sw_corner();
+        let starting_s = starting_sw.northing().floor() as isize;
+        let starting_w = starting_sw.easting().floor() as isize;
+
+        let total_x_tiles_from_las_corner = isize::from(starting.subgrid_id.0) + offset.0;
+        let total_y_tiles_from_las_corner = isize::from(starting.subgrid_id.1) + offset.1;
+
+        TileId {
+            las_tile_id: LASTileId::new(
+                // Safety: the following unwraps are safe because
+                // SUBGRID_TILE_SIDE_LENGTH_USFT = 500 fits into an isize (2**32) no problem, on
+                // any 32+ bit system
+                LASTileId::usft_to_component((starting_w + isize::try_from(SUBGRID_TILE_SIDE_LENGTH_USFT).unwrap() * total_x_tiles_from_las_corner) as f64),
+                LASTileId::usft_to_component((starting_s + isize::try_from(SUBGRID_TILE_SIDE_LENGTH_USFT).unwrap() * total_y_tiles_from_las_corner) as f64),
+            ),
+            subgrid_id: SubgridId::new(
+                // Safety: the following unwraps are safe because SUBGRID_TILES_PER_SIDE is a u8,
+                // therefore x % SUBGRID_TILES_PER_SIDE fits in a u8 for all x ∈ ℤ
+                u8::try_from(total_x_tiles_from_las_corner.rem_euclid(isize::from(SUBGRID_TILES_PER_SIDE))).unwrap(),
+                u8::try_from(total_y_tiles_from_las_corner.rem_euclid(isize::from(SUBGRID_TILES_PER_SIDE))).unwrap(),
+            )
+        }
+    }
 }
 
 
@@ -722,5 +747,47 @@ mod tests {
                 assert_eq!(result.to_string(), id, "failed for subgrid {x}{y}");
             }
         }
+    }
+
+    #[test]
+    fn from_adjacent_tile_identity() {
+        let tile = TileId::parse("982182_23").unwrap();
+        let new_tile = TileId::from_adjacent_tile(&tile, (0, 0));
+        assert_eq!(new_tile.to_string(), "982182_23");
+    }
+
+    #[test]
+    fn from_adjacent_tile_negative() {
+        let tile = TileId::parse("982182_23").unwrap();
+        let new_tile = TileId::from_adjacent_tile(&tile, (-1, -1));
+        assert_eq!(new_tile.to_string(), "982182_12");
+    }
+
+    #[test]
+    fn from_adjacent_tile_positive() {
+        let tile = TileId::parse("982182_23").unwrap();
+        let new_tile = TileId::from_adjacent_tile(&tile, (1, 1));
+        assert_eq!(new_tile.to_string(), "982182_34");
+    }
+
+    #[test]
+    fn from_adjacent_tile_over_tile_border_positive() {
+        let tile = TileId::parse("982182_23").unwrap();
+        let new_tile = TileId::from_adjacent_tile(&tile, (3, 3));
+        assert_eq!(new_tile.to_string(), "985185_01");
+    }
+
+    #[test]
+    fn from_adjacent_tile_over_tile_border_negative() {
+        let tile = TileId::parse("982182_23").unwrap();
+        let new_tile = TileId::from_adjacent_tile(&tile, (-4, 0));
+        assert_eq!(new_tile.to_string(), "980182_33");
+    }
+
+    #[test]
+    fn from_adjacent_tile_over_multi_border_negative() {
+        let tile = TileId::parse("982182_23").unwrap();
+        let new_tile = TileId::from_adjacent_tile(&tile, (-10, 0));
+        assert_eq!(new_tile.to_string(), "977182_23");
     }
 }
