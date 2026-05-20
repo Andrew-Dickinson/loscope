@@ -138,6 +138,12 @@ impl From<&NYSCoords3> for Point {
     }
 }
 
+impl From<&NYSCoords3> for (f64, f64, f64) {
+    fn from(item: &NYSCoords3) -> Self {
+        (item.easting, item.northing, item.alt_usft)
+    }
+}
+
 
 pub fn valid_nys_coordinate(coord: f64) -> bool {
     coord >= MIN_NYS_COORD_VALUE && coord <= MAX_NYS_COORD_VALUE
