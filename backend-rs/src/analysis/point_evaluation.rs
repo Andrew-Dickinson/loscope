@@ -106,37 +106,9 @@ pub fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(dyn El
 
     let intersect_fn = |base_offset: &NYSCoords2| {
         let base_offset = base_offset.clone();
-        move |zone_point: &FresnelZonePoint, terrain: &u16, coords: (usize, usize)| -> PositiveFinite {
-            let top = zone_point.top();
-            let bottom = zone_point.bottom();
 
-            let intersection = if *terrain >= top {
-                PositiveFinite::new(1.0).unwrap()
-            } else if *terrain <= bottom {
-                PositiveFinite::new(0.0).unwrap()
-            } else {
-                let height: f64 = (top - bottom).into();
-                if height == 0.0 {
-                    PositiveFinite::new(1.0).unwrap()
-                } else {
-                    assert!(height > 0.0);
-                    // Safety: from above, we know terrain > bottom, so this result must be positive
-                    PositiveFinite::new(f64::from(*terrain - bottom) / height).unwrap()
-                }
-            };
-
-            let sample_point = point!(
-                x: coords.0 as f64 + base_offset.easting(),
-                y: coords.1 as f64 + base_offset.northing()
-            );
-
-            if Euclidean.distance_within(sample_point, endpoints.0, OCCLUSION_DISTANCE_USFT)
-                || Euclidean.distance_within(sample_point, endpoints.1, OCCLUSION_DISTANCE_USFT)
-            {
-                PositiveFinite::new(0.0).unwrap()
-            } else {
-                intersection
-            }
+        move |zone_point: &FresnelZonePoint, terrain: &u16, coords: (usize, usize)| {
+            intersect_inner(&endpoints, &base_offset, zone_point, terrain, coords)
         }
     };
 
@@ -173,7 +145,184 @@ pub fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(dyn El
         tiles: tile_ids,
     }
 }
+fn intersect_inner(
+    endpoints: &(Point, Point),
+    base_offset: &NYSCoords2,
+    zone_point: &FresnelZonePoint,
+    terrain: &u16,
+    coords: (usize, usize)
+) -> PositiveFinite {
+    let top = zone_point.top();
+    let bottom = zone_point.bottom();
+
+    let intersection = if *terrain >= top {
+        PositiveFinite::new(1.0).unwrap()
+    } else if *terrain <= bottom {
+        PositiveFinite::new(0.0).unwrap()
+    } else {
+        let height: f64 = (top - bottom).into();
+        if height == 0.0 {
+            PositiveFinite::new(1.0).unwrap()
+        } else {
+            assert!(height > 0.0);
+            // Safety: from above, we know terrain > bottom, so this result must be positive
+            PositiveFinite::new(f64::from(*terrain - bottom) / height).unwrap()
+        }
+    };
+
+    let sample_point = point!(
+            x: coords.0 as f64 + base_offset.easting(),
+            y: coords.1 as f64 + base_offset.northing()
+        );
+
+    if Euclidean.distance_within(sample_point, endpoints.0, OCCLUSION_DISTANCE_USFT)
+        || Euclidean.distance_within(sample_point, endpoints.1, OCCLUSION_DISTANCE_USFT)
+    {
+        PositiveFinite::new(0.0).unwrap()
+    } else {
+        intersection
+    }
+}
 
 impl PointEvaluationResult {
     pub fn into_output(self) -> PointEvaluationOutput { self.output }
+}
+
+#[cfg(test)]
+mod tests {
+    use geo::point;
+    use super::*;
+
+    // --- valid_analysis_frequency ---
+
+    #[test]
+    fn frequency_below_min_is_invalid() {
+        assert!(!valid_analysis_frequency(MIN_ANALYSIS_FREQUENCY - 1));
+    }
+
+    #[test]
+    fn frequency_at_min_is_valid() {
+        assert!(valid_analysis_frequency(MIN_ANALYSIS_FREQUENCY));
+    }
+
+    #[test]
+    fn frequency_at_max_is_valid() {
+        assert!(valid_analysis_frequency(MAX_ANALYSIS_FREQUENCY));
+    }
+
+    #[test]
+    fn frequency_above_max_is_invalid() {
+        assert!(!valid_analysis_frequency(MAX_ANALYSIS_FREQUENCY + 1));
+    }
+
+    #[test]
+    fn frequency_typical_value_is_valid() {
+        assert!(valid_analysis_frequency(2_400_000_000)); // 2.4 GHz
+    }
+
+    // --- intersect_inner ---
+
+    fn far_endpoints() -> (geo::Point, geo::Point) {
+        (point!(x: -10000.0, y: -10000.0), point!(x: 10000.0, y: 10000.0))
+    }
+
+    fn zero_offset() -> NYSCoords2 {
+        NYSCoords2::new(0.0, 0.0)
+    }
+
+    #[test]
+    fn intersect_terrain_above_top_returns_full_occlusion() {
+        let zone_point = FresnelZonePoint::new(10, 20);
+        let result = intersect_inner(&far_endpoints(), &zero_offset(), &zone_point, &25, (0, 0));
+        assert_eq!(f64::from(result), 1.0);
+    }
+
+    #[test]
+    fn intersect_terrain_at_top_returns_full_occlusion() {
+        let zone_point = FresnelZonePoint::new(10, 20);
+        let result = intersect_inner(&far_endpoints(), &zero_offset(), &zone_point, &20, (0, 0));
+        assert_eq!(f64::from(result), 1.0);
+    }
+
+    #[test]
+    fn intersect_terrain_below_bottom_returns_no_occlusion() {
+        let zone_point = FresnelZonePoint::new(10, 20);
+        let result = intersect_inner(&far_endpoints(), &zero_offset(), &zone_point, &5, (0, 0));
+        assert_eq!(f64::from(result), 0.0);
+    }
+
+    #[test]
+    fn intersect_terrain_at_bottom_returns_no_occlusion() {
+        let zone_point = FresnelZonePoint::new(10, 20);
+        let result = intersect_inner(&far_endpoints(), &zero_offset(), &zone_point, &10, (0, 0));
+        assert_eq!(f64::from(result), 0.0);
+    }
+
+    #[test]
+    fn intersect_terrain_midpoint_returns_half_occlusion() {
+        // bottom=0, top=100, terrain=50 => 0.5
+        let zone_point = FresnelZonePoint::new(0, 100);
+        let result = intersect_inner(&far_endpoints(), &zero_offset(), &zone_point, &50, (0, 0));
+        assert!((f64::from(result) - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn intersect_terrain_partial_returns_fractional_occlusion() {
+        // bottom=0, top=10, terrain=3 => 0.3
+        let zone_point = FresnelZonePoint::new(0, 10);
+        let result = intersect_inner(&far_endpoints(), &zero_offset(), &zone_point, &3, (0, 0));
+        assert!((f64::from(result) - 0.3).abs() < 1e-10);
+    }
+
+    #[test]
+    fn intersect_zero_height_zone_returns_full_occlusion() {
+        // top == bottom and terrain is between them — degenerate zone
+        let zone_point = FresnelZonePoint::new(10, 10);
+        let result = intersect_inner(&far_endpoints(), &zero_offset(), &zone_point, &11, (0, 0));
+        assert_eq!(f64::from(result), 1.0);
+    }
+
+    #[test]
+    fn intersect_zero_height_zone_returns_zero_occlusion() {
+        // top == bottom and terrain is between them — degenerate zone
+        let zone_point = FresnelZonePoint::new(10, 10);
+        let result = intersect_inner(&far_endpoints(), &zero_offset(), &zone_point, &5, (0, 0));
+        assert_eq!(f64::from(result), 0.0);
+    }
+
+    #[test]
+    fn intersect_near_endpoint_a_returns_zero() {
+        // sample point at (0,0), endpoint_a at (1,1) — distance ~1.4 < OCCLUSION_DISTANCE_USFT
+        let endpoints = (point!(x: 1.0, y: 1.0), point!(x: 10000.0, y: 10000.0));
+        let zone_point = FresnelZonePoint::new(0, 10);
+        let result = intersect_inner(&endpoints, &zero_offset(), &zone_point, &9, (0, 0));
+        assert_eq!(f64::from(result), 0.0);
+    }
+
+    #[test]
+    fn intersect_near_endpoint_b_returns_zero() {
+        // sample point at (0,0), endpoint_b at (0,0) — distance 0 < OCCLUSION_DISTANCE_USFT
+        let endpoints = (point!(x: 10000.0, y: 10000.0), point!(x: 0.0, y: 0.0));
+        let zone_point = FresnelZonePoint::new(0, 10);
+        let result = intersect_inner(&endpoints, &zero_offset(), &zone_point, &9, (0, 0));
+        assert_eq!(f64::from(result), 0.0);
+    }
+
+    #[test]
+    fn intersect_far_from_both_endpoints_uses_terrain_value() {
+        // sample point at (1000, 1000), far from both endpoints
+        let endpoints = (point!(x: 0.0, y: 0.0), point!(x: 0.0, y: 0.0));
+        let zone_point = FresnelZonePoint::new(0, 10);
+        let result = intersect_inner(&endpoints, &zero_offset(), &zone_point, &5, (1000, 1000));
+        assert!((f64::from(result) - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn intersect_base_offset_shifts_sample_point() {
+        let endpoints = (point!(x: 0.0, y: 0.0), point!(x: 1000.0, y: 1000.0));
+        let base_offset = NYSCoords2::new(998.0, 998.0);
+        let zone_point = FresnelZonePoint::new(0, 10);
+        let result = intersect_inner(&endpoints, &base_offset, &zone_point, &5, (2, 2));
+        assert_eq!(f64::from(result), 0.0);
+    }
 }
