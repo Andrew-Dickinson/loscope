@@ -16,8 +16,8 @@ use crate::types::coords::{NYSCoords2, NYSCoords3};
 use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::TileId;
 
-const MIN_ANALYSIS_FREQUENCY: u64 = 1_000;
-const MAX_ANALYSIS_FREQUENCY: u64 = 200_000_000_000;
+const MIN_ANALYSIS_FREQUENCY: f64 = 1_000.;
+const MAX_ANALYSIS_FREQUENCY: f64 = 200_000_000_000.;
 
 const ALPHA_ZONE_FULL: f64 = 1.0;
 const ALPHA_ZONE_INNER: f64 = 0.6;
@@ -55,7 +55,7 @@ pub struct ZoneEvaluation {
 pub struct PointEvaluationInput {
     point_a: NYSCoords3,
     point_b: NYSCoords3,
-    frequency_hz: u64,
+    frequency_hz: f64,
 
     #[serde(default = "ObstructionTypes::default")]
     obstruction_types: ObstructionTypes,
@@ -81,7 +81,7 @@ pub struct PointEvaluationResult {
     tiles: HashSet<TileId>,
 }
 
-pub fn valid_analysis_frequency(frequency_hz: u64) -> bool {
+pub fn valid_analysis_frequency(frequency_hz: f64) -> bool {
     frequency_hz >= MIN_ANALYSIS_FREQUENCY && frequency_hz <= MAX_ANALYSIS_FREQUENCY
 }
 
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn frequency_below_min_is_invalid() {
-        assert!(!valid_analysis_frequency(MIN_ANALYSIS_FREQUENCY - 1));
+        assert!(!valid_analysis_frequency(MIN_ANALYSIS_FREQUENCY - 1.));
     }
 
     #[test]
@@ -212,12 +212,12 @@ mod tests {
 
     #[test]
     fn frequency_above_max_is_invalid() {
-        assert!(!valid_analysis_frequency(MAX_ANALYSIS_FREQUENCY + 1));
+        assert!(!valid_analysis_frequency(MAX_ANALYSIS_FREQUENCY + 1.));
     }
 
     #[test]
     fn frequency_typical_value_is_valid() {
-        assert!(valid_analysis_frequency(2_400_000_000)); // 2.4 GHz
+        assert!(valid_analysis_frequency(2_400_000_000.)); // 2.4 GHz
     }
 
     // --- intersect_inner ---
