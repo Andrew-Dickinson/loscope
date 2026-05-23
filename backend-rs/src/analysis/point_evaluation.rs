@@ -54,7 +54,9 @@ pub struct ZoneEvaluation {
 
 #[derive(new,Serialize,Deserialize,Getters)]
 pub struct PointEvaluationInput {
+    #[serde(rename = "point_a_nys")]
     point_a: NYSCoords3,
+    #[serde(rename = "point_b_nys")]
     point_b: NYSCoords3,
     frequency_hz: f64,
 
