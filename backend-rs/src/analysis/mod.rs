@@ -3,3 +3,4 @@ pub mod fresnel_zone;
 pub mod tiles;
 pub mod angle_context;
 pub mod map_overview;
+pub mod intersection_vis;
