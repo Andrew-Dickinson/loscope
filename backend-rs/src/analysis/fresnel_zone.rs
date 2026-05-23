@@ -2,12 +2,13 @@ use std::{usize};
 use std::ops::RangeInclusive;
 use derive_more::From;
 use rocket::serde::{Deserialize, Serialize};
+use wincode::{SchemaRead, SchemaWrite};
 use crate::analysis::angle_context::AngleContext;
 use crate::analysis::point_evaluation::PointEvaluationInput;
 use nalgebra::{Matrix3, Matrix4, SMatrix, Vector4};
 use ndarray::{Array1, Array2};
 use crate::types::coords::NYSCoords2;
-use crate::types::stairstep::StairStepGrid;
+use crate::types::stairstep::{StairStepGrid, WincodeGridElem};
 
 const OFFSET_BUFFER: f64 = 500.0;
 const SPEED_OF_LIGHT_M_S: f64 = 299_792_458.0;
@@ -15,8 +16,15 @@ const USFT_PER_METER: f64 = 1.0 / 0.3048006096;
 const EARTH_RADIUS_METERS: f64 = 6_369_160.0;
 const EARTH_RADIUS_USFT: f64 = EARTH_RADIUS_METERS * USFT_PER_METER;
 
-#[derive(Serialize, Deserialize, From, Default)]
+#[derive(Serialize, Deserialize, SchemaWrite, SchemaRead, From, Default, Copy, Clone)]
+#[repr(C)]
 pub struct FresnelZonePoint(u16, u16);
+
+impl WincodeGridElem for FresnelZonePoint {
+    type Wire = FresnelZonePoint;
+    fn into_wire(self) -> FresnelZonePoint { self }
+    fn from_wire(w: FresnelZonePoint) -> Self { w }
+}
 
 impl FresnelZonePoint {
     pub fn new(bottom: u16, top: u16) -> FresnelZonePoint { FresnelZonePoint(bottom, top) }

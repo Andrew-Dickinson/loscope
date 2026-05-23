@@ -3,6 +3,7 @@ use derive_new::new;
 use approx_derive::AbsDiffEq;
 use geo::Point;
 use rocket::serde::{Deserializer, Serializer};
+use wincode::{SchemaRead, SchemaWrite};
 use serde::{Serialize, Deserialize, de};
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeTuple;
@@ -32,14 +33,14 @@ pub struct GPSCoords2 {
    lon: f64
 }
 
-#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Clone)]
+#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Clone, SchemaWrite, SchemaRead)]
 pub struct NYSCoords3 {
     easting: f64,
     northing: f64,
     alt_usft: f64
 }
 
-#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Clone)]
+#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Clone, SchemaWrite, SchemaRead)]
 pub struct NYSCoords2 {
     easting: f64,
     northing: f64

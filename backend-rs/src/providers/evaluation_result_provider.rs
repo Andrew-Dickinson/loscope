@@ -4,8 +4,6 @@ use crate::analysis::point_evaluation::PointEvaluationOutcome;
 use crate::providers::backends::value_store::ValueStore;
 use crate::types::errors::AssetErr;
 
-use serde_cbor::{from_slice, to_vec};
-
 const KEY_PREFIX: &str = "PointEvaluationResult";
 
 #[derive(new)]
@@ -21,23 +19,19 @@ impl PointEvaluationResultProvider {
     pub fn put(&self, result: &PointEvaluationOutcome) -> Result<(), AssetErr> {
         self.value_store.put(
             PointEvaluationResultProvider::key(result.output().id()),
-            to_vec(result)
-                .or_else(|e| Err(
-                    AssetErr::AssetContentError(
-                        format!("Error serializing for result_id {}: {e}", result.output().id())
-                    )
+            wincode::config::serialize(result, wincode::config::Configuration::default().disable_preallocation_size_limit())
+                .map_err(|e| AssetErr::AssetContentError(
+                    format!("Error serializing for result_id {}: {e}", result.output().id())
                 ))?
         )
     }
 
     pub fn get(&self, result_id: &Uuid) -> Result<PointEvaluationOutcome, AssetErr> {
         let resp = self.value_store.get(PointEvaluationResultProvider::key(result_id))?;
-        Ok(
-            from_slice(resp.as_slice())
-            .or_else(|e| Err(AssetErr::AssetContentError(
+        wincode::config::deserialize::<PointEvaluationOutcome, _>(&resp, wincode::config::Configuration::default().disable_preallocation_size_limit())
+            .map_err(|e| AssetErr::AssetContentError(
                 format!("Error deserializing response for result_id {result_id}: {e}")
-            )))?
-        )
+            ))
     }
 }
 

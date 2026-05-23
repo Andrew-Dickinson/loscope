@@ -8,6 +8,7 @@ use rocket::serde::{Deserialize, Serializer};
 use serde::Serialize;
 use typed_floats::tf64::PositiveFinite;
 use uuid::Uuid;
+use wincode::{SchemaRead, SchemaWrite};
 use crate::analysis::fresnel_zone::{compute_fresnel_zone, FresnelZone, FresnelZonePoint};
 use crate::analysis::tiles::{get_intersecting_tiles, TerrainFactory, TerrainGrid};
 use crate::providers::elevation_tile_provider::{CachingElevationTileProvider, ElevationTileProvider};
@@ -24,14 +25,14 @@ const ALPHA_ZONE_INNER: f64 = 0.6;
 
 const OCCLUSION_DISTANCE_USFT: f64 = 4.0;
 
-#[derive(Serialize,Deserialize,PartialEq)]
+#[derive(Serialize,Deserialize,SchemaWrite,SchemaRead,PartialEq)]
 pub enum ResultStatus {
     Unobstructed,
     PartiallyObstructed, // alpha=1.0 blocked, alpha=0.6 clear
     Obstructed, // alpha=0.6 blocked
 }
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize,Deserialize,SchemaWrite,SchemaRead)]
 pub enum ObstructionTypes {
     All,
     Specific(Vec<String>),
@@ -45,13 +46,13 @@ impl Default for ObstructionTypes {
 
 pub type IntersectionResult = StairStepGrid<PositiveFinite>;
 
-#[derive(new,Serialize,Deserialize,Getters)]
+#[derive(new,Serialize,Deserialize,SchemaWrite,SchemaRead,Getters)]
 pub struct ZoneEvaluation {
     zone: FresnelZone,
     intersection: IntersectionResult,
 }
 
-#[derive(new,Serialize,Deserialize,Getters)]
+#[derive(new,Serialize,Deserialize,SchemaWrite,SchemaRead,Getters)]
 pub struct PointEvaluationInput {
     #[serde(rename = "point_a_nys")]
     point_a: NYSCoords3,
@@ -63,7 +64,7 @@ pub struct PointEvaluationInput {
     obstruction_types: ObstructionTypes,
 }
 
-#[derive(Serialize,Deserialize,new,Getters)]
+#[derive(Serialize,Deserialize,SchemaWrite,SchemaRead,new,Getters)]
 pub struct PointEvaluationOutput {
     id: Uuid,
 
@@ -73,7 +74,7 @@ pub struct PointEvaluationOutput {
     result: ResultStatus,
 }
 
-#[derive(new,Getters,Serialize,Deserialize)]
+#[derive(new,Getters,Serialize,Deserialize,SchemaWrite,SchemaRead)]
 pub struct PointEvaluationOutcome {
     output: PointEvaluationOutput,
 

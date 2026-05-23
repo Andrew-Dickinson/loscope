@@ -1,11 +1,34 @@
 use std::iter::repeat_n;
+use std::mem::MaybeUninit;
 use derive_getters::Getters;
 use derive_new::new;
 use futures_util::StreamExt;
 use ndarray::{s, Array1, Array2};
 use rocket::serde::{Deserialize, Serialize};
+use typed_floats::tf64::PositiveFinite;
+use wincode::{ReadError, SchemaRead, SchemaWrite};
+use wincode::config::Config;
+use wincode::io::{Reader, Writer};
 use crate::types::coords::NYSCoords2;
 use crate::types::tiles::{TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
+
+/// Maps a StairStepGrid element type to a wincode-serializable wire form.
+///
+/// This exists because ndarray element types (like `PositiveFinite`) may not
+/// implement wincode's foreign traits directly due to the orphan rule.
+pub(crate) trait WincodeGridElem: Copy + Sized + 'static {
+    type Wire: Clone + 'static;
+    fn into_wire(self) -> Self::Wire;
+    fn from_wire(wire: Self::Wire) -> Self;
+}
+
+impl WincodeGridElem for PositiveFinite {
+    type Wire = f64;
+    fn into_wire(self) -> f64 { self.into() }
+    fn from_wire(w: f64) -> Self {
+        PositiveFinite::try_from(w).expect("deserialized f64 is not a valid PositiveFinite")
+    }
+}
 
 /// Sparse Array2 representation, which uses an x-offset for each row in values to shift that row
 /// in the positive-x direction. The contents of row i in values are only valid up to widths[i]
@@ -123,6 +146,73 @@ impl<T> StairStepGrid<T> {
         Box::new(iter)
     }
 
+}
+
+unsafe impl<C: Config, T> SchemaWrite<C> for StairStepGrid<T>
+where
+    T: WincodeGridElem,
+    T::Wire: SchemaWrite<C, Src = T::Wire>,
+    Vec<T::Wire>: SchemaWrite<C, Src = Vec<T::Wire>>,
+{
+    type Src = StairStepGrid<T>;
+
+    fn size_of(src: &Self::Src) -> wincode::WriteResult<usize> {
+        let nrows = src.values.nrows();
+        let ncols = src.values.ncols();
+        let wire_widths: Vec<usize> = src.widths.to_vec();
+        let wire_offsets: Vec<usize> = src.offsets.to_vec();
+        let wire_values: Vec<T::Wire> = src.values.iter().copied().map(T::into_wire).collect();
+        Ok(
+            <usize as SchemaWrite<C>>::size_of(&nrows)? +
+            <usize as SchemaWrite<C>>::size_of(&ncols)? +
+            <Vec<usize> as SchemaWrite<C>>::size_of(&wire_widths)? +
+            <Vec<usize> as SchemaWrite<C>>::size_of(&wire_offsets)? +
+            <NYSCoords2 as SchemaWrite<C>>::size_of(src.base_offset())? +
+            <Vec<T::Wire> as SchemaWrite<C>>::size_of(&wire_values)?
+        )
+    }
+
+    fn write(mut writer: impl Writer, src: &Self::Src) -> wincode::WriteResult<()> {
+        let nrows = src.values.nrows();
+        let ncols = src.values.ncols();
+        <usize as SchemaWrite<C>>::write(writer.by_ref(), &nrows)?;
+        <usize as SchemaWrite<C>>::write(writer.by_ref(), &ncols)?;
+        let wire_widths: Vec<usize> = src.widths.to_vec();
+        <Vec<usize> as SchemaWrite<C>>::write(writer.by_ref(), &wire_widths)?;
+        let wire_offsets: Vec<usize> = src.offsets.to_vec();
+        <Vec<usize> as SchemaWrite<C>>::write(writer.by_ref(), &wire_offsets)?;
+        <NYSCoords2 as SchemaWrite<C>>::write(writer.by_ref(), src.base_offset())?;
+        let wire_values: Vec<T::Wire> = src.values.iter().copied().map(T::into_wire).collect();
+        <Vec<T::Wire> as SchemaWrite<C>>::write(writer, &wire_values)?;
+        Ok(())
+    }
+}
+
+unsafe impl<'de, C: Config, T> SchemaRead<'de, C> for StairStepGrid<T>
+where
+    T: WincodeGridElem,
+    T::Wire: SchemaRead<'de, C, Dst = T::Wire>,
+    Vec<T::Wire>: SchemaRead<'de, C, Dst = Vec<T::Wire>>,
+{
+    type Dst = StairStepGrid<T>;
+
+    fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> wincode::ReadResult<()> {
+        let nrows = <usize as SchemaRead<'de, C>>::get(reader.by_ref())?;
+        let ncols = <usize as SchemaRead<'de, C>>::get(reader.by_ref())?;
+        let wire_widths = <Vec<usize> as SchemaRead<'de, C>>::get(reader.by_ref())?;
+        let wire_offsets = <Vec<usize> as SchemaRead<'de, C>>::get(reader.by_ref())?;
+        let base_offset = <NYSCoords2 as SchemaRead<'de, C>>::get(reader.by_ref())?;
+        let wire_values = <Vec<T::Wire> as SchemaRead<'de, C>>::get(reader)?;
+
+        let values_data: Vec<T> = wire_values.into_iter().map(T::from_wire).collect();
+        let values = Array2::from_shape_vec((nrows, ncols), values_data)
+            .map_err(|_| ReadError::InvalidValue("array element count does not match shape"))?;
+        let widths = Array1::from_vec(wire_widths);
+        let offsets = Array1::from_vec(wire_offsets);
+
+        dst.write(StairStepGrid { values, widths, offsets, base_offset });
+        Ok(())
+    }
 }
 
 #[cfg(test)]
