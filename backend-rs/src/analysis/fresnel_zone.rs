@@ -79,11 +79,17 @@ fn translation_matrix(offset: (f64, f64, f64)) -> Matrix4<f64> {
     )
 }
 
+/// 4×4 homogeneous transform: NYS frame → ellipsoid frame (A_ellipsoid_to_nys inverted).
+fn nys_to_ellipsoid_transform(mid: (f64, f64, f64), ctx: &AngleContext) -> Matrix4<f64> {
+    let a_ell_to_nys = translation_matrix(mid) * rotation_ellipsoid_to_nys(ctx);
+    a_ell_to_nys.try_inverse().expect("rotation is always invertible") // TODO: Is this true?
+}
+
 /// Integer grid [ceil(lo), floor(hi)] inclusive.
 fn integer_grid(lo: f64, hi: f64) -> RangeInclusive<i64> {
+    assert!(lo <= hi); // TODO: Validate this before call?
     let start = lo.ceil() as i64;
     let end = hi.floor() as i64;
-    assert!(start <= end); // TODO: Validate this before call?
     start..=end
 }
 
@@ -168,11 +174,7 @@ pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha
         construct_fresnel_quadratic(dist, *point_evaluation_input.frequency_hz(), alpha);
     let major_axis = 2.0 * semi_major;
 
-    // A_nys_to_ellipsoid = inv(T @ R)
-    let a_ell_to_nys = translation_matrix(mid) * rotation_ellipsoid_to_nys(&ctx);
-    let a_nys_to_ell = a_ell_to_nys
-        .try_inverse()
-        .unwrap(); // TODO: Should this be failable instead? Is this case even possible?
+    let a_nys_to_ell = nys_to_ellipsoid_transform(mid, &ctx);
 
     // Q expressed in NYS: Q_nys = A^T Q_ell A
     let q_nys = a_nys_to_ell.transpose() * q_ellipsoid * a_nys_to_ell;
@@ -190,6 +192,7 @@ pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha
     let x_base = (pa.0.min(pb.0) - semi_minor - OFFSET_BUFFER).floor() as i64;
     let y_base = *y_vals.start();
 
+    // TODO: Extra alloc here, could be prevented?
     let mut values = Array2::<FresnelZonePoint>::default((output_height, max_width));
     let mut widths = Array1::<usize>::zeros(output_height);
     let mut offsets = Array1::<usize>::zeros(output_height);
@@ -266,4 +269,246 @@ pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha
     }
 
     FresnelZone::new(values, widths, offsets, NYSCoords2::new(x_base as f64, y_base as f64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_relative_eq;
+    use crate::analysis::point_evaluation::{ObstructionTypes, PointEvaluationInput};
+    use crate::types::coords::{GPSCoords3, NYSCoords3};
+    use crate::util::coord_conversion::CoordinateConverter;
+
+    fn gps_to_nys(lat: f64, lon: f64, alt_m: f64) -> NYSCoords3 {
+        CoordinateConverter::new().to_nys_plane3(&GPSCoords3::new(lat, lon, alt_m))
+    }
+
+    fn make_input(pa: NYSCoords3, pb: NYSCoords3, freq: f64) -> PointEvaluationInput {
+        PointEvaluationInput::new(pa, pb, freq, ObstructionTypes::All)
+    }
+
+    const REL_TOL: f64 = 1e-6;
+
+    #[test]
+    fn test_angle_context() {
+        let delta: (f64, f64, f64) = (-57160.96194245259, 24456.04380098125, 32480.250000000004);
+        let (dx, dy, dz) = delta;
+
+        let tan_theta: f64 = -dy / dx;
+        let tan_phi: f64 = -dz / dx;
+        let theta = tan_theta.atan();
+        let phi = tan_phi.atan();
+        let tan_rho = tan_phi * theta.cos();
+        let rho = tan_rho.atan();
+        let tan_omega = theta.cos() / (theta.sin() * phi.cos());
+        let omega = tan_omega.atan();
+
+        let ctx = AngleContext::from_delta(delta);
+
+        assert_relative_eq!(ctx.sin_theta, theta.sin(), max_relative = REL_TOL);
+        assert_relative_eq!(ctx.cos_theta, theta.cos(), max_relative = REL_TOL);
+        assert_relative_eq!(ctx.sin_phi, phi.sin(), max_relative = REL_TOL);
+        assert_relative_eq!(ctx.cos_phi, phi.cos(), max_relative = REL_TOL);
+        assert_relative_eq!(ctx.sin_rho, rho.sin(), max_relative = REL_TOL);
+        assert_relative_eq!(ctx.cos_rho, rho.cos(), max_relative = REL_TOL);
+        assert_relative_eq!(ctx.sin_omega, omega.sin(), max_relative = REL_TOL);
+        assert_relative_eq!(ctx.cos_omega, omega.cos(), max_relative = REL_TOL);
+    }
+
+    #[test]
+    fn test_rotation_ellipsoid_to_nys() {
+        let pa = (1039747.7086964573, 176152.26368097877, 328.08333333333337);
+        let pb = (982586.7467540047, 200608.30748196002, 32808.333333333336);
+        let delta = (pb.0 - pa.0, pb.1 - pa.1, pb.2 - pa.2);
+
+        let ctx = AngleContext::from_delta(delta);
+        let result = rotation_ellipsoid_to_nys(&ctx);
+
+        let expected = [
+            [ 0.30312669, -0.81488729,  0.49403736, 0.0],
+            [ 0.93725462,  0.34864563,  0.0,        0.0],
+            [-0.17224396,  0.4630388,   0.86944068, 0.0],
+            [ 0.0,         0.0,         0.0,        1.0],
+        ];
+
+        for row in 0..4 {
+            for col in 0..4 {
+                assert_relative_eq!(
+                    result[(row, col)],
+                    expected[row][col],
+                    max_relative = REL_TOL,
+                    epsilon = 1e-6,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_construct_fresnel_quadratic() {
+        let (q, semi_major, semi_minor) =
+            construct_fresnel_quadratic(70145.8501170563, 5_000_000_000.0, 0.8);
+
+        let expected_diag = [4.52942599e-04, 8.12933101e-10, 4.52942599e-04, -1.0];
+        for (i, &exp) in expected_diag.iter().enumerate() {
+            assert_relative_eq!(q[(i, i)], exp, max_relative = REL_TOL);
+        }
+        // Off-diagonal elements must be zero.
+        for row in 0..4 {
+            for col in 0..4 {
+                if row != col {
+                    assert_eq!(q[(row, col)], 0.0);
+                }
+            }
+        }
+
+        assert_relative_eq!(semi_major, 35072.97423698255, max_relative = REL_TOL);
+        assert_relative_eq!(semi_minor, 46.987075610800986, max_relative = REL_TOL);
+    }
+
+    #[test]
+    fn test_integer_grid() {
+        let collect = |lo: f64, hi: f64| -> Vec<i64> { integer_grid(lo, hi).collect() };
+
+        assert_eq!(collect(-3.1, 1.98), vec![-3, -2, -1, 0, 1]);
+        assert_eq!(collect(-3.0, 2.0), vec![-3, -2, -1, 0, 1, 2]);
+        assert_eq!(collect(1.0, 1.98), vec![1]);
+        assert_eq!(collect(1.0, 1.0), vec![1]);
+        assert_eq!(collect(2.0, 7.0), vec![2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_integer_grid_invalid() {
+        let _ = integer_grid(10.0, 0.0).collect::<Vec<_>>();
+    }
+
+    #[test]
+    fn test_normalize_ellipse() {
+        let c = Matrix3::new(
+            0.00015217054611868413, 0.00017090600184125422,  1.5442065871587545,
+            0.00017090600184125422, 0.0003558296484122786,  -0.8774557722289558,
+            1.5442065871587545,    -0.8774557722289558,     57294.55752986111,
+        );
+
+        let (c_norm, u, v) = normalize_ellipse(&c).expect("normalize_ellipse returned None");
+
+        let expected_norm = Matrix3::new(
+            0.00015217054611868413, 0.00017090600184125422, 0.0,
+            0.00017090600184125422, 0.0003558296484122786,  0.0,
+            0.0,                   0.0,                   -0.0369624448723276,
+        );
+
+        for row in 0..3 {
+            for col in 0..3 {
+                assert_relative_eq!(c_norm[(row, col)], expected_norm[(row, col)], epsilon = 1e-9);
+            }
+        }
+
+        assert_relative_eq!(u, -28047.112648969174, max_relative = REL_TOL);
+        assert_relative_eq!(v,  15937.052135928374, max_relative = REL_TOL);
+    }
+
+    #[test]
+    fn test_nys_to_ellipsoid_transform() {
+        let pa = (1039747.7086964573f64, 176152.26368097877, 328.08333333333337);
+        let pb = (982586.7467540047f64,  200608.30748196002, 32808.333333333336);
+        let delta = (pb.0 - pa.0, pb.1 - pa.1, pb.2 - pa.2);
+        let mid = ((pa.0 + pb.0) / 2.0, (pa.1 + pb.1) / 2.0, (pa.2 + pb.2) / 2.0);
+        let dist = (delta.0 * delta.0 + delta.1 * delta.1 + delta.2 * delta.2).sqrt();
+
+        let ctx = AngleContext::from_delta(delta);
+        let a_nys_to_ell = nys_to_ellipsoid_transform(mid, &ctx);
+        let a_ell_to_nys = a_nys_to_ell.try_inverse().unwrap();
+
+        let close = |a: f64, b: f64| assert_relative_eq!(a, b, epsilon = 1e-6);
+
+        // Midpoint maps to the ellipsoid origin.
+        let result = a_nys_to_ell * Vector4::new(mid.0, mid.1, mid.2, 1.0);
+        close(result[0], 0.0);
+        close(result[1], 0.0);
+        close(result[2], 0.0);
+        assert_relative_eq!(result[3], 1.0, epsilon = 1e-9);
+
+        // Ellipsoid origin maps back to the midpoint.
+        let result = a_ell_to_nys * Vector4::new(0.0, 0.0, 0.0, 1.0);
+        close(result[0], mid.0);
+        close(result[1], mid.1);
+        close(result[2], mid.2);
+
+        // Ellipsoid (0, +dist/2, 0) maps back to point_b.
+        let result = a_ell_to_nys * Vector4::new(0.0, dist / 2.0, 0.0, 1.0);
+        close(result[0], pb.0);
+        close(result[1], pb.1);
+        close(result[2], pb.2);
+
+        // Ellipsoid (0, -dist/2, 0) maps back to point_a.
+        let result = a_ell_to_nys * Vector4::new(0.0, -dist / 2.0, 0.0, 1.0);
+        close(result[0], pa.0);
+        close(result[1], pa.1);
+        close(result[2], pa.2);
+    }
+
+    // --- compute_fresnel_zone smoke tests ---
+
+    #[test]
+    fn test_stress_test_fresnel_zone() {
+        let input = make_input(
+            gps_to_nys(40.650, -73.800, 100.0),
+            gps_to_nys(40.7173, -74.0060, 10000.0),
+            5_000_000_000.0,
+        );
+        let _zone = compute_fresnel_zone(&input, 0.8);
+    }
+
+    #[test]
+    fn test_old_stress_test_fresnel_zone() {
+        let input = make_input(
+            gps_to_nys(40.650, -73.979, 100.0),
+            gps_to_nys(40.7173, -74.0060, 100.0),
+            2_400_000_000.0,
+        );
+        let _zone = compute_fresnel_zone(&input, 1.0);
+    }
+
+    #[test]
+    fn test_east_west_long_fresnel_zone() {
+        let input = make_input(
+            gps_to_nys(40.650, -73.800, 100.0),
+            gps_to_nys(40.650, -74.000, 100.0),
+            5_000_000_000.0,
+        );
+        let _zone = compute_fresnel_zone(&input, 1.0);
+    }
+
+    #[test]
+    fn test_north_south_long_fresnel_zone() {
+        let input = make_input(
+            gps_to_nys(40.650, -73.800, 100.0),
+            gps_to_nys(40.8, -73.800, 100.0),
+            5_000_000_000.0,
+        );
+        let _zone = compute_fresnel_zone(&input, 1.0);
+    }
+
+    #[test]
+    fn test_new_fresnel_zone() {
+        let input = make_input(
+            gps_to_nys(40.81399261450678, -73.9576824966002, 100.0),
+            gps_to_nys(40.81669146433694, -73.93829606722406, 100.0),
+            5_000_000_000.0,
+        );
+        let _zone = compute_fresnel_zone(&input, 1.0);
+    }
+
+    #[test]
+    fn test_fresnel_zone_empty_x_grid() {
+        // At 24 GHz the semi-minor axis is tiny (~0.17 usft), so the x bounds can
+        // span < 1 usft — no integer x falls inside and the row must be skipped, not panic.
+        let input = make_input(
+            gps_to_nys(40.861448, -73.907696, 76.0),
+            gps_to_nys(40.830477, -73.941012, 80.0),
+            24_000_000_000.0,
+        );
+        let _zone: FresnelZone = compute_fresnel_zone(&input, 1.0);
+    }
 }
