@@ -1,8 +1,12 @@
+use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::iter::{repeat_n};
 use derive_getters::Getters;
 use geo::{coord, Coord, Rect};
+use rocket::serde::{de, Deserializer, Serializer};
+use rocket::serde::de::{Error, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
+use serde::de::Unexpected;
 use crate::types::coords::{valid_nys_coordinate, NYSCoords2, MAX_NYS_COORD_VALUE};
 use crate::types::errors::TileParseErr;
 use crate::types::errors::TileParseErr::{InvalidLASTileId, InvalidSubgrid};
@@ -20,16 +24,16 @@ const PERMITTED_LAS_ID_COMPONENT_MODULI: &[u8] = &[0, 2, 5, 7];
 
 const LAS_ID_UNIT_MUTIPLIER_TO_COORD: u16 = 1000;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, Hash, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
 // Easting, Northing coordinates (in NYS LI plane) (units of 1000 usft)
 pub struct LASTileId(u16, u16);
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, Hash, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
 // X, Y (Easting, Northing in units of 500 usft) offset from the SW corner of
 // the associated LAS tile
 pub struct SubgridId(u8, u8);
 
-#[derive(Debug, Getters, Clone, Copy, Serialize, Deserialize, Eq, Hash, PartialEq)]
+#[derive(Debug, Getters, Clone, Copy, Eq, Hash, PartialEq)]
 pub struct TileId {
     las_tile_id: LASTileId,
     subgrid_id: SubgridId,
@@ -304,6 +308,38 @@ impl TileId {
 impl Display for TileId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}_{}", self.las_tile_id, self.subgrid_id)
+    }
+}
+
+impl Serialize for TileId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        self.to_string().serialize(serializer)
+    }
+}
+
+
+impl<'de> Deserialize<'de> for TileId {
+    fn deserialize<D: Deserializer<'de>>(des: D) -> Result<Self, D::Error>{
+        pub struct TileIdVisitor;
+        impl<'de> Visitor<'de> for TileIdVisitor {
+            type Value = TileId;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "a tile id in the form <las_tile_id>_<subgrid_id>")
+            }
+            fn visit_str<E>(self, input_str: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                TileId::parse(input_str).map_err(
+                    |_| Error::invalid_type(Unexpected::Str(input_str), &self)
+                )
+            }
+        }
+
+        des.deserialize_str(TileIdVisitor)
     }
 }
 
@@ -789,5 +825,37 @@ mod tests {
         let tile = TileId::parse("982182_23").unwrap();
         let new_tile = TileId::from_adjacent_tile(&tile, (-10, 0));
         assert_eq!(new_tile.to_string(), "977182_23");
+    }
+
+    // --- TileId serde ---
+
+    #[test]
+    fn tile_id_serializes_to_string() {
+        use rocket::serde::json::serde_json;
+        let id = TileId::parse("500300_23").unwrap();
+        assert_eq!(serde_json::to_string(&id).unwrap(), "\"500300_23\"");
+    }
+
+    #[test]
+    fn tile_id_deserializes_from_string() {
+        use rocket::serde::json::serde_json;
+        let id: TileId = serde_json::from_str("\"500300_23\"").unwrap();
+        assert_eq!(id.to_string(), "500300_23");
+    }
+
+    #[test]
+    fn tile_id_serde_roundtrip() {
+        use rocket::serde::json::serde_json;
+        let original = TileId::parse("987177_42").unwrap();
+        let restored: TileId = serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
+        assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn tile_id_deserialize_invalid() {
+        use rocket::serde::json::serde_json;
+        assert!(serde_json::from_str::<TileId>("\"invalid\"").is_err());
+        assert!(serde_json::from_str::<TileId>("\"500300\"").is_err());
+        assert!(serde_json::from_str::<TileId>("\"500301_23\"").is_err());
     }
 }
