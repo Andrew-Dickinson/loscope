@@ -5,6 +5,7 @@ use std::ops::Sub;
 use derive_getters::Getters;
 use derive_new::new;
 use geo::Convert;
+use futures_util::{stream, StreamExt, TryStreamExt};
 use ndarray::{s, Array1, Array2};
 use crate::analysis::fresnel_zone::FresnelZone;
 use crate::providers::elevation_tile_provider::{ElevationTile, ElevationTileProvider};
@@ -13,6 +14,7 @@ use crate::types::errors::AssetErr;
 use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::{TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
 
+const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT: usize = 10;
 
 pub(crate) type TerrainGrid = StairStepGrid<u16>;
 
@@ -98,10 +100,14 @@ impl<'a> TerrainFactory<'a> {
 
         let mut height_values = Array2::<u16>::zeros(zone.values().raw_dim());
 
-        for tile_id in tile_ids {
-            let tile = self.tile_provider.get_elevation_tile(*tile_id).await?;
-            bilt_tile(&tile, &mut height_values, zone);
+        let tiles: Vec<ElevationTile> = stream::iter(tile_ids.iter().copied())
+            .map(|id| self.tile_provider.get_elevation_tile(id))
+            .buffered(PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT)
+            .try_collect()
+            .await?;
 
+        for tile in &tiles {
+            bilt_tile(tile, &mut height_values, zone);
             // TODO: Compute obstructions and apply them also
         }
 
