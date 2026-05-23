@@ -1,6 +1,6 @@
 use derive_new::new;
 use uuid::Uuid;
-use crate::analysis::point_evaluation::PointEvaluationResult;
+use crate::analysis::point_evaluation::PointEvaluationOutcome;
 use crate::providers::backends::value_store::ValueStore;
 use crate::types::errors::AssetErr;
 
@@ -18,7 +18,7 @@ impl PointEvaluationResultProvider {
         format!("{KEY_PREFIX}/{result_id}")
     }
 
-    pub fn put(&self, result: &PointEvaluationResult) -> Result<(), AssetErr> {
+    pub fn put(&self, result: &PointEvaluationOutcome) -> Result<(), AssetErr> {
         self.value_store.put(
             PointEvaluationResultProvider::key(result.output().id()),
             to_vec(result)
@@ -30,7 +30,7 @@ impl PointEvaluationResultProvider {
         )
     }
 
-    pub fn get(&self, result_id: &Uuid) -> Result<PointEvaluationResult, AssetErr> {
+    pub fn get(&self, result_id: &Uuid) -> Result<PointEvaluationOutcome, AssetErr> {
         let resp = self.value_store.get(PointEvaluationResultProvider::key(result_id))?;
         Ok(
             from_slice(resp.as_slice())

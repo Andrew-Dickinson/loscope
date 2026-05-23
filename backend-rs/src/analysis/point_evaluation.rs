@@ -72,7 +72,7 @@ pub struct PointEvaluationOutput {
 }
 
 #[derive(new,Getters,Serialize,Deserialize)]
-pub struct PointEvaluationResult {
+pub struct PointEvaluationOutcome {
     output: PointEvaluationOutput,
 
     result_full: ZoneEvaluation,
@@ -85,7 +85,7 @@ pub fn valid_analysis_frequency(frequency_hz: f64) -> bool {
     frequency_hz >= MIN_ANALYSIS_FREQUENCY && frequency_hz <= MAX_ANALYSIS_FREQUENCY
 }
 
-pub fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(dyn ElevationTileProvider + Send + Sync)) -> PointEvaluationResult {
+pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(dyn ElevationTileProvider + Send + Sync)) -> PointEvaluationOutcome {
     let analysis_id = Uuid::new_v4();
 
     let terrain_factory = TerrainFactory::new(tile_provider);
@@ -128,7 +128,7 @@ pub fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(dyn El
         ResultStatus::Obstructed
     };
 
-    PointEvaluationResult {
+    PointEvaluationOutcome {
         output: PointEvaluationOutput {
             id: analysis_id,
             input: eval_input,
@@ -184,7 +184,7 @@ fn intersect_inner(
     }
 }
 
-impl PointEvaluationResult {
+impl PointEvaluationOutcome {
     pub fn into_output(self) -> PointEvaluationOutput { self.output }
 }
 
