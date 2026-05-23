@@ -51,7 +51,7 @@ impl<T> StairStepGrid<T> {
             assert_eq!(other.offsets()[i], offset_x);
 
             self_row.iter().zip(other_row.iter()).enumerate().for_each(|(j, (self_val, other_val))| {
-                output.values[[i,j]] = merge_fn(self_val, other_val.clone(), (offset_x, offset_y));
+                output.values[[i,j]] = merge_fn(self_val, other_val, (offset_x, offset_y));
             })
         }
 

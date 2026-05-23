@@ -22,7 +22,7 @@ pub async fn point_analysis(
     ).await?;
     
     providers.point_eval_result_provider().put(&result)
-        .or_else(|err| Err(Status::InternalServerError))?;
+        .or_else(|_| Err(Status::InternalServerError))?;
 
     Ok(Json(result.into_output()))
 }

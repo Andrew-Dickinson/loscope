@@ -9,7 +9,7 @@ use crate::providers::backends::fs_cache::{AssetProvider};
 use crate::types::errors::AssetErr;
 use crate::types::tiles::{TileId, LAS_TILE_SIDE_LENGTH_USFT};
 
-const ORTHO_IMAGE_SIZE_PIXELS: u16 = 5000;
+const _ORTHO_IMAGE_SIZE_PIXELS: u16 = 5000;
 const ORTHO_SCALE_PX_PER_USFT: u8 = 2;
 
 #[async_trait]
