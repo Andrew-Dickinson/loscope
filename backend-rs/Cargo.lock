@@ -1688,6 +1688,7 @@ dependencies = [
  "ndarray",
  "openjpeg-sys",
  "pretty_assertions",
+ "rand 0.8.6",
  "rocket",
  "scopeguard",
  "serde",
