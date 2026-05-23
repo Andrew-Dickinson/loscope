@@ -16,7 +16,7 @@ thread_local! {
 }
 
 pub fn init_coord_converter_factory(f: impl Fn() -> CoordinateConverter + Send + Sync + 'static) {
-    WRAPPER_INIT.set(Box::new(f)).ok().expect("factory already set");
+    WRAPPER_INIT.get_or_init(|| Box::new(f));
 }
 
 pub fn with_coord_converter<F, R>(f: F) -> R

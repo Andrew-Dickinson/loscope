@@ -89,10 +89,7 @@ mod tests {
 
     fn setup() {
         SETUP.get_or_init(|| {
-            // Guard against the factory already having been set by another test module.
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                init_coord_converter_factory(|| CoordinateConverter::new());
-            }));
+            init_coord_converter_factory(|| CoordinateConverter::new());
         });
     }
 
