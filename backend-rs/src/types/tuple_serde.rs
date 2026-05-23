@@ -36,7 +36,7 @@ impl<'de> Visitor<'de> for CoordsVisitor2 {
 
 
 pub fn serialize_tuple2<S: Serializer>(tuple: (f64, f64), serializer: S) -> Result<S::Ok, S::Error> {
-    let mut seq = serializer.serialize_tuple(3)?;
+    let mut seq = serializer.serialize_tuple(2)?;
     seq.serialize_element(&tuple.0)?;
     seq.serialize_element(&tuple.1)?;
     seq.end()
