@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use derive_new::new;
-use rand::Rng;
 use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
 use crate::types::errors::AssetErr;
 use strum_macros::{AsRefStr, Display};
@@ -48,23 +47,8 @@ impl AssetFetcher for S3AssetFetcher {
         let prefix = self.asset_type_prefixes.get(&asset_type)
             .ok_or(AssetErr::UnsupportedAssetType(format!("Unable to find {asset_type:?} prefix")))?;
 
-        let local_path_temp_owned = {
-            let mut local_path_temp_mut = local_path.to_path_buf().into_os_string();
-            // Use a temp file with a random name to reduce the chance of a collision with another
-            // thread that's downloading the same asset. 100k is relatively low, but the only
-            // consequence of a collision is that an AssetErr will be thrown below when the
-            // second thread tries to write it at the same time
-            // TODO: A proper mutex accounting system keyed by local_path could probably resolve
-            //  this for real
-            local_path_temp_mut.push(
-                format!("-{:05}.tmp", rand::thread_rng().gen_range(1..100_000))
-            );
-            PathBuf::from(local_path_temp_mut)
-        };
-        let local_path_temp = local_path_temp_owned.as_path();
-
-        let mut temp_file = File::create(local_path_temp)
-            .map_err(|err| AssetErr::LocalFileSystemError(format!("Error opening temp file {local_path_temp:?}: {err:?}")))?;
+        let mut temp_file = File::create(local_path)
+            .map_err(|err| AssetErr::LocalFileSystemError(format!("Error creating file {local_path:?}: {err:?}")))?;
 
         let bucket = self.bucket_name.as_str();
         let key = prefix.clone().join(remote_path);
@@ -95,15 +79,6 @@ impl AssetFetcher for S3AssetFetcher {
                 ))
             })?;
         }
-
-        std::fs::rename(local_path_temp, local_path).or_else(|err| {
-            Err(AssetErr::LocalFileSystemError(
-                format!(
-                    "Failed to move temp file {local_path_temp:?} \
-                    to output destination {local_path:?}: {err}"
-                )
-            ))
-        })?;
 
         Ok(())
     }
