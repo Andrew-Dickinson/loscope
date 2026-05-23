@@ -19,14 +19,14 @@ enum CoordError {
     ExceedsBound
 }
 
-#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize)]
+#[derive(Debug, Getters, new, PartialEq, AbsDiffEq)]
 pub struct GPSCoords3 {
    lat: f64,
    lon: f64,
    alt_m: f64
 }
 
-#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize)]
+#[derive(Debug, Getters, new, PartialEq, AbsDiffEq)]
 pub struct GPSCoords2 {
    lat: f64,
    lon: f64
@@ -65,6 +65,31 @@ impl<'de> Deserialize<'de> for NYSCoords3 {
 }
 
 impl<'de> Deserialize<'de> for NYSCoords2 {
+    fn deserialize<D: Deserializer<'de>>(des: D) -> Result<Self, D::Error>{
+        Ok(des.deserialize_tuple(3, CoordsVisitor2)?.into())
+    }
+}
+
+impl Serialize for GPSCoords3 {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_tuple3(self.into(), serializer)
+    }
+}
+
+impl Serialize for GPSCoords2 {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_tuple2(self.into(), serializer)
+    }
+}
+
+
+impl<'de> Deserialize<'de> for GPSCoords3 {
+    fn deserialize<D: Deserializer<'de>>(des: D) -> Result<Self, D::Error> {
+        Ok(des.deserialize_tuple(3, CoordsVisitor3)?.into())
+    }
+}
+
+impl<'de> Deserialize<'de> for GPSCoords2 {
     fn deserialize<D: Deserializer<'de>>(des: D) -> Result<Self, D::Error>{
         Ok(des.deserialize_tuple(3, CoordsVisitor2)?.into())
     }
@@ -193,6 +218,30 @@ impl From<(f64, f64, f64)> for NYSCoords3 {
 impl From<(f64, f64)> for NYSCoords2 {
     fn from(item: (f64, f64)) -> Self {
         NYSCoords2::new(item.0, item.1)
+    }
+}
+
+impl From<&GPSCoords3> for (f64, f64, f64) {
+    fn from(item: &GPSCoords3) -> Self {
+        (item.lat, item.lon, item.alt_m)
+    }
+}
+
+impl From<&GPSCoords2> for (f64, f64) {
+    fn from(item: &GPSCoords2) -> Self {
+        (item.lat, item.lon)
+    }
+}
+
+impl From<(f64, f64, f64)> for GPSCoords3 {
+    fn from(item: (f64, f64, f64)) -> Self {
+        GPSCoords3::new(item.0, item.1, item.2)
+    }
+}
+
+impl From<(f64, f64)> for GPSCoords2 {
+    fn from(item: (f64, f64)) -> Self {
+        GPSCoords2::new(item.0, item.1)
     }
 }
 
