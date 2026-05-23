@@ -102,8 +102,8 @@ pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(
 
     let tile_ids = get_intersecting_tiles(&zone_full);
 
-    let terrain_full = terrain_factory.load_terrain_grid(&tile_ids, &zone_full);
-    let terrain_inner = terrain_factory.load_terrain_grid(&tile_ids, &zone_inner);
+    let terrain_full = terrain_factory.load_terrain_grid(&tile_ids, &zone_full).await?;
+    let terrain_inner = terrain_factory.load_terrain_grid(&tile_ids, &zone_inner).await?;
 
     let intersect_fn = |base_offset: &NYSCoords2| {
         let base_offset = base_offset.clone();
