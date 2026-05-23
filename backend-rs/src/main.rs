@@ -1,4 +1,4 @@
-use fresnel_2::endpoints::analysis::{intersection_visualization, map_overview, point_analysis};
+use fresnel_2::endpoints::analysis::{fresnel_kml, intersection_visualization, map_overview, point_analysis};
 use fresnel_2::endpoints::coords::gps_to_nys;
 use fresnel_2::endpoints::rooftop::{render_rooftop, sample_points as sample_points_endpoint};
 use fresnel_2::endpoints::tileview::get_terrain_ortho;
@@ -19,5 +19,5 @@ async fn rocket() -> _ {
         .mount("/api/rooftop", rocket::routes![render_rooftop, sample_points_endpoint])
         .mount("/api/tileview", rocket::routes![get_terrain_ortho])
         .mount("/api/coords", rocket::routes![gps_to_nys])
-        .mount("/api/analysis", rocket::routes![point_analysis,map_overview,intersection_visualization])
+        .mount("/api/analysis", rocket::routes![point_analysis,map_overview,intersection_visualization,fresnel_kml])
 }

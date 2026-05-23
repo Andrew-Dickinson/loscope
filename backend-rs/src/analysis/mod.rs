@@ -4,3 +4,4 @@ pub mod tiles;
 pub mod angle_context;
 pub mod map_overview;
 pub mod intersection_vis;
+pub mod fresnel_kml;
