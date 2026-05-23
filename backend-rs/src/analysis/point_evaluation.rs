@@ -4,7 +4,6 @@ use derive_new::new;
 use futures_util::StreamExt;
 use geo::algorithm::line_measures::Distance;
 use geo::{point, Euclidean, Point};
-use rocket::http::Status;
 use rocket::serde::{Deserialize, Serializer};
 use serde::Serialize;
 use typed_floats::tf64::PositiveFinite;
@@ -35,7 +34,7 @@ pub enum ResultStatus {
 #[derive(Serialize,Deserialize)]
 pub enum ObstructionTypes {
     All,
-    Specific(Vec<Status>)
+    Specific(Vec<String>),
 }
 
 impl Default for ObstructionTypes {
