@@ -55,8 +55,8 @@ fn bilt_tile(tile: &ElevationTile, height_values: &mut Array2<u16>, zone: &Fresn
     let tile_base_offset = (tile_base_offset.easting().floor() as usize, tile_base_offset.northing().floor() as usize);
 
     let i_start = (tile_base_offset.1 as isize - zone_base_offset.1 as isize).max(0) as usize;
-    let i_end: usize = ((tile_base_offset.1 as isize - zone_base_offset.1 as isize).min(zone.widths().len() as isize)
-        + SUBGRID_TILE_SIDE_LENGTH_USFT as isize)
+    let i_end: usize = ((tile_base_offset.1 as isize - zone_base_offset.1 as isize) + SUBGRID_TILE_SIDE_LENGTH_USFT as isize)
+        .min(zone.widths().len() as isize)
         .try_into()
         .expect("Tile selection logic issue, tile must have at least one pixel NE of the zone's SW corner");
 
@@ -507,6 +507,23 @@ mod test {
             let row = result.values().row(i);
             assert!(row.iter().take(500).all(|&v| v == 11), "row {i}: west region should be 11");
             assert!(row.iter().skip(500).all(|&v| v == 22), "row {i}: east region should be 22");
+        }
+    }
+
+    #[test]
+    fn bilt_tile_tile_extends_north_beyond_zone_does_not_panic() {
+        let id = TileId::parse("2235_01").unwrap(); // SW at (1_002_500, 235_500)
+        let tile = flat_tile(id, 9);
+        let zone = flat_zone(NYSCoords2::new(1_002_500.0, 235_000.0), 600, 500, 500, 0);
+        let mut hv = Array2::<u16>::zeros(zone.values().raw_dim());
+
+        bilt_tile(&tile, &mut hv, &zone); // would panic with the old i_end formula
+
+        for i in 0..500usize {
+            assert!(hv.row(i).iter().all(|&v| v == 0), "row {i}: outside tile, should be zero");
+        }
+        for i in 500..600usize {
+            assert!(hv.row(i).iter().all(|&v| v == 9), "row {i}: within overlap, should be filled");
         }
     }
 }
