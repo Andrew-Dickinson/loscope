@@ -4,10 +4,7 @@ use crate::types::coords::{NYSCoords2, NYSCoords3, RelativeCoords3};
 
 #[derive(Serialize, new)]
 pub struct EncodedPoint {
-    #[serde(flatten)]
     relative: RelativeCoords3,
-
-    #[serde(flatten)]
     nys: NYSCoords3,
 }
 

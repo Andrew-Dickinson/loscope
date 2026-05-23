@@ -2,8 +2,12 @@ use derive_getters::Getters;
 use derive_new::new;
 use approx_derive::AbsDiffEq;
 use geo::Point;
-use serde::{Serialize, Deserialize};
+use rocket::serde::{Deserializer, Serializer};
+use serde::{Serialize, Deserialize, de};
+use serde::de::{SeqAccess, Visitor};
+use serde::ser::SerializeTuple;
 use crate::sample_points::point::EncodedPoint;
+use crate::types::tuple_serde::{serialize_tuple2, serialize_tuple3, CoordsVisitor2, CoordsVisitor3};
 
 pub const MIN_NYS_COORD_VALUE: f64 = 0.0;
 pub const MAX_NYS_COORD_VALUE: f64 = 2_000_000.0;
@@ -28,33 +32,63 @@ pub struct GPSCoords2 {
    lon: f64
 }
 
-#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize, Clone)]
+#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Clone)]
 pub struct NYSCoords3 {
-    #[serde(rename = "nys_x")]
     easting: f64,
-
-    #[serde(rename = "nys_y")]
     northing: f64,
-
-    #[serde(rename = "nys_z")]
     alt_usft: f64
 }
 
-#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize, Clone)]
+#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Clone)]
 pub struct NYSCoords2 {
-    #[serde(rename = "nys_x")]
     easting: f64,
-
-    #[serde(rename = "nys_y")]
     northing: f64
 }
 
+impl Serialize for NYSCoords3 {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_tuple3(self.into(), serializer)
+    }
+}
 
-#[derive(Debug, Getters, new, PartialEq, AbsDiffEq, Serialize, Deserialize)]
+impl Serialize for NYSCoords2 {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_tuple2(self.into(), serializer)
+    }
+}
+
+
+impl<'de> Deserialize<'de> for NYSCoords3 {
+    fn deserialize<D: Deserializer<'de>>(des: D) -> Result<Self, D::Error> {
+        Ok(des.deserialize_tuple(3, CoordsVisitor3)?.into())
+    }
+}
+
+impl<'de> Deserialize<'de> for NYSCoords2 {
+    fn deserialize<D: Deserializer<'de>>(des: D) -> Result<Self, D::Error>{
+        Ok(des.deserialize_tuple(3, CoordsVisitor2)?.into())
+    }
+}
+
+
+#[derive(Debug, Getters, new, PartialEq, AbsDiffEq)]
 pub struct RelativeCoords3 {
     x: f64,
     y: f64,
     alt_usft: f64
+}
+
+
+impl<'de> Deserialize<'de> for RelativeCoords3 {
+    fn deserialize<D: Deserializer<'de>>(des: D) -> Result<Self, D::Error> {
+        Ok(des.deserialize_tuple(3, CoordsVisitor3)?.into())
+    }
+}
+
+impl Serialize for RelativeCoords3 {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_tuple3(self.into(), serializer)
+    }
 }
 
 impl NYSCoords2 {
@@ -141,6 +175,37 @@ impl From<&NYSCoords3> for Point {
 impl From<&NYSCoords3> for (f64, f64, f64) {
     fn from(item: &NYSCoords3) -> Self {
         (item.easting, item.northing, item.alt_usft)
+    }
+}
+
+impl From<&NYSCoords2> for (f64, f64) {
+    fn from(item: &NYSCoords2) -> Self {
+        (item.easting, item.northing)
+    }
+}
+
+impl From<(f64, f64, f64)> for NYSCoords3 {
+    fn from(item: (f64, f64, f64)) -> Self {
+        NYSCoords3::new(item.0, item.1, item.2)
+    }
+}
+
+impl From<(f64, f64)> for NYSCoords2 {
+    fn from(item: (f64, f64)) -> Self {
+        NYSCoords2::new(item.0, item.1)
+    }
+}
+
+impl From<(f64, f64, f64)> for RelativeCoords3 {
+    fn from(item: (f64, f64, f64)) -> Self {
+        RelativeCoords3::new(item.0, item.1, item.2)
+    }
+}
+
+
+impl From<&RelativeCoords3> for (f64, f64, f64) {
+    fn from(item: &RelativeCoords3) -> Self {
+        (item.x, item.y, item.alt_usft)
     }
 }
 
