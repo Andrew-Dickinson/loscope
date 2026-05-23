@@ -19,7 +19,7 @@ pub async fn point_analysis(
     let result = evaluate_points(
         point_pair.into_inner(),
         providers.elevation_tile_provider().as_ref()
-    );
+    ).await?;
     
     providers.point_eval_result_provider().put(&result)
         .or_else(|err| Err(Status::InternalServerError))?;

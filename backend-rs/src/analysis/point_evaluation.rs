@@ -13,6 +13,7 @@ use crate::analysis::fresnel_zone::{compute_fresnel_zone, FresnelZone, FresnelZo
 use crate::analysis::tiles::{get_intersecting_tiles, TerrainFactory, TerrainGrid};
 use crate::providers::elevation_tile_provider::{CachingElevationTileProvider, ElevationTileProvider};
 use crate::types::coords::{NYSCoords2, NYSCoords3};
+use crate::types::errors::AssetErr;
 use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::TileId;
 
@@ -85,7 +86,7 @@ pub fn valid_analysis_frequency(frequency_hz: f64) -> bool {
     frequency_hz >= MIN_ANALYSIS_FREQUENCY && frequency_hz <= MAX_ANALYSIS_FREQUENCY
 }
 
-pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(dyn ElevationTileProvider + Send + Sync)) -> PointEvaluationOutcome {
+pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(dyn ElevationTileProvider + Send + Sync)) -> Result<PointEvaluationOutcome, AssetErr> {
     let analysis_id = Uuid::new_v4();
 
     let terrain_factory = TerrainFactory::new(tile_provider);
@@ -128,7 +129,7 @@ pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(
         ResultStatus::Obstructed
     };
 
-    PointEvaluationOutcome {
+    Ok(PointEvaluationOutcome {
         output: PointEvaluationOutput {
             id: analysis_id,
             input: eval_input,
@@ -143,7 +144,7 @@ pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(
             intersection: intersection_inner,
         },
         tiles: tile_ids,
-    }
+    })
 }
 fn intersect_inner(
     endpoints: &(Point, Point),
