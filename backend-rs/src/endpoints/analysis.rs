@@ -12,7 +12,7 @@ pub async fn point_analysis(
     if !point_pair.point_a().valid() || !point_pair.point_b().valid() {
         return Err(Status::BadRequest);
     }
-    if valid_analysis_frequency(*point_pair.frequency_hz()) {
+    if !valid_analysis_frequency(*point_pair.frequency_hz()) {
         return Err(Status::BadRequest);
     }
 
