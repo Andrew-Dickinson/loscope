@@ -46,7 +46,7 @@ impl Default for ObstructionTypes {
 
 pub type IntersectionResult = StairStepGrid<PositiveFinite>;
 
-#[derive(new,Serialize,Deserialize)]
+#[derive(new,Serialize,Deserialize,Getters)]
 pub struct ZoneEvaluation {
     zone: FresnelZone,
     intersection: IntersectionResult,
