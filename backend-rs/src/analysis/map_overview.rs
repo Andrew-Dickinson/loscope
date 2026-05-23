@@ -1,7 +1,8 @@
+use std::cmp::PartialEq;
 use derive_getters::Getters;
 use derive_new::new;
 use rocket::serde::{Deserialize, Serialize};
-use crate::analysis::point_evaluation::PointEvaluationOutcome;
+use crate::analysis::point_evaluation::{PointEvaluationOutcome, ResultStatus};
 use crate::types::coords::{GPSCoords2, GPSCoords3, NYSCoords2, NYSCoords3};
 use crate::types::tiles::TileId;
 use crate::util::coord_conversion::with_coord_converter;
@@ -44,12 +45,11 @@ impl From<&PointEvaluationOutcome> for PointEvaluationOverview {
                                     converter.to_gps2(&NYSCoords2::new(tile_e.into(), tile_n.into()))
                                 )
                             },
-                            intersection_detected: value.result_full()
+                            intersection_detected: *value.output().result() != ResultStatus::Unobstructed &&
+                                value.result_full()
                                 .intersection()
-                                .rasterize_in_tile(tile_id)
-                                .into_iter() // rows
-                                .into_iter() // cols
-                                .max()
+                                .max_in_tile(tile_id)
+                                .cloned()
                                 .map(f64::from)
                                 .unwrap_or(0.0)
                                  > 0.0

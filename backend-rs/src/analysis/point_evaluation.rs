@@ -25,7 +25,7 @@ const ALPHA_ZONE_INNER: f64 = 0.6;
 
 const OCCLUSION_DISTANCE_USFT: f64 = 4.0;
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize,Deserialize,PartialEq)]
 pub enum ResultStatus {
     Unobstructed,
     PartiallyObstructed, // alpha=1.0 blocked, alpha=0.6 clear

@@ -1,5 +1,7 @@
+use std::iter::repeat_n;
 use derive_getters::Getters;
 use derive_new::new;
+use futures_util::StreamExt;
 use ndarray::{s, Array1, Array2};
 use rocket::serde::{Deserialize, Serialize};
 use crate::types::coords::NYSCoords2;
@@ -22,6 +24,10 @@ impl<T> StairStepGrid<T> where T: Ord{
             .zip(self.widths.iter())
             .flat_map(|(row, &width)| row.into_iter().take(width))
             .max()
+    }
+
+    pub fn max_in_tile(&self, tile_id: TileId) -> Option<&T> {
+        self.rasterize_in_tile_iter(tile_id).flatten().max()
     }
 }
 
@@ -58,61 +64,65 @@ impl<T> StairStepGrid<T> {
     }
 }
 
-impl<T> StairStepGrid<T> where T: Default + Clone {
-    pub fn rasterize_in_tile(&self, tile_id: TileId) -> Array2<T> {
-        let mut output = Array2::default((
-                SUBGRID_TILE_SIDE_LENGTH_USFT.into(),
-                SUBGRID_TILE_SIDE_LENGTH_USFT.into()
-            )
-        );
+impl<T> StairStepGrid<T> {
+    pub fn rasterize_in_tile(&self, tile_id: TileId) -> Array2<Option<&T>> {
+        // Safety: rasterize_in_tile_iter is guaranteed to return a vec of the right size, so
+        // this unwrap should never panic
+        Array2::<Option<&T>>::from_shape_vec(
+            (SUBGRID_TILE_SIDE_LENGTH_USFT.into(), SUBGRID_TILE_SIDE_LENGTH_USFT.into()),
+            self.rasterize_in_tile_iter(tile_id).collect()
+        ).unwrap().reversed_axes() // TODO: Is this reversed call right? Should we have a different loop convention?
+    }
 
-        let zone_base_offset = &self.base_offset;
+    fn rasterize_in_tile_iter(&self, tile_id: TileId) -> Box<dyn Iterator<Item = Option<&T>> + '_> {
+        let step_base_offset = &self.base_offset;
         let tile_base_offset  = tile_id.get_sw_corner();
 
-        let zone_base_offset = (zone_base_offset.easting().floor() as usize, zone_base_offset.northing().floor() as usize);
+        let step_base_offset = (step_base_offset.easting().floor() as usize, step_base_offset.northing().floor() as usize);
         let tile_base_offset = (tile_base_offset.easting().floor() as usize, tile_base_offset.northing().floor() as usize);
 
-        let i_start = (tile_base_offset.1 as isize - zone_base_offset.1 as isize).max(0) as usize;
-        let i_end: Result<usize, _> = ((tile_base_offset.1 as isize - zone_base_offset.1 as isize) + SUBGRID_TILE_SIDE_LENGTH_USFT as isize)
-            .min(self.widths.len() as isize)
-            .try_into();
+        let iter = (0..(SUBGRID_TILE_SIDE_LENGTH_USFT as usize)).flat_map(
+            move |tile_i| -> Box<dyn Iterator<Item = Option<&T>> + '_> {
+                let step_i = ((tile_i + tile_base_offset.1) as isize) - (step_base_offset.1 as isize);
 
-        let Ok(i_end) = i_end else {
-            // If zone_base_offset.1 > (tile_base_offset.1 + SUBGRID_TILE_SIDE_LENGTH_USFT), the
-            // tile doesn't overlap at all with the stairstep and i_end < 0 <= i_start, so we return
-            // default values for the entire output raster
-            return output;
-        };
+                let Some(step_i) = usize::try_from(step_i)
+                    .ok().filter(|step_i| *step_i < self.widths.len()) else {
+                    // This row of the stairstep falls above/below the tile, so we just emit
+                    // a full row of None objects
+                    return Box::new(repeat_n(None, SUBGRID_TILE_SIDE_LENGTH_USFT as usize));
+                };
 
-        for i in i_start..i_end {
-            let width = self.widths[i];
-            if width == 0 { continue; }
+                let width = self.widths[step_i];
+                let global_step_row_start = step_base_offset.0 + self.offsets[step_i];
+                let global_step_row_end = global_step_row_start + width;
 
-            // Safety: strict_sub() won't panic here because as constructed above,
-            // min(i) = tile_base_offset.1 - zone_base_offset.1
-            let tile_y = (zone_base_offset.1 + i).strict_sub(tile_base_offset.1);
+                let global_overlap_start = global_step_row_start.max(tile_base_offset.0);
+                let global_overlap_end = global_step_row_end.min(tile_base_offset.0 + usize::from(SUBGRID_TILE_SIDE_LENGTH_USFT));
+                if global_overlap_start >= global_overlap_end {
+                    // This row of the stairstep falls entirely to the left/right of the tile, so
+                    // we just emit a full row of None objects
+                    return Box::new(repeat_n(None, SUBGRID_TILE_SIDE_LENGTH_USFT as usize))
+                }
 
-            let row_start = zone_base_offset.0 + self.offsets[i];
-            let row_end = row_start + width;
+                // Safety: strict_sub() won't panic here because as constructed above,
+                // global_overlap_end > global_overlap_start >= global_step_row_start &&
+                // global_overlap_end > global_overlap_start >= tile_base_offset.0
+                let step_j_start = global_overlap_start.strict_sub(global_step_row_start);
+                let step_j_end = global_overlap_end.strict_sub(global_step_row_start);
+                let tile_j_start = global_overlap_start.strict_sub(tile_base_offset.0);
+                let tile_j_end = global_overlap_end.strict_sub(tile_base_offset.0);
 
-            let overlap_start = row_start.max(tile_base_offset.0);
-            let overlap_end = row_end.min(tile_base_offset.0 + usize::from(SUBGRID_TILE_SIDE_LENGTH_USFT));
-            if overlap_start >= overlap_end { continue; }
+                let tile_columns_after_overlap = (SUBGRID_TILE_SIDE_LENGTH_USFT as usize).strict_sub(tile_j_end);
 
-            // Safety: strict_sub() won't panic here because as constructed above,
-            // overlap_end > overlap_start >= row_start &&
-            // overlap_end > overlap_start >= tile_base_offset.0
-            let j_start = overlap_start.strict_sub(row_start);
-            let j_end = overlap_end.strict_sub(row_start);
-            let tile_x_start = overlap_start.strict_sub(tile_base_offset.0);
-            let tile_x_end = overlap_end.strict_sub(tile_base_offset.0);
+                Box::new(repeat_n(None, tile_j_start)
+                    .chain(self.values.slice(s![step_i, step_j_start..step_j_end]).into_iter().map(Some))
+                    .chain(repeat_n(None, tile_columns_after_overlap)))
+            }
+        );
 
-            output.slice_mut(s![tile_x_start..tile_x_end, tile_y])
-                .assign(&*self.values().slice(s![i, j_start..j_end]));
-        }
-
-        output
+        Box::new(iter)
     }
+
 }
 
 #[cfg(test)]
@@ -151,10 +161,10 @@ mod tests {
         let values = Array2::from_shape_vec((1, 3), vec![7u8, 8, 9]).unwrap();
         let grid = make_grid_at(values, array![3], array![0], (e, n));
         let out = grid.rasterize_in_tile(tile());
-        assert_eq!(out[[0, 0]], 7);
-        assert_eq!(out[[1, 0]], 8);
-        assert_eq!(out[[2, 0]], 9);
-        assert_eq!(out[[3, 0]], 0); // beyond width → untouched
+        assert_eq!(*out[[0, 0]].unwrap(), 7);
+        assert_eq!(*out[[1, 0]].unwrap(), 8);
+        assert_eq!(*out[[2, 0]].unwrap(), 9);
+        assert_eq!(out[[3, 0]], None); // beyond width → untouched
     }
 
     #[test]
@@ -163,8 +173,8 @@ mod tests {
         let values = Array2::from_shape_vec((2, 2), vec![10u8, 11, 20, 21]).unwrap();
         let grid = make_grid_at(values, array![2, 2], array![0, 0], (e, n));
         let out = grid.rasterize_in_tile(tile());
-        assert_eq!((out[[0, 0]], out[[1, 0]]), (10, 11)); // row 0 → tile_y=0
-        assert_eq!((out[[0, 1]], out[[1, 1]]), (20, 21)); // row 1 → tile_y=1
+        assert_eq!((*out[[0, 0]].unwrap(), *out[[1, 0]].unwrap()), (10, 11)); // row 0 → tile_y=0
+        assert_eq!((*out[[0, 1]].unwrap(), *out[[1, 1]].unwrap()), (20, 21)); // row 1 → tile_y=1
     }
 
     #[test]
@@ -174,9 +184,9 @@ mod tests {
         let values = Array2::from_shape_vec((1, 1), vec![42u8]).unwrap();
         let grid = make_grid_at(values, array![1], array![5], (e, n));
         let out = grid.rasterize_in_tile(tile());
-        assert_eq!(out[[5, 0]], 42);
-        assert_eq!(out[[4, 0]], 0);
-        assert_eq!(out[[6, 0]], 0);
+        assert_eq!(*out[[5, 0]].unwrap(), 42);
+        assert_eq!(out[[4, 0]], None);
+        assert_eq!(out[[6, 0]], None);
     }
 
     #[test]
@@ -186,36 +196,36 @@ mod tests {
         // Only middle row has non-zero width
         let grid = make_grid_at(values, array![0, 2, 0], array![0, 0, 0], (e, n));
         let out = grid.rasterize_in_tile(tile());
-        assert_eq!(out[[0, 0]], 0); // row 0 skipped
-        assert_eq!(out[[0, 1]], 9); // row 1 written
-        assert_eq!(out[[0, 2]], 0); // row 2 skipped
+        assert_eq!(out[[0, 0]], None); // row 0 skipped
+        assert_eq!(*out[[0, 1]].unwrap(), 9); // row 1 written
+        assert_eq!(out[[0, 2]], None); // row 2 skipped
     }
 
     #[test]
-    fn rasterize_zone_south_of_tile_returns_zeros() {
+    fn rasterize_zone_south_of_tile_returns_none() {
         // Zone base is far south — i_start will exceed i_end, loop never executes
         let values = Array2::from_shape_vec((1, 3), vec![99u8, 99, 99]).unwrap();
         let grid = make_grid_at(values, array![3], array![0], (500_000.0, 200_000.0));
         let out = grid.rasterize_in_tile(tile());
-        assert!(out.iter().all(|&v| v == 0));
+        assert!(out.iter().all(|&v| v == None));
     }
 
     #[test]
-    fn rasterize_zone_north_of_tile_returns_zeros() {
+    fn rasterize_zone_north_of_tile_returns_none() {
         // Zone base is north of the tile — i_end will be negative, early return
         let values = Array2::from_shape_vec((1, 3), vec![99u8, 99, 99]).unwrap();
         let grid = make_grid_at(values, array![3], array![0], (500_000.0, 301_000.0));
         let out = grid.rasterize_in_tile(tile());
-        assert!(out.iter().all(|&v| v == 0));
+        assert!(out.iter().all(|&v| v == None));
     }
 
     #[test]
-    fn rasterize_zone_east_of_tile_returns_zeros() {
+    fn rasterize_zone_east_of_tile_returns_none() {
         // Zone data is entirely east of the tile's NE easting (500500)
         let values = Array2::from_shape_vec((1, 1), vec![99u8]).unwrap();
         let grid = make_grid_at(values, array![1], array![0], (501_000.0, 300_000.0));
         let out = grid.rasterize_in_tile(tile());
-        assert!(out.iter().all(|&v| v == 0));
+        assert!(out.iter().all(|&v| v == None));
     }
 
     #[test]
@@ -227,9 +237,9 @@ mod tests {
         let grid = make_grid_at(values, array![200], array![0], (499_900.0, n));
         let out = grid.rasterize_in_tile(tile());
         // j_start = 500000-499900 = 100, so out[0..100, 0] = values[100..200]
-        assert_eq!(out[[0, 0]], 100);
-        assert_eq!(out[[99, 0]], 199);
-        assert_eq!(out[[100, 0]], 0); // beyond the 200-wide zone data
+        assert_eq!(*out[[0, 0]].unwrap(), 100);
+        assert_eq!(*out[[99, 0]].unwrap(), 199);
+        assert_eq!(out[[100, 0]], None); // beyond the 200-wide zone data
     }
 
     #[test]
@@ -277,6 +287,87 @@ mod tests {
         // Row 0 valid up to width 2 (values 1,2), row 1 valid up to width 3 (values 4,5,6)
         let grid = make_grid(values, array![2, 3], array![0, 0]);
         assert_eq!(grid.max(), Some(&6));
+    }
+
+    // --- max_in_tile ---
+
+    #[test]
+    fn max_in_tile_single_overlapping_row() {
+        let (e, n) = tile_sw();
+        let values = Array2::from_shape_vec((1, 3), vec![5i32, 10, 3]).unwrap();
+        let grid = make_grid_at(values, array![3], array![0], (e, n));
+        assert_eq!(*grid.max_in_tile(tile()).unwrap(), 10);
+    }
+
+    #[test]
+    fn max_in_tile_multiple_rows_returns_overall_max() {
+        let (e, n) = tile_sw();
+        let values = Array2::from_shape_vec((3, 3), vec![1i32, 2, 3, 7, 9, 4, 5, 6, 8]).unwrap();
+        let grid = make_grid_at(values, array![3, 3, 3], array![0, 0, 0], (e, n));
+        assert_eq!(*grid.max_in_tile(tile()).unwrap(), 9);
+    }
+
+    #[test]
+    fn max_in_tile_zero_width_rows_skipped() {
+        let (e, n) = tile_sw();
+        // Rows 0 and 2 have width 0; only row 1 (value 7) is valid
+        let values = Array2::from_shape_vec((3, 1), vec![99i32, 7, 99]).unwrap();
+        let grid = make_grid_at(values, array![0, 1, 0], array![0, 0, 0], (e, n));
+        assert_eq!(*grid.max_in_tile(tile()).unwrap(), 7);
+    }
+
+    #[test]
+    fn max_in_tile_all_zero_widths_returns_none() {
+        let (e, n) = tile_sw();
+        let values = Array2::from_shape_vec((2, 2), vec![9i32; 4]).unwrap();
+        let grid = make_grid_at(values, array![0, 0], array![0, 0], (e, n));
+        assert_eq!(grid.max_in_tile(tile()), None);
+    }
+
+    #[test]
+    fn max_in_tile_zone_south_of_tile_returns_none() {
+        // Zone base northing 200_000, tile starts at 300_000 → i_start exceeds rows
+        let values = Array2::from_shape_vec((1, 3), vec![9i32; 3]).unwrap();
+        let grid = make_grid_at(values, array![3], array![0], (500_000.0, 200_000.0));
+        assert_eq!(grid.max_in_tile(tile()), None);
+    }
+
+    #[test]
+    fn max_in_tile_zone_north_of_tile_returns_none() {
+        // Zone base northing 301_000 is above tile top (300_500) → i_end negative
+        let values = Array2::from_shape_vec((1, 3), vec![9i32; 3]).unwrap();
+        let grid = make_grid_at(values, array![3], array![0], (500_000.0, 301_000.0));
+        assert_eq!(grid.max_in_tile(tile()), None);
+    }
+
+    #[test]
+    fn max_in_tile_data_entirely_west_of_tile_returns_none() {
+        // Zone base easting 499_000, 3-wide row → data spans [499_000, 499_003), tile starts 500_000
+        let (_, n) = tile_sw();
+        let values = Array2::from_shape_vec((1, 3), vec![9i32; 3]).unwrap();
+        let grid = make_grid_at(values, array![3], array![0], (499_000.0, n));
+        assert_eq!(grid.max_in_tile(tile()), None);
+    }
+
+    #[test]
+    fn max_in_tile_clips_to_tile_east_boundary() {
+        // 600-wide row starting at tile SW; cell 499 (value 99) is inside, cell 500 (value 100) is outside
+        let (e, n) = tile_sw();
+        let mut data = vec![0i32; 600];
+        data[499] = 99;
+        data[500] = 100;
+        let values = Array2::from_shape_vec((1, 600), data).unwrap();
+        let grid = make_grid_at(values, array![600], array![0], (e, n));
+        assert_eq!(*grid.max_in_tile(tile()).unwrap(), 99);
+    }
+
+    #[test]
+    fn max_in_tile_x_offset_shifts_data_into_tile() {
+        // Zone base at (499_900, tile_n); offset 100 → data at absolute easting 499_900+100=500_000
+        let (_, n) = tile_sw();
+        let values = Array2::from_shape_vec((1, 1), vec![42i32]).unwrap();
+        let grid = make_grid_at(values, array![1], array![100], (499_900.0, n));
+        assert_eq!(*grid.max_in_tile(tile()).unwrap(), 42);
     }
 
     // --- merge ---
