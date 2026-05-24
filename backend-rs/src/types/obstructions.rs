@@ -53,7 +53,43 @@ impl Display for ObstructionType {
     }
 }
 
+// Deserialization helper that accepts both the current `offset_nys` format and the legacy
+// `x_offset`/`y_offset` flat fields. Only used for deserialization; serialization is derived
+// directly on ObstructionMeta and always emits `offset_nys`.
+#[derive(Deserialize)]
+struct ObstructionMetaDeHelper {
+    #[serde(rename = "obstruction_id")]
+    id: ObstructionId,
+    #[serde(rename = "obstruction_type")]
+    type_: ObstructionType,
+    attributes: HashMap<String, AttributeValue>,
+    #[serde(rename = "offset_nys")]
+    sw_offset: Option<NYSCoords2>,
+    x_offset: Option<f64>,
+    y_offset: Option<f64>,
+    tile_ids: Vec<TileId>,
+}
+
+impl TryFrom<ObstructionMetaDeHelper> for ObstructionMeta {
+    type Error = String;
+
+    fn try_from(h: ObstructionMetaDeHelper) -> Result<Self, Self::Error> {
+        let sw_offset = match h.sw_offset {
+            Some(coords) => coords,
+            None => match (h.x_offset, h.y_offset) {
+                (Some(x), Some(y)) => NYSCoords2::new(x, y),
+                _ => return Err(
+                    "missing offset: need either `offset_nys` or both `x_offset` and `y_offset`"
+                        .to_string()
+                ),
+            },
+        };
+        Ok(ObstructionMeta { id: h.id, type_: h.type_, attributes: h.attributes, sw_offset, tile_ids: h.tile_ids })
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(try_from = "ObstructionMetaDeHelper")]
 pub struct ObstructionMeta {
     #[serde(rename = "obstruction_id")]
     id: ObstructionId,
