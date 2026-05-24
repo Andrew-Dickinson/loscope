@@ -183,7 +183,59 @@ impl PointEvaluationOutcome {
 #[cfg(test)]
 mod tests {
     use geo::point;
+    use ndarray::Array2;
     use super::*;
+    use crate::providers::elevation_tile_provider::{ElevationTile, ElevationTileProvider};
+    use crate::types::coords::{GPSCoords3, NYSCoords3};
+    use crate::util::coord_conversion::CoordinateConverter;
+
+    fn gps_to_nys(lat: f64, lon: f64, alt_m: f64) -> NYSCoords3 {
+        CoordinateConverter::new().to_nys_plane3(&GPSCoords3::new(lat, lon, alt_m))
+    }
+
+    fn make_input(pa: NYSCoords3, pb: NYSCoords3, freq: f64) -> PointEvaluationInput {
+        PointEvaluationInput::new(pa, pb, freq, ObstructionTypesFilter::default())
+    }
+
+    struct FlatTileProvider { elevation_inches: u16 }
+
+    #[async_trait]
+    impl ElevationTileProvider for FlatTileProvider {
+        async fn get_elevation_tile(&self, tile_id: TileId) -> Result<ElevationTile, AssetErr> {
+            let side = usize::from(crate::types::tiles::SUBGRID_TILE_SIDE_LENGTH_USFT);
+            Ok(ElevationTile::new(tile_id, Array2::from_elem((side, side), self.elevation_inches)))
+        }
+    }
+
+    // --- evaluate_points ---
+
+    #[tokio::test]
+    async fn evaluate_points_flat_zero_terrain_is_unobstructed() {
+        // Two antennas at the same height with flat zero terrain — the Fresnel zone
+        // sits above the ground, so there should be no obstruction.
+        let provider = FlatTileProvider { elevation_inches: 0 };
+        let input = make_input(
+            gps_to_nys(40.700, -73.960, 30.0),
+            gps_to_nys(40.705, -73.950, 30.0),
+            5_000_000_000.0,
+        );
+        let outcome = evaluate_points(input, &provider).await.unwrap();
+        assert!(matches!(outcome.output().result(), ResultStatus::Unobstructed));
+    }
+
+    #[tokio::test]
+    async fn evaluate_points_max_terrain_is_obstructed() {
+        // Terrain at u16::MAX completely fills the Fresnel zone — both the full and
+        // inner zones are blocked, so the result must be Obstructed.
+        let provider = FlatTileProvider { elevation_inches: u16::MAX };
+        let input = make_input(
+            gps_to_nys(40.700, -73.960, 30.0),
+            gps_to_nys(40.705, -73.950, 30.0),
+            5_000_000_000.0,
+        );
+        let outcome = evaluate_points(input, &provider).await.unwrap();
+        assert!(matches!(outcome.output().result(), ResultStatus::Obstructed));
+    }
 
     // --- valid_analysis_frequency ---
 

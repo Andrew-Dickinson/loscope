@@ -87,6 +87,7 @@ mod tests {
     // --- BINId::parse ---
 
     use crate::building::bin_id::BINId;
+    use serde_json;
 
     #[test]
     fn bin_id_parse_valid() {
@@ -133,5 +134,91 @@ mod tests {
     #[test]
     fn bin_id_parse_non_digit() {
         assert!(BINId::parse("1a34567").is_err());
+    }
+
+    // --- BINId::from_int ---
+
+    #[test]
+    fn bin_id_from_int_valid() {
+        let id = BINId::from_int(1234567).unwrap();
+        assert_eq!(id.as_str(), "1234567");
+    }
+
+    #[test]
+    fn bin_id_from_int_all_valid_first_digits() {
+        for d in [1i64, 2, 3, 4, 5] {
+            assert!(BINId::from_int(d * 1_000_000).is_ok());
+        }
+    }
+
+    #[test]
+    fn bin_id_from_int_too_small() {
+        assert!(BINId::from_int(123456).is_err());
+    }
+
+    #[test]
+    fn bin_id_from_int_too_large() {
+        assert!(BINId::from_int(12345678).is_err());
+    }
+
+    #[test]
+    fn bin_id_from_int_invalid_first_digit() {
+        assert!(BINId::from_int(6000000).is_err());
+    }
+
+    #[test]
+    fn bin_id_from_int_zero_first_digit() {
+        // 7-digit number starting with 0 cannot be represented as i64 with leading zero,
+        // so from_int(0123456) == from_int(123456) which is too short — confirm it errors
+        assert!(BINId::from_int(0_123_456).is_err());
+    }
+
+    // --- Serde ---
+
+    #[test]
+    fn bin_id_serialize() {
+        let id = BINId::parse("3456789").unwrap();
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "\"3456789\"");
+    }
+
+    #[test]
+    fn bin_id_deserialize_valid() {
+        let id: BINId = serde_json::from_str("\"2345678\"").unwrap();
+        assert_eq!(id.as_str(), "2345678");
+    }
+
+    #[test]
+    fn bin_id_serde_roundtrip() {
+        let original = BINId::parse("1234567").unwrap();
+        let json = serde_json::to_string(&original).unwrap();
+        let restored: BINId = serde_json::from_str(&json).unwrap();
+        assert_eq!(original.as_str(), restored.as_str());
+    }
+
+    #[test]
+    fn bin_id_deserialize_too_short() {
+        assert!(serde_json::from_str::<BINId>("\"123456\"").is_err());
+    }
+
+    #[test]
+    fn bin_id_deserialize_too_long() {
+        assert!(serde_json::from_str::<BINId>("\"12345678\"").is_err());
+    }
+
+    #[test]
+    fn bin_id_deserialize_invalid_first_char() {
+        assert!(serde_json::from_str::<BINId>("\"0123456\"").is_err());
+        assert!(serde_json::from_str::<BINId>("\"6123456\"").is_err());
+    }
+
+    #[test]
+    fn bin_id_deserialize_non_digit() {
+        assert!(serde_json::from_str::<BINId>("\"1a34567\"").is_err());
+    }
+
+    #[test]
+    fn bin_id_deserialize_not_a_string() {
+        assert!(serde_json::from_str::<BINId>("1234567").is_err());
     }
 }

@@ -30,17 +30,18 @@ impl AssetProvider for CachingAssetProvider {
     async fn list_assets_of_type(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
         let index_local_path = self.cache_root.join(asset_type.as_ref());
         if index_local_path.exists() {
-            Ok(fs::read_dir(index_local_path)
+            let file_list: Vec<String> = fs::read_dir(index_local_path)
                 .map_err(|e| AssetErr::LocalFileSystemError(
                     format!("Error reading local cached obstruction index {}", e)
                 ))?.into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().map(|e| e.is_file()).unwrap_or(false))
                 .filter_map(|f| f.file_name().into_string().ok())
-                .collect())
-        } else {
-            self.upstream_fetcher.list_assets(asset_type).await
+                .collect();
+            if !file_list.is_empty() { return Ok(file_list); }
         }
+
+        self.upstream_fetcher.list_assets(asset_type).await
     }
 
     async fn get_asset(&self, asset_type: AssetType, asset_id: &str) -> Result<File, AssetErr> {
@@ -127,6 +128,22 @@ mod tests {
 
         async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
             panic!("MockAssetFetcher::list_assets")
+        }
+    }
+
+    // None => returns Err, Some(v) => returns Ok(v)
+    struct ListMockFetcher { assets: Option<Vec<String>> }
+
+    #[async_trait]
+    impl AssetFetcher for ListMockFetcher {
+        async fn fetch_asset(&self, _: AssetType, _: &Utf8UnixPath, _: &Path) -> Result<(), AssetErr> {
+            panic!("ListMockFetcher::fetch_asset not expected")
+        }
+        async fn list_assets(&self, _: AssetType) -> Result<Vec<String>, AssetErr> {
+            match &self.assets {
+                Some(v) => Ok(v.clone()),
+                None => Err(AssetErr::AssetDownloadError("mock upstream error".into())),
+            }
         }
     }
 
@@ -229,5 +246,89 @@ mod tests {
 
         let result = provider.get_asset(AssetType::OrthoImage, "test.jpg").await;
         assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
+    }
+
+    // --- list_assets_of_type ---
+
+    #[tokio::test]
+    async fn list_assets_no_cache_dir_delegates_to_upstream() {
+        let temp_dir = test_temp_dir!();
+        let cache_root = temp_dir.as_path_untracked().to_path_buf();
+        // Cache dir for ObstructionIndex is absent — upstream should be called.
+        let provider = CachingAssetProvider::new(
+            Box::new(ListMockFetcher { assets: Some(vec!["a.json".into(), "b.json".into()]) }),
+            cache_root,
+        );
+
+        let mut result = provider.list_assets_of_type(AssetType::ObstructionIndex).await.unwrap();
+        result.sort();
+        assert_eq!(result, vec!["a.json", "b.json"]);
+    }
+
+    #[tokio::test]
+    async fn list_assets_no_cache_dir_propagates_upstream_error() {
+        let temp_dir = test_temp_dir!();
+        let cache_root = temp_dir.as_path_untracked().to_path_buf();
+        let provider = CachingAssetProvider::new(
+            Box::new(ListMockFetcher { assets: None }),
+            cache_root,
+        );
+
+        let result = provider.list_assets_of_type(AssetType::ObstructionIndex).await;
+        assert!(matches!(result, Err(AssetErr::AssetDownloadError(_))));
+    }
+
+    #[tokio::test]
+    async fn list_assets_cache_dir_exists_returns_file_names() {
+        let temp_dir = test_temp_dir!();
+        let cache_root = temp_dir.as_path_untracked().to_path_buf();
+        let cache_dir = cache_root.join("ObstructionIndex");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        std::fs::write(cache_dir.join("buildings.json"), b"{}").unwrap();
+        std::fs::write(cache_dir.join("towers.json"), b"{}").unwrap();
+
+        // Upstream panics if called — success proves the cache was used.
+        let provider = CachingAssetProvider::new(
+            Box::new(MockAssetFetcher { should_succeed: false }),
+            cache_root,
+        );
+
+        let mut result = provider.list_assets_of_type(AssetType::ObstructionIndex).await.unwrap();
+        result.sort();
+        assert_eq!(result, vec!["buildings.json", "towers.json"]);
+    }
+
+    #[tokio::test]
+    async fn list_assets_cache_dir_exists_but_empty_delegates_to_upstream() {
+        let temp_dir = test_temp_dir!();
+        let cache_root = temp_dir.as_path_untracked().to_path_buf();
+        std::fs::create_dir_all(cache_root.join("ObstructionIndex")).unwrap();
+        // Cache dir for ObstructionIndex is empty — upstream should be called.
+        let provider = CachingAssetProvider::new(
+            Box::new(ListMockFetcher { assets: Some(vec!["a.json".into(), "b.json".into()]) }),
+            cache_root,
+        );
+
+        let mut result = provider.list_assets_of_type(AssetType::ObstructionIndex).await.unwrap();
+        result.sort();
+        assert_eq!(result, vec!["a.json", "b.json"]);
+    }
+
+    #[tokio::test]
+    async fn list_assets_cache_dir_excludes_subdirectories() {
+        let temp_dir = test_temp_dir!();
+        let cache_root = temp_dir.as_path_untracked().to_path_buf();
+        let cache_dir = cache_root.join("ObstructionIndex");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        std::fs::write(cache_dir.join("real.json"), b"{}").unwrap();
+        std::fs::create_dir_all(cache_dir.join("subdir")).unwrap();
+
+        let provider = CachingAssetProvider::new(
+            Box::new(MockAssetFetcher { should_succeed: false }),
+            cache_root,
+        );
+
+        let result = provider.list_assets_of_type(AssetType::ObstructionIndex).await.unwrap();
+        assert_eq!(result, vec!["real.json"]);
     }
 }

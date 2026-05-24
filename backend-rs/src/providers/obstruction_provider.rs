@@ -85,3 +85,221 @@ impl ObstructionProvider for CachingObstructionProvider {
         Ok(ObstructionRaster::read_from_tiff(obstruction_id, obstruction_raster_file)?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::fs::File;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use uuid::Uuid;
+    use crate::providers::backends::asset_fetcher::AssetType;
+    use crate::providers::backends::fs_cache::AssetProvider;
+    use crate::types::obstructions::ObstructionType;
+    use crate::types::tiles::TileId;
+
+    struct MockAssetProvider {
+        list_data: HashMap<String, Vec<String>>,
+        asset_data: HashMap<(String, String), Vec<u8>>,
+        temp_dir: PathBuf,
+    }
+
+    impl MockAssetProvider {
+        fn new() -> Self {
+            let temp_dir = std::env::temp_dir().join(format!("fresnel_mock_{}", Uuid::new_v4()));
+            fs::create_dir_all(&temp_dir).unwrap();
+            Self { list_data: HashMap::new(), asset_data: HashMap::new(), temp_dir }
+        }
+        fn with_list(mut self, asset_type: AssetType, ids: &[&str]) -> Self {
+            self.list_data.insert(
+                asset_type.as_ref().to_string(),
+                ids.iter().map(|s| s.to_string()).collect(),
+            );
+            self
+        }
+        fn with_asset(mut self, asset_type: AssetType, id: &str, content: Vec<u8>) -> Self {
+            self.asset_data.insert((asset_type.as_ref().to_string(), id.to_string()), content);
+            self
+        }
+    }
+
+    impl Drop for MockAssetProvider {
+        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.temp_dir); }
+    }
+
+    #[async_trait]
+    impl AssetProvider for MockAssetProvider {
+        async fn get_asset(&self, asset_type: AssetType, asset_id: &str) -> Result<File, AssetErr> {
+            let key = (asset_type.as_ref().to_string(), asset_id.to_string());
+            match self.asset_data.get(&key) {
+                Some(content) => {
+                    let safe = asset_id.replace(['/', '\\'], "_");
+                    let path = self.temp_dir.join(format!("{}_{}", safe, Uuid::new_v4()));
+                    fs::write(&path, content).unwrap();
+                    Ok(File::open(&path).unwrap())
+                }
+                None => Err(AssetErr::AssetNotFound(
+                    format!("{}/{} not in mock", asset_type, asset_id)
+                )),
+            }
+        }
+        async fn list_assets_of_type(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
+            Ok(self.list_data.get(asset_type.as_ref()).cloned().unwrap_or_default())
+        }
+        fn get_local_asset_path(&self, _: AssetType, asset_id: &str) -> PathBuf {
+            self.temp_dir.join(asset_id)
+        }
+    }
+
+    fn arc(mock: MockAssetProvider) -> Arc<dyn AssetProvider + Send + Sync> { Arc::new(mock) }
+
+    fn index_json(tile_str: &str, ids: &[Uuid]) -> Vec<u8> {
+        let ids_str = ids.iter().map(|u| format!("\"{}\"", u)).collect::<Vec<_>>().join(",");
+        format!(r#"{{"{}":[{}]}}"#, tile_str, ids_str).into_bytes()
+    }
+
+    #[tokio::test]
+    async fn new_with_no_index_assets_produces_empty_index() {
+        let provider = CachingObstructionProvider::new(arc(MockAssetProvider::new())).await.unwrap();
+        let tile = TileId::parse("982182_00").unwrap();
+        assert!(provider.get_obstruction_ids_for_tile(tile).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn new_loads_valid_index_json() {
+        let id = Uuid::new_v4();
+        let mock = MockAssetProvider::new()
+            .with_list(AssetType::ObstructionIndex, &["towers"])
+            .with_asset(AssetType::ObstructionIndex, "towers", index_json("982182_00", &[id]));
+
+        let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
+        let tile = TileId::parse("982182_00").unwrap();
+        let result = provider.get_obstruction_ids_for_tile(tile).await.unwrap();
+
+        let t = ObstructionType::parse("towers").unwrap();
+        assert_eq!(result[&t], vec![id]);
+    }
+
+    #[tokio::test]
+    async fn new_returns_asset_content_error_on_malformed_json() {
+        let mock = MockAssetProvider::new()
+            .with_list(AssetType::ObstructionIndex, &["towers"])
+            .with_asset(AssetType::ObstructionIndex, "towers", b"not json".to_vec());
+
+        let result = CachingObstructionProvider::new(arc(mock)).await;
+        assert!(matches!(result, Err(AssetErr::AssetContentError(_))));
+    }
+
+    #[tokio::test]
+    async fn get_ids_returns_empty_for_unknown_tile() {
+        let id = Uuid::new_v4();
+        let mock = MockAssetProvider::new()
+            .with_list(AssetType::ObstructionIndex, &["towers"])
+            .with_asset(AssetType::ObstructionIndex, "towers", index_json("982182_00", &[id]));
+
+        let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
+        let other = TileId::parse("990200_23").unwrap();
+        assert!(provider.get_obstruction_ids_for_tile(other).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_ids_returns_all_matching_obstruction_types() {
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        let tile_str = "982182_00";
+        let mock = MockAssetProvider::new()
+            .with_list(AssetType::ObstructionIndex, &["towers", "signs"])
+            .with_asset(AssetType::ObstructionIndex, "towers", index_json(tile_str, &[id1]))
+            .with_asset(AssetType::ObstructionIndex, "signs",  index_json(tile_str, &[id2]));
+
+        let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
+        let tile = TileId::parse(tile_str).unwrap();
+        let result = provider.get_obstruction_ids_for_tile(tile).await.unwrap();
+
+        assert_eq!(result[&ObstructionType::parse("towers").unwrap()], vec![id1]);
+        assert_eq!(result[&ObstructionType::parse("signs").unwrap()],  vec![id2]);
+    }
+
+    #[tokio::test]
+    async fn get_ids_tile_with_multiple_obstructions_same_type() {
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        let tile_str = "982182_00";
+        let mock = MockAssetProvider::new()
+            .with_list(AssetType::ObstructionIndex, &["towers"])
+            .with_asset(AssetType::ObstructionIndex, "towers", index_json(tile_str, &[id1, id2]));
+
+        let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
+        let tile = TileId::parse(tile_str).unwrap();
+        let result = provider.get_obstruction_ids_for_tile(tile).await.unwrap();
+
+        let ids = &result[&ObstructionType::parse("towers").unwrap()];
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&id1));
+        assert!(ids.contains(&id2));
+    }
+
+    #[tokio::test]
+    async fn get_meta_propagates_asset_not_found() {
+        let provider = CachingObstructionProvider::new(arc(MockAssetProvider::new())).await.unwrap();
+        let type_ = ObstructionType::parse("towers").unwrap();
+        let id = Uuid::new_v4();
+        let err = provider.get_obstruction_meta(&type_, id).await.unwrap_err();
+        assert!(matches!(err, AssetErr::AssetNotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn get_meta_fetches_correct_path() {
+        let type_ = ObstructionType::parse("towers").unwrap();
+        let id = Uuid::new_v4();
+        let expected_asset_id = format!("towers/{}.json", id);
+
+        let mock = MockAssetProvider::new()
+            .with_asset(AssetType::Obstruction, &expected_asset_id, b"bad json".to_vec());
+
+        let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
+        // The call should reach the asset (not return NotFound) and fail on JSON parsing
+        let err = provider.get_obstruction_meta(&type_, id).await.unwrap_err();
+        assert!(matches!(err, AssetErr::AssetContentError(_)),
+            "expected AssetContentError (bad json), got {:?}", err);
+    }
+
+    #[tokio::test]
+    async fn get_meta_returns_content_error_on_bad_json() {
+        let type_ = ObstructionType::parse("towers").unwrap();
+        let id = Uuid::new_v4();
+        let asset_id = format!("towers/{}.json", id);
+        let mock = MockAssetProvider::new()
+            .with_asset(AssetType::Obstruction, &asset_id, b"{{invalid}}".to_vec());
+
+        let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
+        let err = provider.get_obstruction_meta(&type_, id).await.unwrap_err();
+        assert!(matches!(err, AssetErr::AssetContentError(_)));
+    }
+
+    #[tokio::test]
+    async fn get_raster_propagates_asset_not_found() {
+        let provider = CachingObstructionProvider::new(arc(MockAssetProvider::new())).await.unwrap();
+        let type_ = ObstructionType::parse("towers").unwrap();
+        let id = Uuid::new_v4();
+        let err = provider.get_obstruction_raster(&type_, id).await.unwrap_err();
+        assert!(matches!(err, AssetErr::AssetNotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn get_raster_fetches_correct_path() {
+        let type_ = ObstructionType::parse("towers").unwrap();
+        let id = Uuid::new_v4();
+        let expected_asset_id = format!("towers/{}.tif", id);
+
+        let mock = MockAssetProvider::new()
+            .with_asset(AssetType::Obstruction, &expected_asset_id, b"not a tiff".to_vec());
+
+        let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
+        // Reaches the asset provider (not NotFound) and fails on TIFF parsing
+        let err = provider.get_obstruction_raster(&type_, id).await.unwrap_err();
+        assert!(matches!(err, AssetErr::AssetContentError(_)),
+            "expected AssetContentError (bad tiff), got {:?}", err);
+    }
+}

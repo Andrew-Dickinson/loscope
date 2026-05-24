@@ -212,3 +212,197 @@ pub fn build_fresnel_kml(analysis_id: &Uuid, start: GPSCoords3, end: GPSCoords3,
         ],
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nyc() -> GPSCoords3 { GPSCoords3::new(40.7128, -74.0060, 100.0) }
+    fn albany() -> GPSCoords3 { GPSCoords3::new(42.6526, -73.7562, 150.0) }
+    const FREQ_900MHZ: f64 = 900e6;
+
+    pub(crate) fn fresnel_semi_minor(distance: f64, frequency_hz: f64) -> f64 {
+        let wavelength = SPEED_OF_LIGHT / frequency_hz;
+        let semi_major = distance / 2.0 + wavelength / 4.0;
+        (semi_major * semi_major - (distance / 2.0).powi(2)).sqrt()
+    }
+
+    fn doc_elements(kml: &Kml) -> &[Kml] {
+        match kml {
+            Kml::KmlDocument(doc) => match &doc.elements[0] {
+                Kml::Document { elements, .. } => elements,
+                _ => panic!("expected Document"),
+            },
+            _ => panic!("expected KmlDocument"),
+        }
+    }
+
+    #[test]
+    fn returns_kml_document() {
+        let id = Uuid::new_v4();
+        let kml = build_fresnel_kml(&id, nyc(), albany(), FREQ_900MHZ);
+        assert!(matches!(kml, Kml::KmlDocument(_)));
+    }
+
+    #[test]
+    fn document_has_five_elements() {
+        let id = Uuid::new_v4();
+        let kml = build_fresnel_kml(&id, nyc(), albany(), FREQ_900MHZ);
+        assert_eq!(doc_elements(&kml).len(), 5);
+    }
+
+    #[test]
+    fn name_element_contains_analysis_id() {
+        let id = Uuid::new_v4();
+        let kml = build_fresnel_kml(&id, nyc(), albany(), FREQ_900MHZ);
+        let els = doc_elements(&kml);
+        match &els[0] {
+            Kml::Element(el) => {
+                assert_eq!(el.name, "name");
+                assert_eq!(el.content.as_deref(), Some(id.to_string().as_str()));
+            }
+            _ => panic!("expected Element for name"),
+        }
+    }
+
+    #[test]
+    fn fresnel_style_has_correct_id_and_color() {
+        let id = Uuid::new_v4();
+        let kml = build_fresnel_kml(&id, nyc(), albany(), FREQ_900MHZ);
+        let els = doc_elements(&kml);
+        match &els[1] {
+            Kml::Style(s) => {
+                assert_eq!(s.id.as_deref(), Some("fresnel"));
+                assert_eq!(s.poly.as_ref().unwrap().color, "99ff44cc");
+            }
+            _ => panic!("expected Style for fresnel"),
+        }
+    }
+
+    #[test]
+    fn los_style_has_correct_id_and_color() {
+        let id = Uuid::new_v4();
+        let kml = build_fresnel_kml(&id, nyc(), albany(), FREQ_900MHZ);
+        let els = doc_elements(&kml);
+        match &els[2] {
+            Kml::Style(s) => {
+                assert_eq!(s.id.as_deref(), Some("los"));
+                assert_eq!(s.line.as_ref().unwrap().color, "ffaa2277");
+            }
+            _ => panic!("expected Style for los"),
+        }
+    }
+
+    #[test]
+    fn los_placemark_references_correct_style_and_endpoints() {
+        let id = Uuid::new_v4();
+        let start = nyc();
+        let end = albany();
+        let kml = build_fresnel_kml(&id, start, end, FREQ_900MHZ);
+        let els = doc_elements(&kml);
+        match &els[3] {
+            Kml::Placemark(p) => {
+                assert_eq!(p.style_url.as_deref(), Some("#los"));
+                match p.geometry.as_ref().unwrap() {
+                    Geometry::LineString(ls) => {
+                        assert_eq!(ls.coords.len(), 2);
+                        let c0 = &ls.coords[0];
+                        let c1 = &ls.coords[1];
+                        assert!((c0.x - (-74.0060)).abs() < 1e-9); // lon
+                        assert!((c0.y - 40.7128).abs() < 1e-9);    // lat
+                        assert!((c1.x - (-73.7562)).abs() < 1e-9);
+                        assert!((c1.y - 42.6526).abs() < 1e-9);
+                    }
+                    _ => panic!("expected LineString"),
+                }
+            }
+            _ => panic!("expected Placemark for los"),
+        }
+    }
+
+    #[test]
+    fn ellipsoid_placemark_references_fresnel_style() {
+        let id = Uuid::new_v4();
+        let kml = build_fresnel_kml(&id, nyc(), albany(), FREQ_900MHZ);
+        let els = doc_elements(&kml);
+        match &els[4] {
+            Kml::Placemark(p) => assert_eq!(p.style_url.as_deref(), Some("#fresnel")),
+            _ => panic!("expected Placemark for ellipsoid"),
+        }
+    }
+
+    #[test]
+    fn ellipsoid_has_correct_polygon_count() {
+        let id = Uuid::new_v4();
+        let kml = build_fresnel_kml(&id, nyc(), albany(), FREQ_900MHZ);
+        let els = doc_elements(&kml);
+        match &els[4] {
+            Kml::Placemark(p) => match p.geometry.as_ref().unwrap() {
+                Geometry::MultiGeometry(mg) => {
+                    assert_eq!(mg.geometries.len(), LAT_SEGMENTS * LON_SEGMENTS);
+                }
+                _ => panic!("expected MultiGeometry"),
+            },
+            _ => panic!("expected Placemark"),
+        }
+    }
+
+    #[test]
+    fn each_polygon_ring_is_closed() {
+        let id = Uuid::new_v4();
+        let kml = build_fresnel_kml(&id, nyc(), albany(), FREQ_900MHZ);
+        let els = doc_elements(&kml);
+        match &els[4] {
+            Kml::Placemark(p) => match p.geometry.as_ref().unwrap() {
+                Geometry::MultiGeometry(mg) => {
+                    for geom in &mg.geometries {
+                        match geom {
+                            Geometry::Polygon(poly) => {
+                                let coords = &poly.outer.coords;
+                                assert_eq!(coords.len(), 5); // 4 unique + closing repeat
+                                let first = &coords[0];
+                                let last = &coords[coords.len() - 1];
+                                assert!((first.x - last.x).abs() < 1e-12);
+                                assert!((first.y - last.y).abs() < 1e-12);
+                            }
+                            _ => panic!("expected Polygon"),
+                        }
+                    }
+                }
+                _ => panic!("expected MultiGeometry"),
+            },
+            _ => panic!("expected Placemark"),
+        }
+    }
+
+    #[test]
+    fn fresnel_radius_grows_with_lower_frequency() {
+        let r_high = fresnel_semi_minor(100_000.0, 5_800e6);
+        let r_low  = fresnel_semi_minor(100_000.0,   900e6);
+        assert!(r_low > r_high, "lower frequency => larger Fresnel zone");
+    }
+
+    #[test]
+    fn fresnel_radius_grows_with_longer_link() {
+        let r_short = fresnel_semi_minor(10_000.0,  FREQ_900MHZ);
+        let r_long  = fresnel_semi_minor(100_000.0, FREQ_900MHZ);
+        assert!(r_long > r_short, "longer link => larger Fresnel zone");
+    }
+
+    #[test]
+    fn different_analysis_ids_produce_different_names() {
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        let kml1 = build_fresnel_kml(&id1, nyc(), albany(), FREQ_900MHZ);
+        let kml2 = build_fresnel_kml(&id2, nyc(), albany(), FREQ_900MHZ);
+        let name1 = match &doc_elements(&kml1)[0] {
+            Kml::Element(e) => e.content.clone().unwrap(),
+            _ => panic!(),
+        };
+        let name2 = match &doc_elements(&kml2)[0] {
+            Kml::Element(e) => e.content.clone().unwrap(),
+            _ => panic!(),
+        };
+        assert_ne!(name1, name2);
+    }
+}
