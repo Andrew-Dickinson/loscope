@@ -61,10 +61,16 @@ fn bilt_impl(src_base: (usize, usize), src: ArrayView2<u16>, height_values: &mut
     let src_northing_size = src.ncols();
 
     let i_start = (src_base.1 as isize - zone_base.1 as isize).max(0) as usize;
-    let i_end: usize = ((src_base.1 as isize - zone_base.1 as isize) + src_northing_size as isize)
+    let Ok(i_end) = ((src_base.1 as isize - zone_base.1 as isize) + src_northing_size as isize)
         .min(zone.widths().len() as isize)
         .try_into()
-        .expect("Source selection logic issue, source must have at least one pixel NE of the zone's SW corner");
+    else {
+        // If i_end < 0, there's no overlap between src and zone, so nothing to bilt.
+        // This is a valid scenario, it happens when we try to bilt obstructions into the zone
+        // that we identified by being in the same tile as the zone (but not necessarily
+        // intersecting it)
+        return;
+    };
 
     for i in i_start..i_end {
         let width = zone.widths()[i];
