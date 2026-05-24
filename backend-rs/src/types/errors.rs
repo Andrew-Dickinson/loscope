@@ -40,6 +40,7 @@ pub enum AssetErr {
 #[derive(Debug)]
 pub enum ProviderInitErr {
     RusqliteError(tokio_rusqlite::Error),
+    AssetPrefetchError(AssetErr),
 }
 
 impl From<ParseIntError> for TileParseErr {

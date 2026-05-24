@@ -14,6 +14,8 @@ use tokio::fs;
 pub enum AssetType {
     OrthoImage,
     ElevationTile,
+    ObstructionIndex,
+    Obstruction,
     BuildingFootprintWKT
 }
 
