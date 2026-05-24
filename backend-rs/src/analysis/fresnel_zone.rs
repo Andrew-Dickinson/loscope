@@ -197,7 +197,9 @@ pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha
     // let mut y_vals_peek = y_vals.peekable();
 
     // +1 to account for inclusive bound
-    let output_height = usize::try_from(y_vals.end() - y_vals.start() + 1).unwrap(); // TODO: unwrap safety?
+    // Saftey: this will never panic because the assertion in integer_grid bounds y_vals.start() at
+    // y_vals.end() - 1, so min(output_height) = 0
+    let output_height = usize::try_from(y_vals.end() - y_vals.start() + 1).unwrap();
     let max_width = (2.0 * semi_minor / ctx.sin_theta).ceil().abs() as usize + 1;
 
     let x_base = (pa.0.min(pb.0) - semi_minor - OFFSET_BUFFER).floor() as i64;
@@ -241,8 +243,9 @@ pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha
         if x_grid_nys.is_empty() {
             continue;
         }
-
-        let width = usize::try_from(x_grid_nys.end() - x_grid_nys.start() + 1).unwrap(); // TODO: unwrap safety?
+        // Saftey: this will never panic because the assertion in integer_grid bounds
+        // x_grid_nys.start() at x_grid_nys.end() - 1, so min(width) = 0
+        let width = usize::try_from(x_grid_nys.end() - x_grid_nys.start() + 1).unwrap();
 
         let x_row_base = *x_grid_nys.start();
 
