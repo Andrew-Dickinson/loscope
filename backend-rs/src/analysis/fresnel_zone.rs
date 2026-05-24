@@ -95,7 +95,7 @@ fn nys_to_ellipsoid_transform(mid: (f64, f64, f64), ctx: &AngleContext) -> Matri
 
 /// Integer grid [ceil(lo), floor(hi)] inclusive.
 fn integer_grid(lo: f64, hi: f64) -> RangeInclusive<i64> {
-    assert!(lo <= hi); // TODO: Validate this before call?
+    assert!(lo <= hi);
     let start = lo.ceil() as i64;
     let end = hi.floor() as i64;
     start..=end
@@ -200,7 +200,6 @@ pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha
     let x_base = (pa.0.min(pb.0) - semi_minor - OFFSET_BUFFER).floor() as i64;
     let y_base = *y_vals.start();
 
-    // TODO: Extra alloc here, could be prevented?
     let mut values = Array2::<FresnelZonePoint>::default((output_height, max_width));
     let mut widths = Array1::<usize>::zeros(output_height);
     let mut offsets = Array1::<usize>::zeros(output_height);
@@ -268,7 +267,6 @@ pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha
                     (EARTH_RADIUS_USFT * EARTH_RADIUS_USFT - axial * axial).max(0.0).sqrt()
                         - center_correction;
 
-                // TODO: Is i.j right? Should it be j,i?
                 values[[i,j]] = FresnelZonePoint::new(
                     to_u16(lower_z_nys - correction),
                     to_u16(upper_z_nys - correction)

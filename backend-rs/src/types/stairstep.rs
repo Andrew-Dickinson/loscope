@@ -95,7 +95,7 @@ impl<T> StairStepGrid<T> {
         Array2::<Option<&T>>::from_shape_vec(
             (SUBGRID_TILE_SIDE_LENGTH_USFT.into(), SUBGRID_TILE_SIDE_LENGTH_USFT.into()),
             self.rasterize_in_tile_iter(tile_id).collect()
-        ).unwrap().reversed_axes() // TODO: Is this reversed call right? Should we have a different loop convention?
+        ).unwrap().reversed_axes()
     }
 
     fn rasterize_in_tile_iter(&self, tile_id: TileId) -> impl Iterator<Item = Option<&T>> + '_ {
