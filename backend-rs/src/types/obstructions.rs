@@ -96,7 +96,7 @@ pub struct ObstructionMeta {
     #[serde(rename = "obstruction_id")]
     id: ObstructionId,
 
-    #[serde(flatten, rename = "obstruction_type")]
+    #[serde(rename = "obstruction_type")]
     type_: ObstructionType,
 
     attributes: HashMap<String, AttributeValue>,
@@ -213,5 +213,58 @@ impl ObstructionRaster {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LEGACY_PAYLOAD: &str = r#"{
+        "obstruction_id": "83167e5c-c108-4d85-905c-6dc3224cc367",
+        "obstruction_type": "new_construction_building_footprint",
+        "attributes": {
+            "bin": "2129799",
+            "bbl": "2023440027",
+            "ground_elevation": 34.0,
+            "height_roof": 85.0,
+            "geom_source": "Other (Manual)",
+            "construction_year": 2025,
+            "last_status_type": "Constructed"
+        },
+        "tile_ids": ["2235_21", "2235_22"],
+        "x_offset": 1003728,
+        "y_offset": 235953,
+        "width": 155,
+        "height": 229,
+        "raster_file": "83167e5c-c108-4d85-905c-6dc3224cc367.tif"
+    }"#;
+
+    #[test]
+    fn legacy_payload_deserializes_offset() {
+        let meta: ObstructionMeta = serde_json::from_str(LEGACY_PAYLOAD).unwrap();
+        assert_eq!(*meta.sw_offset.easting(), 1003728.0);
+        assert_eq!(*meta.sw_offset.northing(), 235953.0);
+    }
+
+    #[test]
+    fn legacy_payload_deserializes_attributes() {
+        let meta: ObstructionMeta = serde_json::from_str(LEGACY_PAYLOAD).unwrap();
+        assert_eq!(meta.attributes.len(), 7);
+
+        assert!(matches!(meta.attributes.get("bin"), Some(AttributeValue::String(s)) if s == "2129799"));
+        assert!(matches!(meta.attributes.get("ground_elevation"), Some(AttributeValue::Number(_))));
+        assert!(matches!(meta.attributes.get("construction_year"), Some(AttributeValue::Number(_))));
+    }
+
+    #[test]
+    fn legacy_payload_serializes_attributes_back_out() {
+        let meta: ObstructionMeta = serde_json::from_str(LEGACY_PAYLOAD).unwrap();
+        let json: serde_json::Value = serde_json::to_value(&meta).unwrap();
+
+        let attrs = json.get("attributes").expect("attributes key missing");
+        assert_eq!(attrs.get("bin").and_then(|v| v.as_str()), Some("2129799"));
+        assert_eq!(attrs.get("ground_elevation").and_then(|v| v.as_f64()), Some(34.0));
+        assert_eq!(attrs.get("construction_year").and_then(|v| v.as_f64()), Some(2025.0));
     }
 }
