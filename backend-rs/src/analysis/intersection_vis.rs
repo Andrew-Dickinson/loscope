@@ -5,34 +5,47 @@ use typed_floats::tf64::PositiveFinite;
 const TILE_SIDE: usize = 500;
 const UPSCALE: usize = 8;
 const OUT_SIDE: usize = TILE_SIDE * UPSCALE;
+const BORDER: usize = 2;
 
-fn interp(v: f64, stops: &[f64], values: &[f64]) -> f64 {
-    if v <= stops[0] {
-        return values[0];
+fn colormap(v: f64) -> [u8; 4] {
+    const STOPS: [f64; 5] = [0.0, 0.4, 0.6, 0.75, 1.0];
+    const R: [f64; 5] = [255.0, 255.0, 210.0, 138.0, 214.0];
+    const G: [f64; 5] = [215.0, 105.0, 18.0,   0.0,   2.0];
+    const B: [f64; 5] = [  0.0,   0.0, 28.0,  16.0,  52.0];
+    const LAST: usize = STOPS.len() - 1;
+    if v <= STOPS[0] {
+        return [R[0] as u8, G[0] as u8, B[0] as u8, 255];
     }
-    let last = stops.len() - 1;
-    if v >= stops[last] {
-        return values[last];
+    if v >= STOPS[LAST] {
+        return [R[LAST] as u8, G[LAST] as u8, B[LAST] as u8, 255];
     }
-    for i in 0..last {
-        if v <= stops[i + 1] {
-            let t = (v - stops[i]) / (stops[i + 1] - stops[i]);
-            return values[i] + t * (values[i + 1] - values[i]);
+    for i in 0..LAST {
+        if v <= STOPS[i + 1] {
+            let t = (v - STOPS[i]) / (STOPS[i + 1] - STOPS[i]);
+            return [
+                (R[i] + t * (R[i + 1] - R[i])) as u8,
+                (G[i] + t * (G[i + 1] - G[i])) as u8,
+                (B[i] + t * (B[i + 1] - B[i])) as u8,
+                255,
+            ];
         }
     }
-    values[last]
+    [R[LAST] as u8, G[LAST] as u8, B[LAST] as u8, 255]
+}
+
+#[inline(always)]
+fn write_px(raw: &mut [u8], idx: usize, color: [u8; 4]) {
+    let off = idx * 4;
+    raw[off]     = color[0];
+    raw[off + 1] = color[1];
+    raw[off + 2] = color[2];
+    raw[off + 3] = color[3];
 }
 
 /// Converts a 500×500 intersection raster (indexed [easting, northing]) into a
 /// 4000×4000 RGBA image using a SunsetDark-inspired colormap, with a 2-pixel
 /// black outline around the filled region.
 pub fn tile_intersection_to_img(intersection: Array2<Option<&PositiveFinite>>) -> Option<DynamicImage> {
-    // SunsetDark-inspired colormap stops
-    const STOPS: [f64; 5] = [0.0, 0.4, 0.6, 0.75, 1.0];
-    const R: [f64; 5] = [255.0, 255.0, 210.0, 138.0, 214.0];
-    const G: [f64; 5] = [215.0, 105.0, 18.0, 0.0, 2.0];
-    const B: [f64; 5] = [0.0, 0.0, 28.0, 16.0, 52.0];
-
     // Build 4000×4000 pixel buffer: upscale 8x, flip north-up.
     // intersection[[x, y]]: x=easting (0..500), y=northing (0 = south).
     // Image row 0 = north (northing=499), col = easting, both repeated 8x.
@@ -43,52 +56,104 @@ pub fn tile_intersection_to_img(intersection: Array2<Option<&PositiveFinite>>) -
         return None;
     }
 
-    let mut pixels = vec![[0u8; 4]; OUT_SIDE * OUT_SIDE];
+    let mut raw = vec![0u8; OUT_SIDE * OUT_SIDE * 4];
+    let mut source_filled = vec![false; TILE_SIDE * TILE_SIDE];
 
-    for out_row in 0..OUT_SIDE {
-        let y = TILE_SIDE - 1 - out_row / UPSCALE;
-        for out_col in 0..OUT_SIDE {
-            let x = out_col / UPSCALE;
-            if let Some(pf) = intersection[[x, y]] {
-                let v = f64::from(*pf);
-                if v > 0.0 {
-                    pixels[out_row * OUT_SIDE + out_col] = [
-                        interp(v, &STOPS, &R) as u8,
-                        interp(v, &STOPS, &G) as u8,
-                        interp(v, &STOPS, &B) as u8,
-                        255,
-                    ];
+    // Iterate source cells once, writing each color to its 8×8 output block.
+    // This computes colormap values 64× less often than the original output-pixel loop.
+    for sy in 0..TILE_SIDE {
+        let out_row_base = (TILE_SIDE - 1 - sy) * UPSCALE;
+        for sx in 0..TILE_SIDE {
+            let Some(pf) = intersection[[sx, sy]] else { continue };
+            let v = f64::from(*pf);
+            if v == 0.0 { continue; }
+
+            source_filled[sy * TILE_SIDE + sx] = true;
+
+            let color = colormap(v);
+            let out_col_base = sx * UPSCALE;
+            for dr in 0..UPSCALE {
+                let row_off = (out_row_base + dr) * OUT_SIDE;
+                for dc in 0..UPSCALE {
+                    write_px(&mut raw, row_off + out_col_base + dc, color);
                 }
             }
         }
     }
 
-    // 2-pixel black outline: dilate the opaque mask twice (4-connected, wrapping),
-    // then paint the border ring (dilated & !filled) black.
-    let filled: Vec<bool> = pixels.iter().map(|p| p[3] > 0).collect();
-    let mut dilated = filled.clone();
+    // 2-pixel black border via source-space dilation.
+    //
+    // A non-filled source cell's output block needs border pixels wherever it is
+    // within output-pixel Manhattan distance BORDER of a filled block. Since
+    // UPSCALE=8 >> BORDER=2, all reachable pixels fall within one source cell:
+    //   - axis-aligned neighbor filled → last/first BORDER cols/rows of our block
+    //   - diagonal neighbor filled → exactly the single corner pixel (distance 1+1=2)
+    let sf = |sx: isize, sy: isize| -> bool {
+        if sx < 0 || sy < 0 || sx >= TILE_SIDE as isize || sy >= TILE_SIDE as isize {
+            return false;
+        }
+        source_filled[sy as usize * TILE_SIDE + sx as usize]
+    };
 
-    for _ in 0..2 {
-        let prev = dilated.clone();
-        for row in 0..OUT_SIDE {
-            for col in 0..OUT_SIDE {
-                let up   = row.checked_sub(1).map(|r| prev[r * OUT_SIDE + col]).unwrap_or(false);
-                let down = if row + 1 < OUT_SIDE { prev[(row + 1) * OUT_SIDE + col] } else { false };
-                let left  = col.checked_sub(1).map(|c| prev[row * OUT_SIDE + c]).unwrap_or(false);
-                let right = if col + 1 < OUT_SIDE { prev[row * OUT_SIDE + col + 1] } else { false };
-                dilated[row * OUT_SIDE + col] =
-                    prev[row * OUT_SIDE + col] | up | down | left | right;
+    for sy in 0..TILE_SIDE {
+        let out_row_base = (TILE_SIDE - 1 - sy) * UPSCALE;
+        for sx in 0..TILE_SIDE {
+            if source_filled[sy * TILE_SIDE + sx] { continue; }
+            let (isx, isy) = (sx as isize, sy as isize);
+            let out_col_base = sx * UPSCALE;
+
+            // right neighbor → last BORDER cols
+            if sf(isx + 1, isy) {
+                for dr in 0..UPSCALE {
+                    let row_off = (out_row_base + dr) * OUT_SIDE;
+                    for dc in (UPSCALE - BORDER)..UPSCALE {
+                        write_px(&mut raw, row_off + out_col_base + dc, [0, 0, 0, 255]);
+                    }
+                }
+            }
+            // left neighbor → first BORDER cols
+            if sf(isx - 1, isy) {
+                for dr in 0..UPSCALE {
+                    let row_off = (out_row_base + dr) * OUT_SIDE;
+                    for dc in 0..BORDER {
+                        write_px(&mut raw, row_off + out_col_base + dc, [0, 0, 0, 255]);
+                    }
+                }
+            }
+            // image-up neighbor (northing+1) → first BORDER rows
+            if sf(isx, isy + 1) {
+                for dr in 0..BORDER {
+                    let row_off = (out_row_base + dr) * OUT_SIDE;
+                    for dc in 0..UPSCALE {
+                        write_px(&mut raw, row_off + out_col_base + dc, [0, 0, 0, 255]);
+                    }
+                }
+            }
+            // image-down neighbor (northing-1) → last BORDER rows
+            if sf(isx, isy - 1) {
+                for dr in (UPSCALE - BORDER)..UPSCALE {
+                    let row_off = (out_row_base + dr) * OUT_SIDE;
+                    for dc in 0..UPSCALE {
+                        write_px(&mut raw, row_off + out_col_base + dc, [0, 0, 0, 255]);
+                    }
+                }
+            }
+            // diagonal neighbors → single corner pixel each (Manhattan distance 1+1=2)
+            if sf(isx + 1, isy + 1) { // upper-right: corner (UPSCALE-1, 0)
+                write_px(&mut raw, out_row_base * OUT_SIDE + out_col_base + UPSCALE - 1, [0, 0, 0, 255]);
+            }
+            if sf(isx - 1, isy + 1) { // upper-left: corner (0, 0)
+                write_px(&mut raw, out_row_base * OUT_SIDE + out_col_base, [0, 0, 0, 255]);
+            }
+            if sf(isx + 1, isy - 1) { // lower-right: corner (UPSCALE-1, UPSCALE-1)
+                write_px(&mut raw, (out_row_base + UPSCALE - 1) * OUT_SIDE + out_col_base + UPSCALE - 1, [0, 0, 0, 255]);
+            }
+            if sf(isx - 1, isy - 1) { // lower-left: corner (0, UPSCALE-1)
+                write_px(&mut raw, (out_row_base + UPSCALE - 1) * OUT_SIDE + out_col_base, [0, 0, 0, 255]);
             }
         }
     }
 
-    for i in 0..(OUT_SIDE * OUT_SIDE) {
-        if dilated[i] && !filled[i] {
-            pixels[i] = [0, 0, 0, 255];
-        }
-    }
-
-    let raw: Vec<u8> = pixels.into_iter().flatten().collect();
     Some(DynamicImage::ImageRgba8(
         ImageBuffer::from_raw(OUT_SIDE as u32, OUT_SIDE as u32, raw)
             .expect("pixel buffer dimensions must match OUT_SIDE²×4"),
