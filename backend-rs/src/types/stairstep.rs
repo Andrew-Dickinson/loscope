@@ -1,4 +1,5 @@
 use std::iter::repeat_n;
+use arrayvec::ArrayVec;
 use std::mem::MaybeUninit;
 use derive_getters::Getters;
 use derive_new::new;
@@ -97,53 +98,51 @@ impl<T> StairStepGrid<T> {
         ).unwrap().reversed_axes() // TODO: Is this reversed call right? Should we have a different loop convention?
     }
 
-    fn rasterize_in_tile_iter(&self, tile_id: TileId) -> Box<dyn Iterator<Item = Option<&T>> + '_> {
+    fn rasterize_in_tile_iter(&self, tile_id: TileId) -> impl Iterator<Item = Option<&T>> + '_ {
+        const TILE_SIDE: usize = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
+
         let step_base_offset = &self.base_offset;
         let tile_base_offset  = tile_id.get_sw_corner();
 
         let step_base_offset = (step_base_offset.easting().floor() as usize, step_base_offset.northing().floor() as usize);
         let tile_base_offset = (tile_base_offset.easting().floor() as usize, tile_base_offset.northing().floor() as usize);
 
-        let iter = (0..(SUBGRID_TILE_SIDE_LENGTH_USFT as usize)).flat_map(
-            move |tile_i| -> Box<dyn Iterator<Item = Option<&T>> + '_> {
-                let step_i = ((tile_i + tile_base_offset.1) as isize) - (step_base_offset.1 as isize);
+        (0..TILE_SIDE).flat_map(move |tile_i| {
+            let mut row = ArrayVec::<Option<&T>, TILE_SIDE>::new();
 
-                let Some(step_i) = usize::try_from(step_i)
-                    .ok().filter(|step_i| *step_i < self.widths.len()) else {
-                    // This row of the stairstep falls above/below the tile, so we just emit
-                    // a full row of None objects
-                    return Box::new(repeat_n(None, SUBGRID_TILE_SIDE_LENGTH_USFT as usize));
-                };
+            let step_i = ((tile_i + tile_base_offset.1) as isize) - (step_base_offset.1 as isize);
 
-                let width = self.widths[step_i];
-                let global_step_row_start = step_base_offset.0 + self.offsets[step_i];
-                let global_step_row_end = global_step_row_start + width;
+            let Some(step_i) = usize::try_from(step_i)
+                .ok().filter(|step_i| *step_i < self.widths.len()) else {
+                row.extend(repeat_n(None, TILE_SIDE));
+                return row;
+            };
 
-                let global_overlap_start = global_step_row_start.max(tile_base_offset.0);
-                let global_overlap_end = global_step_row_end.min(tile_base_offset.0 + usize::from(SUBGRID_TILE_SIDE_LENGTH_USFT));
-                if global_overlap_start >= global_overlap_end {
-                    // This row of the stairstep falls entirely to the left/right of the tile, so
-                    // we just emit a full row of None objects
-                    return Box::new(repeat_n(None, SUBGRID_TILE_SIDE_LENGTH_USFT as usize))
-                }
+            let width = self.widths[step_i];
+            let global_step_row_start = step_base_offset.0 + self.offsets[step_i];
+            let global_step_row_end = global_step_row_start + width;
 
-                // Safety: strict_sub() won't panic here because as constructed above,
-                // global_overlap_end > global_overlap_start >= global_step_row_start &&
-                // global_overlap_end > global_overlap_start >= tile_base_offset.0
-                let step_j_start = global_overlap_start.strict_sub(global_step_row_start);
-                let step_j_end = global_overlap_end.strict_sub(global_step_row_start);
-                let tile_j_start = global_overlap_start.strict_sub(tile_base_offset.0);
-                let tile_j_end = global_overlap_end.strict_sub(tile_base_offset.0);
-
-                let tile_columns_after_overlap = (SUBGRID_TILE_SIDE_LENGTH_USFT as usize).strict_sub(tile_j_end);
-
-                Box::new(repeat_n(None, tile_j_start)
-                    .chain(self.values.slice(s![step_i, step_j_start..step_j_end]).into_iter().map(Some))
-                    .chain(repeat_n(None, tile_columns_after_overlap)))
+            let global_overlap_start = global_step_row_start.max(tile_base_offset.0);
+            let global_overlap_end = global_step_row_end.min(tile_base_offset.0 + TILE_SIDE);
+            if global_overlap_start >= global_overlap_end {
+                row.extend(repeat_n(None, TILE_SIDE));
+                return row;
             }
-        );
 
-        Box::new(iter)
+            // Safety: strict_sub() won't panic here because as constructed above,
+            // global_overlap_end > global_overlap_start >= global_step_row_start &&
+            // global_overlap_end > global_overlap_start >= tile_base_offset.0
+            let step_j_start = global_overlap_start.strict_sub(global_step_row_start);
+            let step_j_end = global_overlap_end.strict_sub(global_step_row_start);
+            let tile_j_start = global_overlap_start.strict_sub(tile_base_offset.0);
+            let tile_j_end = global_overlap_end.strict_sub(tile_base_offset.0);
+            let tile_columns_after_overlap = TILE_SIDE.strict_sub(tile_j_end);
+
+            row.extend(repeat_n(None, tile_j_start));
+            row.extend(self.values.slice(s![step_i, step_j_start..step_j_end]).into_iter().map(Some));
+            row.extend(repeat_n(None, tile_columns_after_overlap));
+            row
+        })
     }
 
 }
