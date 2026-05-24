@@ -68,13 +68,17 @@ impl ObstructionProvider for CachingObstructionProvider {
         ).await?;
         let reader = BufReader::new(obstruction_meta_file);
 
-        let obstruction_meta: ObstructionMeta = serde_json::from_reader(reader)
+        let mut obstruction_meta: ObstructionMeta = serde_json::from_reader(reader)
             .map_err(|e| AssetErr::AssetContentError(
                 format!(
                     "Error deserializing JSON for obstruction ID {} (type {}): {}",
                     obstruction_id, obstruction_type, e
                 )
             ))?;
+
+        // The obstruction types stored inside the JSON files are kinda scrambled, we'll use
+        // the file path as the source of truth to avoid confusion
+        obstruction_meta.set_type(obstruction_type.clone());
 
         Ok(obstruction_meta)
     }
@@ -266,6 +270,24 @@ mod tests {
         let err = provider.get_obstruction_meta(&type_, id).await.unwrap_err();
         assert!(matches!(err, AssetErr::AssetContentError(_)),
             "expected AssetContentError (bad json), got {:?}", err);
+    }
+    #[tokio::test]
+    async fn get_meta_reads_type_from_path_not_file() {
+        let type_ = ObstructionType::parse("new_construction_footprints").unwrap();
+        let id = Uuid::new_v4();
+        let expected_asset_id = format!("new_construction_footprints/{}.json", id);
+
+        let obstruction_metadata_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/resources/new_construction_footprints/83167e5c-c108-4d85-905c-6dc3224cc367.json");
+
+        let obstruction_meta_vec: Vec<u8> = fs::read(obstruction_metadata_path).unwrap();
+
+        let mock = MockAssetProvider::new()
+            .with_asset(AssetType::Obstruction, &expected_asset_id, obstruction_meta_vec);
+
+        let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
+        let obstruction = provider.get_obstruction_meta(&type_, id).await.unwrap();
+        assert_eq!(*obstruction.type_(), type_);
     }
 
     #[tokio::test]

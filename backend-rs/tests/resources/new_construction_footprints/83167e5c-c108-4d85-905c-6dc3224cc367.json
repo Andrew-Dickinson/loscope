@@ -1,0 +1,22 @@
+{
+  "obstruction_id": "83167e5c-c108-4d85-905c-6dc3224cc367",
+  "obstruction_type": "new_construction_building_footprint",
+  "attributes": {
+    "bin": "2129799",
+    "bbl": "2023440027",
+    "ground_elevation": 34.0,
+    "height_roof": 85.0,
+    "geom_source": "Other (Manual)",
+    "construction_year": 2025,
+    "last_status_type": "Constructed"
+  },
+  "tile_ids": [
+    "2235_21",
+    "2235_22"
+  ],
+  "x_offset": 1003728,
+  "y_offset": 235953,
+  "width": 155,
+  "height": 229,
+  "raster_file": "83167e5c-c108-4d85-905c-6dc3224cc367.tif"
+}

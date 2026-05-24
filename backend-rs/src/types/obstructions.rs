@@ -3,6 +3,8 @@ use std::fmt::Display;
 use std::fs::File;
 use std::io;
 use async_fn_stream::fn_stream;
+use derive_getters::Getters;
+use derive_new::new;
 use futures_util::Stream;
 use ndarray::{Array2, Axis};
 use rocket::serde::{Deserialize, Serialize};
@@ -88,7 +90,7 @@ impl TryFrom<ObstructionMetaDeHelper> for ObstructionMeta {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Getters, new)]
 #[serde(try_from = "ObstructionMetaDeHelper")]
 pub struct ObstructionMeta {
     #[serde(rename = "obstruction_id")]
@@ -104,6 +106,12 @@ pub struct ObstructionMeta {
 
     // Tiles intersected by the footprint
     tile_ids: Vec<TileId>
+}
+
+impl ObstructionMeta {
+    pub fn set_type(&mut self, new_type: ObstructionType){
+        self.type_ = new_type;
+    }
 }
 
 #[derive(Debug)]
