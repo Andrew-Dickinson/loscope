@@ -30,6 +30,8 @@ where
 
 const METERS_PER_FOOT: f64 = 0.3048;
 
+const CONVERSION_VALIDITY_BOUNDS_GPS: [[f64; 2]; 2] = [[40.2, 41.15], [-77.2, -72.0]];
+
 pub struct CoordinateConverter {
     nys_to_gps: Projector,
     gps_to_nys: Projector,
@@ -82,7 +84,15 @@ impl CoordinateConverter {
 
         GPSCoords3::new(res.y(), res.x(), res.z() * METERS_PER_FOOT)
     }
+
+    pub fn valid_for_conversion(gps_coords: &GPSCoords2) -> bool {
+        CONVERSION_VALIDITY_BOUNDS_GPS[0][0] <= *gps_coords.lat() &&
+            CONVERSION_VALIDITY_BOUNDS_GPS[0][1] >= *gps_coords.lat() &&
+            CONVERSION_VALIDITY_BOUNDS_GPS[1][0] <= *gps_coords.lon() &&
+            CONVERSION_VALIDITY_BOUNDS_GPS[1][1] >= *gps_coords.lon()
+    }
 }
+
 
 pub struct ThreadLocalCoordConverter {
     init: Arc<dyn Fn() -> CoordinateConverter + Send + Sync>,
@@ -135,6 +145,39 @@ mod tests {
         assert_abs_diff_eq!(*new_gps.lat(), *gps.lat(), epsilon = 0.0000001);
         assert_abs_diff_eq!(*new_gps.lon(), *gps.lon(), epsilon = 0.0000001);
         assert_abs_diff_eq!(*new_gps.alt_m(), *gps.alt_m(), epsilon = 0.001);
+    }
+
+    #[test]
+    fn valid_for_conversion_center_of_ny() {
+        // Well within NY state bounds
+        assert!(CoordinateConverter::valid_for_conversion(&GPSCoords2::new(40.7, -74.0)));
+    }
+
+    #[test]
+    fn valid_for_conversion_boundary_values() {
+        // Exact boundary corners should be valid (inclusive)
+        assert!(CoordinateConverter::valid_for_conversion(&GPSCoords2::new(40.2, -77.2)));
+        assert!(CoordinateConverter::valid_for_conversion(&GPSCoords2::new(41.15, -72.0)));
+        assert!(CoordinateConverter::valid_for_conversion(&GPSCoords2::new(40.2, -72.0)));
+        assert!(CoordinateConverter::valid_for_conversion(&GPSCoords2::new(41.15, -77.2)));
+    }
+
+    #[test]
+    fn valid_for_conversion_lat_out_of_bounds() {
+        assert!(!CoordinateConverter::valid_for_conversion(&GPSCoords2::new(40.1, -74.0))); // too far south
+        assert!(!CoordinateConverter::valid_for_conversion(&GPSCoords2::new(41.2, -74.0))); // too far north
+    }
+
+    #[test]
+    fn valid_for_conversion_lon_out_of_bounds() {
+        assert!(!CoordinateConverter::valid_for_conversion(&GPSCoords2::new(40.7, -77.3))); // too far west
+        assert!(!CoordinateConverter::valid_for_conversion(&GPSCoords2::new(40.7, -71.9))); // too far east
+    }
+
+    #[test]
+    fn valid_for_conversion_wrong_hemisphere() {
+        assert!(!CoordinateConverter::valid_for_conversion(&GPSCoords2::new(40.7, 74.0)));  // positive lon
+        assert!(!CoordinateConverter::valid_for_conversion(&GPSCoords2::new(-40.7, -74.0))); // negative lat
     }
 
     #[test]
