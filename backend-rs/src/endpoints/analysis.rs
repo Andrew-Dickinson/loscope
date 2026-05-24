@@ -1,12 +1,15 @@
+use futures_util::StreamExt;
 use kml::Kml;
 use nalgebra::convert;
-use rocket::http::{Header, Status};
+use rocket::http::{ContentType, Header, Status};
 use rocket::serde::json::Json;
 use rocket::{Response, State};
 use rocket::response::Responder;
+use rocket::response::stream::TextStream;
 use typed_floats::tf64::PositiveFinite;
 use uuid::Uuid;
 use crate::analysis::fresnel_kml::build_fresnel_kml;
+use crate::analysis::fresnel_zone_obj::stream_fresnel_tile_slice_as_obj;
 use crate::analysis::intersection_vis::tile_intersection_to_png;
 use crate::analysis::map_overview::PointEvaluationOverview;
 use crate::analysis::point_evaluation::{evaluate_points, valid_analysis_frequency, PointEvaluationInput, PointEvaluationOutput};
@@ -93,6 +96,31 @@ pub async fn intersection_visualization(
 
     Ok(PngImage(png_bytes))
 }
+
+#[get("/fresnelSliceObj/<analysis_id>/<tile_id>")]
+pub async fn get_fresnel_slice_obj(
+    analysis_id: &str,
+    tile_id: &str,
+    providers: &State<Providers>
+) -> Result<(ContentType, TextStream![String]), Status> {
+    let analysis_id = Uuid::parse_str(analysis_id).map_err(|_| Status::BadRequest)?;
+    let Ok(tile_id) = TileId::parse(&tile_id) else { return Err(Status::BadRequest) };
+
+    let analysis = providers.point_eval_result_provider()
+        .get(&analysis_id)?;
+
+    let obj_stream = TextStream! {
+        let mut stream = std::pin::pin!(
+            stream_fresnel_tile_slice_as_obj(analysis_id, analysis.result_full().zone(), tile_id)
+        );
+        while let Some(chunk) = stream.next().await {
+            yield chunk;
+        }
+    };
+
+    Ok((ContentType::new("model", "obj"), obj_stream))
+}
+
 
 #[get("/fresnelKml/<analysis_id>")]
 pub async fn fresnel_kml(

@@ -116,31 +116,6 @@ pub async fn get_terrain_obstruction_obj(
     Ok((ContentType::new("model", "obj"), obj_stream))
 }
 
-#[get("/terrain/fresnelSliceObj/<analysis_id>/<tile_id>")]
-pub async fn get_fresnel_slice_obj(
-    analysis_id: &str,
-    tile_id: &str,
-    providers: &State<Providers>
-) -> Result<(ContentType, TextStream![String]), Status> {
-    let analysis_id = Uuid::parse_str(analysis_id).map_err(|_| Status::BadRequest)?;
-    let Ok(tile_id) = TileId::parse(&tile_id) else { return Err(Status::BadRequest) };
-
-    let analysis = providers.point_eval_result_provider()
-        .get(&analysis_id)?;
-
-    let obj_stream = TextStream! {
-        let mut stream = std::pin::pin!(
-            stream_fresnel_tile_slice_as_obj(analysis_id, analysis.result_full().zone(), tile_id)
-        );
-        while let Some(chunk) = stream.next().await {
-            yield chunk;
-        }
-    };
-
-    Ok((ContentType::new("model", "obj"), obj_stream))
-}
-
-
 
 #[get("/terrain/orthoImage/<tile_id>")]
 pub async fn get_terrain_ortho(
