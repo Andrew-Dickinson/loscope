@@ -1,6 +1,21 @@
+use std::fmt::Debug;
 use std::num::ParseIntError;
 use rocket::http::Status;
 use strum_macros::Display;
+use crate::meshdb::types;
+use crate::meshdb::types::ErrorResponse;
+
+#[derive(Debug)]
+pub enum MeshDBError {
+    ApiError(String),
+    DataError(String),
+}
+
+impl<T> From<progenitor_client::Error<T>> for MeshDBError where T: Debug {
+    fn from(value: progenitor_client::Error<T>) -> Self {
+        MeshDBError::ApiError(format!("Error calling MeshDB Api: {}", value))
+    }
+}
 
 #[derive(Debug,Display)]
 pub enum TileParseErr {

@@ -40,8 +40,17 @@ nalgebra = "0.34.2"
 rand = "0.8.6"
 wincode = { version = "0.5.4", features = ["derive", "uuid"] }
 kml = "0.13.0"
-reqwest = { version = "0.13.3", features = ["json"] }
+progenitor-client = "0.14.0"
+reqwest = { version = "0.13.3", features = ["json", "stream"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde_json = "1.0"
+regress = "0.10"
 
+[build-dependencies]
+progenitor = "0.14.0"
+serde_json = "1.0"
+syn = { version = "2.0", features = ["full"] }
+prettyplease = "0.2"
 
 [dev-dependencies]
 aws-smithy-mocks = "0.2.6"

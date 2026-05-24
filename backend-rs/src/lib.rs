@@ -7,3 +7,4 @@ pub mod endpoints;
 pub mod building;
 pub mod sample_points;
 pub mod analysis;
+mod meshdb;
