@@ -90,7 +90,7 @@ fn translation_matrix(offset: (f64, f64, f64)) -> Matrix4<f64> {
 /// 4×4 homogeneous transform: NYS frame → ellipsoid frame (A_ellipsoid_to_nys inverted).
 fn nys_to_ellipsoid_transform(mid: (f64, f64, f64), ctx: &AngleContext) -> Matrix4<f64> {
     let a_ell_to_nys = translation_matrix(mid) * rotation_ellipsoid_to_nys(ctx);
-    a_ell_to_nys.try_inverse().expect("rotation is always invertible") // TODO: Is this true?
+    a_ell_to_nys.try_inverse().expect("rotation is always invertible")
 }
 
 /// Integer grid [ceil(lo), floor(hi)] inclusive.

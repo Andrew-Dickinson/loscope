@@ -21,10 +21,8 @@ pub async fn render_rooftop(
     bin_id: &str,
     providers: &State<Providers>
 ) -> Result<(ContentType, TextStream![String]), Status>  {
-    // TODO: Online lookup to validate it's a real BIN?
     let Ok(bin_id) = BINId::parse(bin_id) else { return Err(Status::BadRequest) };
 
-    // TODO: Caching?
     let factory = RooftopHeightMapFactory::new(
         providers.footprint_provider().as_ref(),
         providers.elevation_tile_provider().as_ref()
@@ -55,14 +53,12 @@ pub async fn sample_points(
     sample_config: Json<SampleConfig>,
     providers: &State<Providers>
 ) -> Result<Json<SamplePoints>, Status>  {
-    // TODO: Online lookup to validate it's a real BIN?
     let Ok(bin_id) = BINId::parse(bin_id) else { return Err(Status::BadRequest) };
 
     if sample_config.sample_spacing.is_some_and(|spacing| spacing < 1.0) {
         return Err(Status::BadRequest);
     }
 
-    // TODO: Caching?
     let factory = RooftopHeightMapFactory::new(
         providers.footprint_provider().as_ref(),
         providers.elevation_tile_provider().as_ref()

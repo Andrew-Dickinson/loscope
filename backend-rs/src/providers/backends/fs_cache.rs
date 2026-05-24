@@ -9,7 +9,6 @@ use crate::types::errors::AssetErr;
 
 #[async_trait]
 pub trait AssetProvider {
-    // TODO: Strongly type asset_id?
     async fn get_asset(&self, asset_type: AssetType, asset_id: &str) -> Result<File, AssetErr>;
     async fn list_assets_of_type(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr>;
     fn get_local_asset_path(&self, asset_type: AssetType, asset_id: &str) -> PathBuf;
