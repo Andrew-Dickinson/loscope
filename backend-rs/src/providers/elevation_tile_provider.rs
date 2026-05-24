@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io;
+use std::io::{Seek, Write};
 use std::sync::Arc;
 use derive_getters::Getters;
 use derive_new::new;
@@ -78,8 +79,8 @@ impl ElevationTile {
         Ok(ElevationTile { id, elevation_inches: image_data })
     }
 
-    pub fn write_to_tiff(&self, mut file: File) -> Result<(), TiffError> {
-        let mut tiff = TiffEncoder::new(&mut file)?;
+    pub fn write_to_tiff<W: Write + Seek>(&self, mut writer: W) -> Result<(), TiffError> {
+        let mut tiff = TiffEncoder::new(&mut writer)?;
         tiff.write_image::<colortype::Gray16>(
             SUBGRID_TILE_SIDE_LENGTH_USFT.into(),
             SUBGRID_TILE_SIDE_LENGTH_USFT.into(),
