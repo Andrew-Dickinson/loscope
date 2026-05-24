@@ -159,11 +159,14 @@ fn sample_conic<I: Iterator<Item = f64>>(c: &Matrix3<f64>, x_vals: I) -> impl It
 
 pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha: f64) -> FresnelZone {
     let pa: (f64, f64, f64) = point_evaluation_input.point_a().into();
-    let pb: (f64, f64, f64) = point_evaluation_input.point_b().into();
-    let delta = (pb.0 - pa.0, pb.1 - pa.1, pb.2 - pa.2);
+    let mut pb: (f64, f64, f64) = point_evaluation_input.point_b().into();
+    let mut delta = (pb.0 - pa.0, pb.1 - pa.1, pb.2 - pa.2);
 
-    // TODO: Validate this assertion before calling this fn
-    assert_ne!(delta.0, 0.0);
+    // Avoid divide by zero case by shifting one endpoint by a few inches rather than panic-ing
+    if delta.0 == 0.0 {
+        pb.0 += 0.1;
+        delta.0 = 0.1;
+    }
 
     let dist = (delta.0 * delta.0 + delta.1 * delta.1 + delta.2 * delta.2).sqrt();
     let mid = (
@@ -516,6 +519,16 @@ mod tests {
             gps_to_nys(40.830477, -73.941012, 80.0),
             24_000_000_000.0,
         );
+        let _zone: FresnelZone = compute_fresnel_zone(&input, 1.0);
+    }
+
+    #[test]
+    fn test_fresnel_zone_identical_easting_does_not_panic() {
+        // When pa and pb share the same easting, delta.0 == 0.0 which would cause a divide-by-zero
+        // inside AngleContext. The function shifts pb.0 by 0.1 usft to avoid this.
+        let pa = NYSCoords3::new(1_000_000.0, 176_000.0, 300.0);
+        let pb = NYSCoords3::new(1_000_000.0, 200_000.0, 500.0); // identical easting
+        let input = make_input(pa, pb, 5_000_000_000.0);
         let _zone: FresnelZone = compute_fresnel_zone(&input, 1.0);
     }
 }
