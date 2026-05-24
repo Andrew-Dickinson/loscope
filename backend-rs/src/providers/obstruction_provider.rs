@@ -25,9 +25,14 @@ impl CachingObstructionProvider {
     pub async fn new(asset_provider: Arc<dyn AssetProvider + Send + Sync>) -> Result<Self, AssetErr> {
         let mut obstruction_index = HashMap::new();
 
-        for obstruction_type in asset_provider.list_assets_of_type(AssetType::ObstructionIndex).await? {
-            let index_file = asset_provider.get_asset(AssetType::ObstructionIndex, &obstruction_type).await?;
+        for index_file_name in asset_provider.list_assets_of_type(AssetType::ObstructionIndex).await? {
+            let index_file = asset_provider.get_asset(AssetType::ObstructionIndex, &index_file_name).await?;
             let reader = BufReader::new(index_file);
+
+            let Some(obstruction_type) = index_file_name
+                .strip_suffix(".json")
+                .and_then(|t| ObstructionType::parse(t).ok())
+            else { continue };
 
             let index: HashMap<TileId, Vec<ObstructionId>> = serde_json::from_reader(reader)
                 .map_err(|e| AssetErr::AssetContentError(
@@ -36,8 +41,6 @@ impl CachingObstructionProvider {
                         obstruction_type, e
                     )
                 ))?;
-
-            let Ok(obstruction_type) = ObstructionType::parse(&obstruction_type) else { continue };
             obstruction_index.insert(obstruction_type, index);
         }
 
@@ -170,22 +173,22 @@ mod tests {
     async fn new_loads_valid_index_json() {
         let id = Uuid::new_v4();
         let mock = MockAssetProvider::new()
-            .with_list(AssetType::ObstructionIndex, &["towers"])
-            .with_asset(AssetType::ObstructionIndex, "towers", index_json("982182_00", &[id]));
+            .with_list(AssetType::ObstructionIndex, &["new_construction_footprints.json"])
+            .with_asset(AssetType::ObstructionIndex, "new_construction_footprints.json", index_json("982182_00", &[id]));
 
         let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
         let tile = TileId::parse("982182_00").unwrap();
         let result = provider.get_obstruction_ids_for_tile(tile).await.unwrap();
 
-        let t = ObstructionType::parse("towers").unwrap();
+        let t = ObstructionType::parse("new_construction_footprints").unwrap();
         assert_eq!(result[&t], vec![id]);
     }
 
     #[tokio::test]
     async fn new_returns_asset_content_error_on_malformed_json() {
         let mock = MockAssetProvider::new()
-            .with_list(AssetType::ObstructionIndex, &["towers"])
-            .with_asset(AssetType::ObstructionIndex, "towers", b"not json".to_vec());
+            .with_list(AssetType::ObstructionIndex, &["new_construction_footprints.json"])
+            .with_asset(AssetType::ObstructionIndex, "new_construction_footprints.json", b"not json".to_vec());
 
         let result = CachingObstructionProvider::new(arc(mock)).await;
         assert!(matches!(result, Err(AssetErr::AssetContentError(_))));
@@ -195,8 +198,8 @@ mod tests {
     async fn get_ids_returns_empty_for_unknown_tile() {
         let id = Uuid::new_v4();
         let mock = MockAssetProvider::new()
-            .with_list(AssetType::ObstructionIndex, &["towers"])
-            .with_asset(AssetType::ObstructionIndex, "towers", index_json("982182_00", &[id]));
+            .with_list(AssetType::ObstructionIndex, &["new_construction_footprints.json"])
+            .with_asset(AssetType::ObstructionIndex, "new_construction_footprints.json", index_json("982182_00", &[id]));
 
         let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
         let other = TileId::parse("990200_23").unwrap();
@@ -209,16 +212,16 @@ mod tests {
         let id2 = Uuid::new_v4();
         let tile_str = "982182_00";
         let mock = MockAssetProvider::new()
-            .with_list(AssetType::ObstructionIndex, &["towers", "signs"])
-            .with_asset(AssetType::ObstructionIndex, "towers", index_json(tile_str, &[id1]))
-            .with_asset(AssetType::ObstructionIndex, "signs",  index_json(tile_str, &[id2]));
+            .with_list(AssetType::ObstructionIndex, &["new_construction_footprints.json", "active_permits.json"])
+            .with_asset(AssetType::ObstructionIndex, "new_construction_footprints.json", index_json(tile_str, &[id1]))
+            .with_asset(AssetType::ObstructionIndex, "active_permits.json",  index_json(tile_str, &[id2]));
 
         let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
         let tile = TileId::parse(tile_str).unwrap();
         let result = provider.get_obstruction_ids_for_tile(tile).await.unwrap();
 
-        assert_eq!(result[&ObstructionType::parse("towers").unwrap()], vec![id1]);
-        assert_eq!(result[&ObstructionType::parse("signs").unwrap()],  vec![id2]);
+        assert_eq!(result[&ObstructionType::parse("new_construction_footprints").unwrap()], vec![id1]);
+        assert_eq!(result[&ObstructionType::parse("active_permits").unwrap()],  vec![id2]);
     }
 
     #[tokio::test]
@@ -227,14 +230,14 @@ mod tests {
         let id2 = Uuid::new_v4();
         let tile_str = "982182_00";
         let mock = MockAssetProvider::new()
-            .with_list(AssetType::ObstructionIndex, &["towers"])
-            .with_asset(AssetType::ObstructionIndex, "towers", index_json(tile_str, &[id1, id2]));
+            .with_list(AssetType::ObstructionIndex, &["new_construction_footprints.json"])
+            .with_asset(AssetType::ObstructionIndex, "new_construction_footprints.json", index_json(tile_str, &[id1, id2]));
 
         let provider = CachingObstructionProvider::new(arc(mock)).await.unwrap();
         let tile = TileId::parse(tile_str).unwrap();
         let result = provider.get_obstruction_ids_for_tile(tile).await.unwrap();
 
-        let ids = &result[&ObstructionType::parse("towers").unwrap()];
+        let ids = &result[&ObstructionType::parse("new_construction_footprints").unwrap()];
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&id1));
         assert!(ids.contains(&id2));
@@ -243,7 +246,7 @@ mod tests {
     #[tokio::test]
     async fn get_meta_propagates_asset_not_found() {
         let provider = CachingObstructionProvider::new(arc(MockAssetProvider::new())).await.unwrap();
-        let type_ = ObstructionType::parse("towers").unwrap();
+        let type_ = ObstructionType::parse("new_construction_footprints.json").unwrap();
         let id = Uuid::new_v4();
         let err = provider.get_obstruction_meta(&type_, id).await.unwrap_err();
         assert!(matches!(err, AssetErr::AssetNotFound(_)));
@@ -251,9 +254,9 @@ mod tests {
 
     #[tokio::test]
     async fn get_meta_fetches_correct_path() {
-        let type_ = ObstructionType::parse("towers").unwrap();
+        let type_ = ObstructionType::parse("new_construction_footprints").unwrap();
         let id = Uuid::new_v4();
-        let expected_asset_id = format!("towers/{}.json", id);
+        let expected_asset_id = format!("new_construction_footprints/{}.json", id);
 
         let mock = MockAssetProvider::new()
             .with_asset(AssetType::Obstruction, &expected_asset_id, b"bad json".to_vec());
@@ -267,9 +270,9 @@ mod tests {
 
     #[tokio::test]
     async fn get_meta_returns_content_error_on_bad_json() {
-        let type_ = ObstructionType::parse("towers").unwrap();
+        let type_ = ObstructionType::parse("new_construction_footprints").unwrap();
         let id = Uuid::new_v4();
-        let asset_id = format!("towers/{}.json", id);
+        let asset_id = format!("new_construction_footprints/{}.json", id);
         let mock = MockAssetProvider::new()
             .with_asset(AssetType::Obstruction, &asset_id, b"{{invalid}}".to_vec());
 
@@ -281,7 +284,7 @@ mod tests {
     #[tokio::test]
     async fn get_raster_propagates_asset_not_found() {
         let provider = CachingObstructionProvider::new(arc(MockAssetProvider::new())).await.unwrap();
-        let type_ = ObstructionType::parse("towers").unwrap();
+        let type_ = ObstructionType::parse("new_construction_footprints").unwrap();
         let id = Uuid::new_v4();
         let err = provider.get_obstruction_raster(&type_, id).await.unwrap_err();
         assert!(matches!(err, AssetErr::AssetNotFound(_)));
@@ -289,9 +292,9 @@ mod tests {
 
     #[tokio::test]
     async fn get_raster_fetches_correct_path() {
-        let type_ = ObstructionType::parse("towers").unwrap();
+        let type_ = ObstructionType::parse("new_construction_footprints").unwrap();
         let id = Uuid::new_v4();
-        let expected_asset_id = format!("towers/{}.tif", id);
+        let expected_asset_id = format!("new_construction_footprints/{}.tif", id);
 
         let mock = MockAssetProvider::new()
             .with_asset(AssetType::Obstruction, &expected_asset_id, b"not a tiff".to_vec());
