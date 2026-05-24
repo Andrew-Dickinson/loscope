@@ -14,6 +14,7 @@ use crate::analysis::tiles::{get_intersecting_tiles, TerrainFactory, TerrainGrid
 use crate::providers::elevation_tile_provider::{CachingElevationTileProvider, ElevationTileProvider};
 use crate::types::coords::{NYSCoords2, NYSCoords3};
 use crate::types::errors::AssetErr;
+use crate::types::obstructions::ObstructionTypesFilter;
 use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::TileId;
 
@@ -32,18 +33,6 @@ pub enum ResultStatus {
     Obstructed, // alpha=0.6 blocked
 }
 
-#[derive(Serialize,Deserialize,SchemaWrite,SchemaRead)]
-pub enum ObstructionTypes {
-    All,
-    Specific(Vec<String>),
-}
-
-impl Default for ObstructionTypes {
-    fn default() -> ObstructionTypes {
-        ObstructionTypes::All
-    }
-}
-
 pub type IntersectionResult = StairStepGrid<PositiveFinite>;
 
 #[derive(new,Serialize,Deserialize,SchemaWrite,SchemaRead,Getters)]
@@ -60,8 +49,8 @@ pub struct PointEvaluationInput {
     point_b: NYSCoords3,
     frequency_hz: f64,
 
-    #[serde(default = "ObstructionTypes::default")]
-    obstruction_types: ObstructionTypes,
+    #[serde(default = "ObstructionTypesFilter::default")]
+    obstruction_types: ObstructionTypesFilter,
 }
 
 #[derive(Serialize,Deserialize,SchemaWrite,SchemaRead,new,Getters)]

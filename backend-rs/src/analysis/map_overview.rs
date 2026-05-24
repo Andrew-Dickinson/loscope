@@ -76,9 +76,10 @@ mod tests {
     use uuid::Uuid;
     use super::*;
     use crate::analysis::point_evaluation::{
-        IntersectionResult, ObstructionTypes, PointEvaluationInput,
+        IntersectionResult, PointEvaluationInput,
         PointEvaluationOutcome, PointEvaluationOutput, ResultStatus, ZoneEvaluation,
     };
+    use crate::types::obstructions::ObstructionTypesFilter;
     use crate::types::stairstep::StairStepGrid;
     use crate::types::tiles::TileId;
     use crate::util::coord_conversion::{
@@ -115,7 +116,7 @@ mod tests {
         tiles: HashSet<TileId>,
     ) -> PointEvaluationOutcome {
         let input = PointEvaluationInput::new(
-            point_a, point_b, 2_400_000_000.0, ObstructionTypes::All,
+            point_a, point_b, 2_400_000_000.0, ObstructionTypesFilter::All,
         );
         let output = PointEvaluationOutput::new(Uuid::new_v4(), input, ResultStatus::Unobstructed);
         PointEvaluationOutcome::new(output, empty_zone(), empty_zone(), tiles)

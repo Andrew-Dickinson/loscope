@@ -3,8 +3,9 @@ mod loader;
 
 use loader::{assert_matches_snapshot, load_snapshot};
 use fresnel_2::analysis::fresnel_zone::compute_fresnel_zone;
-use fresnel_2::analysis::point_evaluation::{ObstructionTypes, PointEvaluationInput};
+use fresnel_2::analysis::point_evaluation::{PointEvaluationInput};
 use fresnel_2::types::coords::NYSCoords3;
+use fresnel_2::types::obstructions::ObstructionTypesFilter;
 
 macro_rules! snapshot_test {
     ($fn_name:ident, $bin:expr, $pa:expr, $pb:expr, $freq:expr, $alpha:expr) => {
@@ -15,7 +16,7 @@ macro_rules! snapshot_test {
                 NYSCoords3::new(pa.0, pa.1, pa.2),
                 NYSCoords3::new(pb.0, pb.1, pb.2),
                 freq,
-                ObstructionTypes::All,
+                ObstructionTypesFilter::All,
             );
             let zone = compute_fresnel_zone(&input, alpha);
             let snap = load_snapshot($bin);

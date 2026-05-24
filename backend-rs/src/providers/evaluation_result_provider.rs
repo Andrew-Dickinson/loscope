@@ -44,11 +44,12 @@ mod tests {
     use super::*;
     use crate::analysis::fresnel_zone::FresnelZonePoint;
     use crate::analysis::point_evaluation::{
-        IntersectionResult, ObstructionTypes, PointEvaluationInput,
+        IntersectionResult, PointEvaluationInput,
         PointEvaluationOutcome, PointEvaluationOutput, ResultStatus, ZoneEvaluation,
     };
     use crate::providers::backends::value_store::InMemoryValueStore;
     use crate::types::coords::{NYSCoords2, NYSCoords3};
+    use crate::types::obstructions::ObstructionTypesFilter;
     use crate::types::stairstep::StairStepGrid;
 
     fn empty_zone() -> ZoneEvaluation {
@@ -73,7 +74,7 @@ mod tests {
             NYSCoords3::new(1_039_748.0, 176_148.0, 0.0),
             NYSCoords3::new(1_040_000.0, 176_500.0, 0.0),
             2_400_000_000.0,
-            ObstructionTypes::All,
+            ObstructionTypesFilter::All,
         );
         let output = PointEvaluationOutput::new(id, input, ResultStatus::Unobstructed);
         PointEvaluationOutcome::new(output, empty_zone(), empty_zone(), HashSet::new())

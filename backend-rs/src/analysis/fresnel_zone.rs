@@ -283,8 +283,9 @@ pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use crate::analysis::point_evaluation::{ObstructionTypes, PointEvaluationInput};
+    use crate::analysis::point_evaluation::{PointEvaluationInput};
     use crate::types::coords::{GPSCoords3, NYSCoords3};
+    use crate::types::obstructions::ObstructionTypesFilter;
     use crate::util::coord_conversion::CoordinateConverter;
 
     fn gps_to_nys(lat: f64, lon: f64, alt_m: f64) -> NYSCoords3 {
@@ -292,7 +293,7 @@ mod tests {
     }
 
     fn make_input(pa: NYSCoords3, pb: NYSCoords3, freq: f64) -> PointEvaluationInput {
-        PointEvaluationInput::new(pa, pb, freq, ObstructionTypes::All)
+        PointEvaluationInput::new(pa, pb, freq, ObstructionTypesFilter::All)
     }
 
     const REL_TOL: f64 = 1e-6;
