@@ -55,6 +55,7 @@ prettyplease = "0.2"
 [dev-dependencies]
 aws-smithy-mocks = "0.2.6"
 aws-sdk-s3 = { version = "1", features = ["test-util"] }
+wiremock = "0.6"
 
 [profile.dev]
 debug = true
