@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs::File;
 use std::{fmt, io};
+use std::str::FromStr;
 use async_fn_stream::fn_stream;
 use derive_getters::Getters;
 use derive_new::new;
@@ -9,6 +10,8 @@ use futures_util::Stream;
 use ndarray::Array2;
 use rocket::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use rocket::serde::de::{Error, SeqAccess, Unexpected, Visitor};
+use strum::ParseError;
+use strum_macros::{Display, EnumString, AsRefStr};
 use tiff::decoder::{Decoder, DecodingResult};
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
@@ -95,8 +98,17 @@ impl<'de> Deserialize<'de> for ObstructionTypesFilter {
     }
 }
 
-#[derive(Debug,Serialize,Deserialize,Eq,Hash,PartialEq,Clone,SchemaWrite,SchemaRead)]
-pub struct ObstructionType(String);
+#[derive(Debug,Eq,Serialize,Deserialize,Hash,PartialEq,Clone,SchemaWrite,SchemaRead,EnumString,AsRefStr)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum  ObstructionType {
+    ActivePermits,
+    ApprovedJobApplications,
+    NewConstructionCo,
+    NewConstructionFootprints,
+    RecentJobApplications
+}
+
 pub type ObstructionId = Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -109,15 +121,14 @@ enum AttributeValue {
 }
 
 impl ObstructionType {
-    pub fn parse(input_str: &str) -> Result<Self, ()> {
-        // TODO: Convert to enum?
-        Ok(ObstructionType(input_str.to_string()))
+    pub fn parse(input_str: &str) -> Result<Self, ParseError> {
+        ObstructionType::from_str(input_str)
     }
 }
 
 impl Display for ObstructionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0.as_str())
+        f.write_str(self.as_ref())
     }
 }
 
@@ -129,7 +140,7 @@ struct ObstructionMetaDeHelper {
     #[serde(rename = "obstruction_id")]
     id: ObstructionId,
     #[serde(rename = "obstruction_type")]
-    type_: ObstructionType,
+    type_: String,
     attributes: HashMap<String, AttributeValue>,
     #[serde(rename = "offset_nys")]
     sw_offset: Option<NYSCoords2>,
@@ -138,10 +149,9 @@ struct ObstructionMetaDeHelper {
     tile_ids: Vec<TileId>,
 }
 
-impl TryFrom<ObstructionMetaDeHelper> for ObstructionMeta {
-    type Error = String;
+impl ObstructionMeta {
 
-    fn try_from(h: ObstructionMetaDeHelper) -> Result<Self, Self::Error> {
+    fn try_from(h: ObstructionMetaDeHelper, type_: ObstructionType) -> Result<Self, String> {
         let sw_offset = match h.sw_offset {
             Some(coords) => coords,
             None => match (h.x_offset, h.y_offset) {
@@ -152,12 +162,11 @@ impl TryFrom<ObstructionMetaDeHelper> for ObstructionMeta {
                 ),
             },
         };
-        Ok(ObstructionMeta { id: h.id, type_: h.type_, attributes: h.attributes, sw_offset, tile_ids: h.tile_ids })
+        Ok(ObstructionMeta { id: h.id, type_: type_, attributes: h.attributes, sw_offset, tile_ids: h.tile_ids })
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Getters, new)]
-#[serde(try_from = "ObstructionMetaDeHelper")]
+#[derive(Debug, Serialize, Getters, new)]
 pub struct ObstructionMeta {
     #[serde(rename = "obstruction_id")]
     id: ObstructionId,
@@ -175,8 +184,15 @@ pub struct ObstructionMeta {
 }
 
 impl ObstructionMeta {
-    pub fn set_type(&mut self, new_type: ObstructionType){
-        self.type_ = new_type;
+    pub fn from_json<R>(reader: R, obstruction_type: ObstructionType) -> Result<Self, serde_json::Error>
+        where R: io::Read
+    {
+        let obstruction_meta_internal: ObstructionMetaDeHelper = serde_json::from_reader(reader)?;
+
+        // The obstruction types stored inside the JSON files are kinda scrambled, we use
+        // the file path as the source of truth to avoid confusion
+        ObstructionMeta::try_from(obstruction_meta_internal, obstruction_type)
+            .map_err(|e| serde_json::Error::custom(e.to_string()))
     }
 }
 
@@ -275,6 +291,8 @@ impl ObstructionRaster {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+    use rocket::yansi::Paint;
     use super::*;
 
     const LEGACY_PAYLOAD: &str = r#"{
@@ -299,14 +317,16 @@ mod tests {
 
     #[test]
     fn legacy_payload_deserializes_offset() {
-        let meta: ObstructionMeta = serde_json::from_str(LEGACY_PAYLOAD).unwrap();
+        let meta: ObstructionMeta = ObstructionMeta::from_json(
+            Cursor::new(LEGACY_PAYLOAD.to_string().into_bytes()), ObstructionType::ActivePermits).unwrap();
         assert_eq!(*meta.sw_offset.easting(), 1003728.0);
         assert_eq!(*meta.sw_offset.northing(), 235953.0);
     }
 
     #[test]
     fn legacy_payload_deserializes_attributes() {
-        let meta: ObstructionMeta = serde_json::from_str(LEGACY_PAYLOAD).unwrap();
+        let meta: ObstructionMeta = ObstructionMeta::from_json(
+            Cursor::new(LEGACY_PAYLOAD.to_string().into_bytes()), ObstructionType::ActivePermits).unwrap();
         assert_eq!(meta.attributes.len(), 7);
 
         assert!(matches!(meta.attributes.get("bin"), Some(AttributeValue::String(s)) if s == "2129799"));
@@ -316,7 +336,10 @@ mod tests {
 
     #[test]
     fn legacy_payload_serializes_attributes_back_out() {
-        let meta: ObstructionMeta = serde_json::from_str(LEGACY_PAYLOAD).unwrap();
+        let meta: ObstructionMeta = ObstructionMeta::from_json(
+            Cursor::new(LEGACY_PAYLOAD.to_string().into_bytes()),
+            ObstructionType::ActivePermits
+        ).unwrap();
         let json: serde_json::Value = serde_json::to_value(&meta).unwrap();
 
         let attrs = json.get("attributes").expect("attributes key missing");
@@ -327,27 +350,23 @@ mod tests {
 
     // --- ObstructionTypesFilter::includes tests ---
 
-    fn obs_type(s: &str) -> ObstructionType {
-        ObstructionType::parse(s).unwrap()
-    }
-
     #[test]
     fn includes_all_accepts_any_type() {
         let filter = ObstructionTypesFilter::All;
-        assert!(filter.includes(&obs_type("building")));
-        assert!(filter.includes(&obs_type("tree")));
+        assert!(filter.includes(&ObstructionType::ActivePermits));
+        assert!(filter.includes(&ObstructionType::NewConstructionCo));
     }
 
     #[test]
     fn includes_specific_accepts_matching_type() {
-        let filter = ObstructionTypesFilter::Specific(vec![obs_type("building")]);
-        assert!(filter.includes(&obs_type("building")));
+        let filter = ObstructionTypesFilter::Specific(vec![ObstructionType::ActivePermits]);
+        assert!(filter.includes(&ObstructionType::ActivePermits));
     }
 
     #[test]
     fn includes_specific_rejects_nonmatching_type() {
-        let filter = ObstructionTypesFilter::Specific(vec![obs_type("building")]);
-        assert!(!filter.includes(&obs_type("tree")));
+        let filter = ObstructionTypesFilter::Specific(vec![ObstructionType::ActivePermits]);
+        assert!(!filter.includes(&ObstructionType::NewConstructionCo));
     }
 
     // --- ObstructionTypesFilter serialize tests ---
@@ -359,9 +378,9 @@ mod tests {
 
     #[test]
     fn serialize_specific_produces_array_of_type_strings() {
-        let filter = ObstructionTypesFilter::Specific(vec![obs_type("building"), obs_type("tree")]);
+        let filter = ObstructionTypesFilter::Specific(vec![ObstructionType::ActivePermits, ObstructionType::NewConstructionCo]);
         let v: serde_json::Value = serde_json::to_value(&filter).unwrap();
-        assert_eq!(v, serde_json::json!(["building", "tree"]));
+        assert_eq!(v, serde_json::json!(["active_permits", "new_construction_co"]));
     }
 
     // --- ObstructionTypesFilter deserialize tests ---
@@ -374,16 +393,16 @@ mod tests {
 
     #[test]
     fn deserialize_array_produces_specific() {
-        let filter: ObstructionTypesFilter = serde_json::from_str(r#"["building", "tree"]"#).unwrap();
-        assert!(filter.includes(&obs_type("building")));
-        assert!(filter.includes(&obs_type("tree")));
-        assert!(!filter.includes(&obs_type("other")));
+        let filter: ObstructionTypesFilter = serde_json::from_str(r#"["active_permits", "new_construction_co"]"#).unwrap();
+        assert!(filter.includes(&ObstructionType::ActivePermits));
+        assert!(filter.includes(&ObstructionType::NewConstructionCo));
+        assert!(!filter.includes(&ObstructionType::RecentJobApplications));
     }
 
     #[test]
     fn deserialize_empty_array_produces_specific_with_no_types() {
         let filter: ObstructionTypesFilter = serde_json::from_str("[]").unwrap();
-        assert!(!filter.includes(&obs_type("anything")));
+        assert!(!filter.includes(&ObstructionType::ActivePermits));
     }
 
     #[test]
@@ -401,11 +420,11 @@ mod tests {
 
     #[test]
     fn roundtrip_specific() {
-        let original = ObstructionTypesFilter::Specific(vec![obs_type("building"), obs_type("tree")]);
+        let original = ObstructionTypesFilter::Specific(vec![ObstructionType::RecentJobApplications, ObstructionType::ActivePermits]);
         let json = serde_json::to_string(&original).unwrap();
         let roundtripped: ObstructionTypesFilter = serde_json::from_str(&json).unwrap();
-        assert!(roundtripped.includes(&obs_type("building")));
-        assert!(roundtripped.includes(&obs_type("tree")));
-        assert!(!roundtripped.includes(&obs_type("other")));
+        assert!(roundtripped.includes(&ObstructionType::RecentJobApplications));
+        assert!(roundtripped.includes(&ObstructionType::ActivePermits));
+        assert!(!roundtripped.includes(&ObstructionType::NewConstructionFootprints));
     }
 }

@@ -178,6 +178,7 @@ impl<'a> TerrainFactory<'a> {
 #[cfg(test)]
 mod test {
      use std::collections::{BTreeSet, HashMap, HashSet};
+    use std::io::Cursor;
     use std::iter::repeat;
     use async_trait::async_trait;
     use maplit::{btreeset, hashset};
@@ -507,14 +508,14 @@ mod test {
     //   obs south of zone → (1_002_500, 234_800) [starts 200 below zone SW]
 
     fn obs_meta(sw_easting: f64, sw_northing: f64) -> ObstructionMeta {
-        serde_json::from_str(&format!(r#"{{
+        ObstructionMeta::from_json(Cursor::new(&format!(r#"{{
             "obstruction_id": "00000000-0000-0000-0000-000000000001",
             "obstruction_type": "test",
             "attributes": {{}},
             "x_offset": {sw_easting},
             "y_offset": {sw_northing},
             "tile_ids": []
-        }}"#)).unwrap()
+        }}"#).into_bytes()), ObstructionType::ActivePermits).unwrap()
     }
 
     fn flat_obstruction(sw_easting: f64, sw_northing: f64, easting_size: usize, northing_size: usize, value: u16) -> (ObstructionMeta, ObstructionRaster) {
@@ -741,7 +742,7 @@ mod test {
     impl ObstructionProvider for MockObstructionProvider {
         async fn get_obstruction_ids_for_tile(&self, tile_id: TileId) -> Result<HashMap<ObstructionType, Vec<ObstructionId>>, AssetErr> {
             if tile_id == self.tile_id {
-                Ok(HashMap::from([(ObstructionType::parse("test").unwrap(), vec![self.obs_id])]))
+                Ok(HashMap::from([(ObstructionType::ActivePermits, vec![self.obs_id])]))
             } else {
                 Ok(HashMap::new())
             }

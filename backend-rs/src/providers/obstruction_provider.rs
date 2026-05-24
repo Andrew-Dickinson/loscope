@@ -68,19 +68,11 @@ impl ObstructionProvider for CachingObstructionProvider {
         ).await?;
         let reader = BufReader::new(obstruction_meta_file);
 
-        let mut obstruction_meta: ObstructionMeta = serde_json::from_reader(reader)
-            .map_err(|e| AssetErr::AssetContentError(
-                format!(
-                    "Error deserializing JSON for obstruction ID {} (type {}): {}",
-                    obstruction_id, obstruction_type, e
-                )
-            ))?;
-
-        // The obstruction types stored inside the JSON files are kinda scrambled, we'll use
-        // the file path as the source of truth to avoid confusion
-        obstruction_meta.set_type(obstruction_type.clone());
-
-        Ok(obstruction_meta)
+        ObstructionMeta::from_json(reader, obstruction_type.clone())
+            .map_err(|e| AssetErr::AssetContentError(format!(
+                "Error deserializing JSON for obstruction ID {} (type {}): {}",
+                obstruction_id, obstruction_type, e
+            )))
     }
 
     async fn get_obstruction_raster(&self, obstruction_type: &ObstructionType, obstruction_id: ObstructionId) -> Result<ObstructionRaster, AssetErr> {
@@ -250,7 +242,7 @@ mod tests {
     #[tokio::test]
     async fn get_meta_propagates_asset_not_found() {
         let provider = CachingObstructionProvider::new(arc(MockAssetProvider::new())).await.unwrap();
-        let type_ = ObstructionType::parse("new_construction_footprints.json").unwrap();
+        let type_ = ObstructionType::NewConstructionFootprints;
         let id = Uuid::new_v4();
         let err = provider.get_obstruction_meta(&type_, id).await.unwrap_err();
         assert!(matches!(err, AssetErr::AssetNotFound(_)));
