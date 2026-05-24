@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::isize;
 use std::ops::Sub;
@@ -6,15 +6,18 @@ use derive_getters::Getters;
 use derive_new::new;
 use geo::Convert;
 use futures_util::{stream, StreamExt, TryStreamExt};
-use ndarray::{s, Array1, Array2};
+use ndarray::{s, Array1, Array2, ArrayView2};
 use crate::analysis::fresnel_zone::FresnelZone;
 use crate::providers::elevation_tile_provider::{ElevationTile, ElevationTileProvider};
+use crate::providers::obstruction_provider::ObstructionProvider;
 use crate::types::coords::NYSCoords2;
 use crate::types::errors::AssetErr;
+use crate::types::obstructions::{ObstructionId, ObstructionMeta, ObstructionRaster, ObstructionType, ObstructionTypesFilter};
 use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::{TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
 
-const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT: usize = 10;
+const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_TILES: usize = 10;
+const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_OBSTRUCTIONS: usize = 30;
 
 pub(crate) type TerrainGrid = StairStepGrid<u16>;
 
@@ -49,66 +52,110 @@ pub fn get_intersecting_tiles(fresnel_zone: &FresnelZone) -> HashSet<TileId> {
     intersecting_tiles
 }
 
-fn bilt_tile(tile: &ElevationTile, height_values: &mut Array2<u16>, zone: &FresnelZone) {
-    let zone_base_offset = zone.base_offset();
-    let tile_base_offset  = tile.id().get_sw_corner();
+// Shared blit logic for any source with [easting_local, northing_local] axes.
+// src_base is the (easting, northing) of the source's SW corner.
+fn bilt_impl(src_base: (usize, usize), src: ArrayView2<u16>, height_values: &mut Array2<u16>, zone: &FresnelZone) {
+    let zone_base = (zone.base_offset().easting().floor() as usize, zone.base_offset().northing().floor() as usize);
 
-    let zone_base_offset = (zone_base_offset.easting().floor() as usize, zone_base_offset.northing().floor() as usize);
-    let tile_base_offset = (tile_base_offset.easting().floor() as usize, tile_base_offset.northing().floor() as usize);
+    let src_easting_size = src.nrows();
+    let src_northing_size = src.ncols();
 
-    let i_start = (tile_base_offset.1 as isize - zone_base_offset.1 as isize).max(0) as usize;
-    let i_end: usize = ((tile_base_offset.1 as isize - zone_base_offset.1 as isize) + SUBGRID_TILE_SIDE_LENGTH_USFT as isize)
+    let i_start = (src_base.1 as isize - zone_base.1 as isize).max(0) as usize;
+    let i_end: usize = ((src_base.1 as isize - zone_base.1 as isize) + src_northing_size as isize)
         .min(zone.widths().len() as isize)
         .try_into()
-        .expect("Tile selection logic issue, tile must have at least one pixel NE of the zone's SW corner");
+        .expect("Source selection logic issue, source must have at least one pixel NE of the zone's SW corner");
 
     for i in i_start..i_end {
         let width = zone.widths()[i];
         if width == 0 { continue; }
 
         // Safety: strict_sub() won't panic here because as constructed above,
-        // min(i) = tile_base_offset.1 - zone_base_offset.1
-        let tile_y = (zone_base_offset.1 + i).strict_sub(tile_base_offset.1);
+        // min(i) = src_base.1 - zone_base.1
+        let src_y = (zone_base.1 + i).strict_sub(src_base.1);
 
-        let row_start = zone_base_offset.0 + zone.offsets()[i];
+        let row_start = zone_base.0 + zone.offsets()[i];
         let row_end = row_start + width;
 
-        let overlap_start = row_start.max(tile_base_offset.0);
-        let overlap_end = row_end.min(tile_base_offset.0 + usize::from(SUBGRID_TILE_SIDE_LENGTH_USFT));
+        let overlap_start = row_start.max(src_base.0);
+        let overlap_end = row_end.min(src_base.0 + src_easting_size);
         if overlap_start >= overlap_end { continue; }
 
         // Safety: strict_sub() won't panic here because as constructed above,
         // overlap_end > overlap_start >= row_start &&
-        // overlap_end > overlap_start >= tile_base_offset.0
+        // overlap_end > overlap_start >= src_base.0
         let j_start = overlap_start.strict_sub(row_start);
         let j_end = overlap_end.strict_sub(row_start);
-        let tile_x_start = overlap_start.strict_sub(tile_base_offset.0);
-        let tile_x_end = overlap_end.strict_sub(tile_base_offset.0);
+        let src_x_start = overlap_start.strict_sub(src_base.0);
+        let src_x_end = overlap_end.strict_sub(src_base.0);
 
         height_values.slice_mut(s![i, j_start..j_end])
-            .assign(&*tile.elevation_inches().slice(s![tile_x_start..tile_x_end, tile_y]));
+            .assign(&src.slice(s![src_x_start..src_x_end, src_y]));
     }
+}
+
+fn bilt_obstruction(obstruction_meta: &ObstructionMeta, obstruction_raster: &ObstructionRaster, height_values: &mut Array2<u16>, zone: &FresnelZone) {
+    let c = obstruction_meta.sw_offset();
+    let src_base = (c.easting().floor() as usize, c.northing().floor() as usize);
+    bilt_impl(src_base, obstruction_raster.heightmap().view(), height_values, zone);
+}
+
+fn bilt_tile(tile: &ElevationTile, height_values: &mut Array2<u16>, zone: &FresnelZone) {
+    let c = tile.id().get_sw_corner();
+    let src_base = (c.easting().floor() as usize, c.northing().floor() as usize);
+    bilt_impl(src_base, tile.elevation_inches().view(), height_values, zone);
 }
 
 #[derive(new)]
 pub struct TerrainFactory<'a> {
-    tile_provider: &'a (dyn ElevationTileProvider + Sync + Send)
+    tile_provider: &'a (dyn ElevationTileProvider + Sync + Send),
+    obstruction_provider: &'a (dyn ObstructionProvider + Sync + Send)
 }
 
 impl<'a> TerrainFactory<'a> {
-    pub async fn load_terrain_grid(&self, tile_ids: &HashSet<TileId>, zone: &FresnelZone) -> Result<TerrainGrid, AssetErr> {
+    pub async fn load_terrain_grid(&self, tile_ids: &HashSet<TileId>, zone: &FresnelZone, obs_filter: &ObstructionTypesFilter) -> Result<TerrainGrid, AssetErr> {
 
         let mut height_values = Array2::<u16>::zeros(zone.values().raw_dim());
 
         let tiles: Vec<ElevationTile> = stream::iter(tile_ids.iter().copied())
             .map(|id| self.tile_provider.get_elevation_tile(id))
-            .buffered(PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT)
+            .buffered(PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_TILES)
             .try_collect()
             .await?;
 
+        let all_obstruction_ids: HashSet<(ObstructionType, ObstructionId)> = stream::iter(tile_ids.iter().copied())
+            .map(|id| self.obstruction_provider.get_obstruction_ids_for_tile(id))
+            .buffered(PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_OBSTRUCTIONS)
+            .try_collect::<Vec<_>>()
+            .await?
+            .into_iter()
+            .flat_map(|map| {
+                map.into_iter().flat_map(|(t, ids)| {
+                    ids.into_iter().map(move |id| (t.clone(), id))
+                })
+            })
+            .filter(|(type_, _)| obs_filter.includes(type_))
+            .collect();
+
+        let obstruction_provider = self.obstruction_provider;
+        let obstructions: Vec<(ObstructionMeta, ObstructionRaster)> = stream::iter(all_obstruction_ids)
+            .map(move |(obstruction_type, obstruction_id)| async move {
+                tokio::try_join!(
+                    obstruction_provider.get_obstruction_meta(&obstruction_type, obstruction_id),
+                    obstruction_provider.get_obstruction_raster(&obstruction_type, obstruction_id),
+                )
+            })
+            .buffered(PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_OBSTRUCTIONS)
+            .try_collect()
+            .await?;
+
+
         for tile in &tiles {
             bilt_tile(tile, &mut height_values, zone);
-            // TODO: Compute obstructions and apply them also
+        }
+
+        for (obs_meta, obs_raster) in &obstructions {
+            bilt_obstruction(obs_meta, obs_raster, &mut height_values, zone);
         }
 
         Ok(
@@ -445,7 +492,146 @@ mod test {
         })
     }
 
+    // --- bilt_obstruction helpers ---
+    // Obstruction coordinates are arbitrary (not snapped to tile boundaries).
+    // SW corners used below (easting, northing):
+    //   obs at zone SW   → (1_002_500, 235_000)
+    //   obs inside zone  → (1_002_600, 235_100)  [100 east, 100 north of zone SW]
+    //   obs north half   → (1_002_500, 235_250)  [starts 250 rows in]
+    //   obs south of zone → (1_002_500, 234_800) [starts 200 below zone SW]
+
+    fn obs_meta(sw_easting: f64, sw_northing: f64) -> ObstructionMeta {
+        serde_json::from_str(&format!(r#"{{
+            "obstruction_id": "00000000-0000-0000-0000-000000000001",
+            "obstruction_type": "test",
+            "attributes": {{}},
+            "x_offset": {sw_easting},
+            "y_offset": {sw_northing},
+            "tile_ids": []
+        }}"#)).unwrap()
+    }
+
+    fn flat_obstruction(sw_easting: f64, sw_northing: f64, easting_size: usize, northing_size: usize, value: u16) -> (ObstructionMeta, ObstructionRaster) {
+        let meta = obs_meta(sw_easting, sw_northing);
+        let raster = ObstructionRaster::new(Array2::from_elem((easting_size, northing_size), value));
+        (meta, raster)
+    }
+
+    // --- bilt_obstruction tests ---
+
+    #[test]
+    fn bilt_obstruction_copies_aligned_values() {
+        // Obstruction SW matches zone SW; obstruction covers the full zone footprint.
+        let zone = flat_zone(NYSCoords2::new(1_002_500.0, 235_000.0), 300, 200, 200, 0);
+        let (meta, raster) = flat_obstruction(1_002_500.0, 235_000.0, 200, 300, 13);
+        let mut hv = Array2::<u16>::zeros(zone.values().raw_dim());
+
+        bilt_obstruction(&meta, &raster, &mut hv, &zone);
+
+        assert!(hv.iter().all(|&v| v == 13));
+    }
+
+    #[test]
+    fn bilt_obstruction_no_easting_overlap_leaves_zeros() {
+        // Obstruction is entirely east of the zone; no column overlap.
+        let zone = flat_zone(NYSCoords2::new(1_002_500.0, 235_000.0), 300, 200, 200, 0);
+        let (meta, raster) = flat_obstruction(1_002_700.0, 235_000.0, 100, 300, 99);
+        let mut hv = Array2::<u16>::zeros(zone.values().raw_dim());
+
+        bilt_obstruction(&meta, &raster, &mut hv, &zone);
+
+        assert!(hv.iter().all(|&v| v == 0));
+    }
+
+    #[test]
+    fn bilt_obstruction_partial_northing_overlap_north() {
+        // Obstruction SW is 250 rows north of zone base; rows 0..250 are untouched.
+        let zone = flat_zone(NYSCoords2::new(1_002_500.0, 235_000.0), 500, 200, 200, 0);
+        let (meta, raster) = flat_obstruction(1_002_500.0, 235_250.0, 200, 400, 7);
+        let mut hv = Array2::<u16>::zeros(zone.values().raw_dim());
+
+        bilt_obstruction(&meta, &raster, &mut hv, &zone);
+
+        for i in 0..250usize {
+            assert!(hv.row(i).iter().all(|&v| v == 0),  "row {i}: below obstruction, should be zero");
+        }
+        for i in 250..500usize {
+            assert!(hv.row(i).iter().all(|&v| v == 7), "row {i}: within obstruction, should be filled");
+        }
+    }
+
+    #[test]
+    fn bilt_obstruction_partial_northing_overlap_south() {
+        // Obstruction SW is 200 rows south of zone base; only rows 0..200 are covered.
+        let zone = flat_zone(NYSCoords2::new(1_002_500.0, 235_000.0), 500, 200, 200, 0);
+        let (meta, raster) = flat_obstruction(1_002_500.0, 234_800.0, 200, 400, 5);
+        let mut hv = Array2::<u16>::zeros(zone.values().raw_dim());
+
+        bilt_obstruction(&meta, &raster, &mut hv, &zone);
+
+        for i in 0..200usize {
+            assert!(hv.row(i).iter().all(|&v| v == 5), "row {i}: within overlap, should be filled");
+        }
+        for i in 200..500usize {
+            assert!(hv.row(i).iter().all(|&v| v == 0),  "row {i}: beyond obstruction north edge, should be zero");
+        }
+    }
+
+    #[test]
+    fn bilt_obstruction_smaller_than_zone_fills_only_footprint() {
+        // Obstruction is 100 wide × 200 tall, placed 100 east and 100 north of zone SW.
+        // Zone is 500 wide × 500 tall. Only rows 100..300, cols 100..200 should be filled.
+        let zone = flat_zone(NYSCoords2::new(1_002_500.0, 235_000.0), 500, 500, 500, 0);
+        let (meta, raster) = flat_obstruction(1_002_600.0, 235_100.0, 100, 200, 42);
+        let mut hv = Array2::<u16>::zeros(zone.values().raw_dim());
+
+        bilt_obstruction(&meta, &raster, &mut hv, &zone);
+
+        for i in 0..500usize {
+            let row = hv.row(i);
+            if i < 100 || i >= 300 {
+                assert!(row.iter().all(|&v| v == 0), "row {i}: outside northing footprint, should be zero");
+            } else {
+                assert!(row.iter().take(100).all(|&v| v == 0),  "row {i}: west of footprint, should be zero");
+                assert!(row.iter().skip(100).take(100).all(|&v| v == 42), "row {i}: within footprint, should be 42");
+                assert!(row.iter().skip(200).all(|&v| v == 0),  "row {i}: east of footprint, should be zero");
+            }
+        }
+    }
+
+    #[test]
+    fn bilt_obstruction_maps_coords_correctly() {
+        // A single lit pixel at easting_local=30, northing_local=50 in the obstruction raster
+        // should appear at height_values[[50, 30]] (row=northing, col=easting).
+        let zone = flat_zone(NYSCoords2::new(1_002_500.0, 235_000.0), 200, 200, 200, 0);
+        let meta = obs_meta(1_002_500.0, 235_000.0);
+        let mut heightmap = Array2::<u16>::zeros((200, 200));
+        heightmap[[30, 50]] = 888; // easting_local=30, northing_local=50
+        let raster = ObstructionRaster::new(heightmap);
+        let mut hv = Array2::<u16>::zeros(zone.values().raw_dim());
+
+        bilt_obstruction(&meta, &raster, &mut hv, &zone);
+
+        assert_eq!(hv[[50, 30]], 888);
+        assert_eq!(hv.iter().filter(|&&v| v > 0).count(), 1);
+    }
+
     // --- load_terrain_grid helpers ---
+
+    struct EmptyObstructionProvider;
+
+    #[async_trait]
+    impl ObstructionProvider for EmptyObstructionProvider {
+        async fn get_obstruction_ids_for_tile(&self, _tile_id: TileId) -> Result<HashMap<ObstructionType, Vec<ObstructionId>>, AssetErr> {
+            Ok(HashMap::new())
+        }
+        async fn get_obstruction_meta(&self, _t: &ObstructionType, _id: ObstructionId) -> Result<ObstructionMeta, AssetErr> {
+            unreachable!()
+        }
+        async fn get_obstruction_raster(&self, _t: &ObstructionType, _id: ObstructionId) -> Result<ObstructionRaster, AssetErr> {
+            unreachable!()
+        }
+    }
 
     struct MockTileProvider {
         tiles: HashMap<TileId, u16>,
@@ -468,11 +654,11 @@ mod test {
     #[tokio::test]
     async fn load_terrain_grid_propagates_provider_error() {
         let provider = MockTileProvider { tiles: HashMap::new(), fail: true };
-        let factory = TerrainFactory::new(&provider);
+        let factory = TerrainFactory::new(&provider, &EmptyObstructionProvider);
         let zone = flat_zone(NYSCoords2::new(1_002_500.0, 235_000.0), 500, 500, 500, 0);
         let tile_ids = hashset! { TileId::parse("2235_00").unwrap() };
 
-        let result = factory.load_terrain_grid(&tile_ids, &zone).await;
+        let result = factory.load_terrain_grid(&tile_ids, &zone, &ObstructionTypesFilter::All).await;
 
         assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
     }
@@ -480,11 +666,11 @@ mod test {
     #[tokio::test]
     async fn load_terrain_grid_empty_tile_set_returns_zero_grid_with_zone_metadata() {
         let provider = MockTileProvider { tiles: HashMap::new(), fail: false };
-        let factory = TerrainFactory::new(&provider);
+        let factory = TerrainFactory::new(&provider, &EmptyObstructionProvider);
         let base = NYSCoords2::new(1_002_500.0, 235_000.0);
         let zone = flat_zone(base.clone(), 500, 300, 300, 5);
 
-        let result = factory.load_terrain_grid(&HashSet::new(), &zone).await.unwrap();
+        let result = factory.load_terrain_grid(&HashSet::new(), &zone, &ObstructionTypesFilter::All).await.unwrap();
 
         assert!(result.values().iter().all(|&v| v == 0));
         assert_eq!(result.widths(), zone.widths());
@@ -502,12 +688,12 @@ mod test {
             tiles: HashMap::from([(id_west, 11u16), (id_east, 22u16)]),
             fail: false,
         };
-        let factory = TerrainFactory::new(&provider);
+        let factory = TerrainFactory::new(&provider, &EmptyObstructionProvider);
         // Zone spans both tiles: easting [1_002_500, 1_003_500)
         let zone = flat_zone(NYSCoords2::new(1_002_500.0, 235_000.0), 500, 1000, 1000, 0);
         let tile_ids = hashset! { id_west, id_east };
 
-        let result = factory.load_terrain_grid(&tile_ids, &zone).await.unwrap();
+        let result = factory.load_terrain_grid(&tile_ids, &zone, &ObstructionTypesFilter::All).await.unwrap();
 
         for i in 0..500usize {
             let row = result.values().row(i);
@@ -530,6 +716,68 @@ mod test {
         }
         for i in 500..600usize {
             assert!(hv.row(i).iter().all(|&v| v == 9), "row {i}: within overlap, should be filled");
+        }
+    }
+
+    // --- MockObstructionProvider ---
+
+    struct MockObstructionProvider {
+        tile_id: TileId,
+        obs_id: ObstructionId,
+        sw_easting: f64,
+        sw_northing: f64,
+        raster_easting: usize,
+        raster_northing: usize,
+        raster_value: u16,
+    }
+
+    #[async_trait]
+    impl ObstructionProvider for MockObstructionProvider {
+        async fn get_obstruction_ids_for_tile(&self, tile_id: TileId) -> Result<HashMap<ObstructionType, Vec<ObstructionId>>, AssetErr> {
+            if tile_id == self.tile_id {
+                Ok(HashMap::from([(ObstructionType::parse("test").unwrap(), vec![self.obs_id])]))
+            } else {
+                Ok(HashMap::new())
+            }
+        }
+        async fn get_obstruction_meta(&self, _t: &ObstructionType, _id: ObstructionId) -> Result<ObstructionMeta, AssetErr> {
+            Ok(obs_meta(self.sw_easting, self.sw_northing))
+        }
+        async fn get_obstruction_raster(&self, _t: &ObstructionType, _id: ObstructionId) -> Result<ObstructionRaster, AssetErr> {
+            Ok(ObstructionRaster::new(Array2::from_elem((self.raster_easting, self.raster_northing), self.raster_value)))
+        }
+    }
+
+    #[tokio::test]
+    async fn load_terrain_grid_obstruction_overwrites_terrain_in_footprint() {
+        // Tile "2235_00" fills the whole zone at elevation 10.
+        // A 100×200 obstruction placed at (1_002_600, 235_100) then overwrites that region.
+        // Expected: rows 100..300, cols 100..200 → 5000; everything else → 10.
+        let tile_id = TileId::parse("2235_00").unwrap();
+        let tile_provider = MockTileProvider { tiles: HashMap::from([(tile_id, 10u16)]), fail: false };
+        let obs_provider = MockObstructionProvider {
+            tile_id,
+            obs_id: uuid::Uuid::nil(),
+            sw_easting: 1_002_600.0,
+            sw_northing: 235_100.0,
+            raster_easting: 100,
+            raster_northing: 200,
+            raster_value: 5000,
+        };
+        let factory = TerrainFactory::new(&tile_provider, &obs_provider);
+        let zone = flat_zone(NYSCoords2::new(1_002_500.0, 235_000.0), 500, 500, 500, 0);
+
+        let result = factory.load_terrain_grid(&hashset! { tile_id }, &zone, &ObstructionTypesFilter::All).await.unwrap();
+
+        for i in 0..500usize {
+            let row = result.values().row(i);
+            if i < 100 || i >= 300 {
+                assert!(row.iter().all(|&v| v == 10), "row {i}: outside obstruction northing, should be terrain");
+            } else {
+                assert!(row.iter().take(100).all(|&v| v == 10),   "row {i}: west of obstruction, should be terrain");
+                assert!(row.iter().skip(100).take(100).all(|&v| v == 5000), "row {i}: obstruction footprint");
+                assert!(row.iter().skip(200).all(|&v| v == 10),   "row {i}: east of obstruction, should be terrain");
+            }
         }
     }
 }

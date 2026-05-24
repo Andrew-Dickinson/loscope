@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs::File;
-use std::io;
+use std::{fmt, io};
 use async_fn_stream::fn_stream;
 use derive_getters::Getters;
 use derive_new::new;
 use futures_util::Stream;
 use ndarray::Array2;
-use rocket::serde::{Deserialize, Serialize};
+use rocket::serde::{Deserialize, Deserializer, Serialize, Serializer};
+use rocket::serde::de::{Error, SeqAccess, Unexpected, Visitor};
 use tiff::decoder::{Decoder, DecodingResult};
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
@@ -17,10 +18,19 @@ use crate::types::obj_writer::{append_obj_row, MAX_OBJ_SIZE_USFT};
 use crate::types::tiles::{TileId};
 use crate::yield_str;
 
-#[derive(Serialize,Deserialize,SchemaWrite,SchemaRead)]
+#[derive(SchemaWrite,SchemaRead)]
 pub enum ObstructionTypesFilter {
     All,
-    Specific(Vec<String>),
+    Specific(Vec<ObstructionType>),
+}
+
+impl ObstructionTypesFilter {
+    pub fn includes(&self, type_: &ObstructionType) -> bool {
+        match self {
+            ObstructionTypesFilter::All => true,
+            ObstructionTypesFilter::Specific(allowed_types) => allowed_types.contains(&type_)
+        }
+    }
 }
 
 impl Default for ObstructionTypesFilter {
@@ -29,7 +39,63 @@ impl Default for ObstructionTypesFilter {
     }
 }
 
-#[derive(Debug,Serialize,Deserialize,Eq,Hash,PartialEq,Clone)]
+impl Serialize for ObstructionTypesFilter {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        match self {
+            ObstructionTypesFilter::All => {serializer.serialize_str("*")},
+            ObstructionTypesFilter::Specific(allowed_types) => {
+                allowed_types.serialize(serializer)
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ObstructionTypesFilter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>
+    {
+        pub struct ObstructionTypesFilterVisitor;
+        impl<'de> Visitor<'de> for ObstructionTypesFilterVisitor {
+            type Value = ObstructionTypesFilter;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "either a '*' literal or an array of strings")
+            }
+            fn visit_str<E>(self, input_str: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                if input_str == "*" {
+                    Ok(ObstructionTypesFilter::All)
+                } else  {
+                    Err(Error::invalid_value(Unexpected::Str(input_str), &self))
+                }
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut specifics = Vec::new();
+                while let Some(item) = seq.next_element()? {
+                    specifics.push(
+                        ObstructionType::parse(item).map_err(
+                            |_| Error::invalid_value(Unexpected::Str(item), &self)
+                        )?
+                    );
+                }
+                Ok(ObstructionTypesFilter::Specific(specifics))
+            }
+        }
+
+        deserializer.deserialize_any(ObstructionTypesFilterVisitor)
+    }
+}
+
+#[derive(Debug,Serialize,Deserialize,Eq,Hash,PartialEq,Clone,SchemaWrite,SchemaRead)]
 pub struct ObstructionType(String);
 pub type ObstructionId = Uuid;
 
@@ -123,6 +189,14 @@ pub struct ObstructionRaster {
 }
 
 impl ObstructionRaster {
+    pub(crate) fn new(heightmap: Array2<u16>) -> Self {
+        ObstructionRaster { heightmap }
+    }
+
+    pub fn heightmap(&self) -> &Array2<u16> {
+        &self.heightmap
+    }
+
     pub fn read_from_tiff(obstruction_id: ObstructionId, file: File) -> Result<ObstructionRaster, AssetErr> {
         let io = std::io::BufReader::new(file);
 
@@ -249,5 +323,89 @@ mod tests {
         assert_eq!(attrs.get("bin").and_then(|v| v.as_str()), Some("2129799"));
         assert_eq!(attrs.get("ground_elevation").and_then(|v| v.as_f64()), Some(34.0));
         assert_eq!(attrs.get("construction_year").and_then(|v| v.as_f64()), Some(2025.0));
+    }
+
+    // --- ObstructionTypesFilter::includes tests ---
+
+    fn obs_type(s: &str) -> ObstructionType {
+        ObstructionType::parse(s).unwrap()
+    }
+
+    #[test]
+    fn includes_all_accepts_any_type() {
+        let filter = ObstructionTypesFilter::All;
+        assert!(filter.includes(&obs_type("building")));
+        assert!(filter.includes(&obs_type("tree")));
+    }
+
+    #[test]
+    fn includes_specific_accepts_matching_type() {
+        let filter = ObstructionTypesFilter::Specific(vec![obs_type("building")]);
+        assert!(filter.includes(&obs_type("building")));
+    }
+
+    #[test]
+    fn includes_specific_rejects_nonmatching_type() {
+        let filter = ObstructionTypesFilter::Specific(vec![obs_type("building")]);
+        assert!(!filter.includes(&obs_type("tree")));
+    }
+
+    // --- ObstructionTypesFilter serialize tests ---
+
+    #[test]
+    fn serialize_all_produces_star_literal() {
+        assert_eq!(serde_json::to_string(&ObstructionTypesFilter::All).unwrap(), r#""*""#);
+    }
+
+    #[test]
+    fn serialize_specific_produces_array_of_type_strings() {
+        let filter = ObstructionTypesFilter::Specific(vec![obs_type("building"), obs_type("tree")]);
+        let v: serde_json::Value = serde_json::to_value(&filter).unwrap();
+        assert_eq!(v, serde_json::json!(["building", "tree"]));
+    }
+
+    // --- ObstructionTypesFilter deserialize tests ---
+
+    #[test]
+    fn deserialize_star_literal_produces_all() {
+        let filter: ObstructionTypesFilter = serde_json::from_str(r#""*""#).unwrap();
+        assert!(matches!(filter, ObstructionTypesFilter::All));
+    }
+
+    #[test]
+    fn deserialize_array_produces_specific() {
+        let filter: ObstructionTypesFilter = serde_json::from_str(r#"["building", "tree"]"#).unwrap();
+        assert!(filter.includes(&obs_type("building")));
+        assert!(filter.includes(&obs_type("tree")));
+        assert!(!filter.includes(&obs_type("other")));
+    }
+
+    #[test]
+    fn deserialize_empty_array_produces_specific_with_no_types() {
+        let filter: ObstructionTypesFilter = serde_json::from_str("[]").unwrap();
+        assert!(!filter.includes(&obs_type("anything")));
+    }
+
+    #[test]
+    fn deserialize_unrecognized_string_errors() {
+        assert!(serde_json::from_str::<ObstructionTypesFilter>(r#""all""#).is_err());
+        assert!(serde_json::from_str::<ObstructionTypesFilter>(r#""ALL""#).is_err());
+    }
+
+    #[test]
+    fn roundtrip_all() {
+        let json = serde_json::to_string(&ObstructionTypesFilter::All).unwrap();
+        let roundtripped: ObstructionTypesFilter = serde_json::from_str(&json).unwrap();
+        assert!(matches!(roundtripped, ObstructionTypesFilter::All));
+    }
+
+    #[test]
+    fn roundtrip_specific() {
+        let original = ObstructionTypesFilter::Specific(vec![obs_type("building"), obs_type("tree")]);
+        let json = serde_json::to_string(&original).unwrap();
+        let roundtripped: ObstructionTypesFilter = serde_json::from_str(&json).unwrap();
+        assert!(roundtripped.includes(&obs_type("building")));
+        assert!(roundtripped.includes(&obs_type("tree")));
+        assert!(!roundtripped.includes(&obs_type("other")));
     }
 }

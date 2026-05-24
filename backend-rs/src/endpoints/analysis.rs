@@ -54,7 +54,8 @@ pub async fn point_analysis(
 
     let result = evaluate_points(
         point_pair.into_inner(),
-        providers.elevation_tile_provider().as_ref()
+        providers.elevation_tile_provider().as_ref(),
+        providers.obstruction_provider().as_ref(),
     ).await
         .map_err(|err| { eprintln!("{:?}", err); err })
     ?;

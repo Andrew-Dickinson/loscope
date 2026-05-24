@@ -13,6 +13,7 @@ use wincode::{SchemaRead, SchemaWrite};
 use crate::analysis::fresnel_zone::{compute_fresnel_zone, FresnelZone, FresnelZonePoint};
 use crate::analysis::tiles::{get_intersecting_tiles, TerrainFactory, TerrainGrid};
 use crate::providers::elevation_tile_provider::{CachingElevationTileProvider, ElevationTileProvider};
+use crate::providers::obstruction_provider::ObstructionProvider;
 use crate::types::coords::{NYSCoords2, NYSCoords3};
 use crate::types::errors::AssetErr;
 use crate::types::obstructions::ObstructionTypesFilter;
@@ -78,10 +79,10 @@ pub fn valid_analysis_frequency(frequency_hz: f64) -> bool {
     frequency_hz >= MIN_ANALYSIS_FREQUENCY && frequency_hz <= MAX_ANALYSIS_FREQUENCY
 }
 
-pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(dyn ElevationTileProvider + Send + Sync)) -> Result<PointEvaluationOutcome, AssetErr> {
+pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(dyn ElevationTileProvider + Send + Sync), obstruction_provider: &(dyn ObstructionProvider + Send + Sync)) -> Result<PointEvaluationOutcome, AssetErr> {
     let analysis_id = Uuid::new_v4();
 
-    let terrain_factory = TerrainFactory::new(tile_provider);
+    let terrain_factory = TerrainFactory::new(tile_provider, obstruction_provider);
 
     let endpoints: (Point<f64>, Point<f64>) = (eval_input.point_a().into(), eval_input.point_b().into());
 
@@ -99,8 +100,8 @@ pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(
 
     let tile_ids = get_intersecting_tiles(&zone_full);
 
-    let terrain_full = terrain_factory.load_terrain_grid(&tile_ids, &zone_full).await?;
-    let terrain_inner = terrain_factory.load_terrain_grid(&tile_ids, &zone_inner).await?;
+    let terrain_full = terrain_factory.load_terrain_grid(&tile_ids, &zone_full, &eval_input.obstruction_types).await?;
+    let terrain_inner = terrain_factory.load_terrain_grid(&tile_ids, &zone_inner, &eval_input.obstruction_types).await?;
 
     let intersect_fn = |base_offset: &NYSCoords2| {
         let base_offset = base_offset.clone();
@@ -191,8 +192,13 @@ mod tests {
     use geo::point;
     use ndarray::Array2;
     use super::*;
+    use std::collections::HashMap;
+    use async_trait::async_trait;
     use crate::providers::elevation_tile_provider::{ElevationTile, ElevationTileProvider};
+    use crate::providers::obstruction_provider::ObstructionProvider;
     use crate::types::coords::{GPSCoords3, NYSCoords3};
+    use crate::types::obstructions::{ObstructionId, ObstructionMeta, ObstructionRaster, ObstructionType};
+    use crate::types::tiles::TileId;
     use crate::util::coord_conversion::CoordinateConverter;
 
     fn gps_to_nys(lat: f64, lon: f64, alt_m: f64) -> NYSCoords3 {
@@ -204,6 +210,21 @@ mod tests {
     }
 
     struct FlatTileProvider { elevation_inches: u16 }
+
+    struct EmptyObstructionProvider;
+
+    #[async_trait]
+    impl ObstructionProvider for EmptyObstructionProvider {
+        async fn get_obstruction_ids_for_tile(&self, _tile_id: TileId) -> Result<HashMap<ObstructionType, Vec<ObstructionId>>, AssetErr> {
+            Ok(HashMap::new())
+        }
+        async fn get_obstruction_meta(&self, _obstruction_type: &ObstructionType, _obstruction_id: ObstructionId) -> Result<ObstructionMeta, AssetErr> {
+            unreachable!()
+        }
+        async fn get_obstruction_raster(&self, _obstruction_type: &ObstructionType, _obstruction_id: ObstructionId) -> Result<ObstructionRaster, AssetErr> {
+            unreachable!()
+        }
+    }
 
     #[async_trait]
     impl ElevationTileProvider for FlatTileProvider {
@@ -225,7 +246,7 @@ mod tests {
             gps_to_nys(40.705, -73.950, 30.0),
             5_000_000_000.0,
         );
-        let outcome = evaluate_points(input, &provider).await.unwrap();
+        let outcome = evaluate_points(input, &provider, &EmptyObstructionProvider).await.unwrap();
         assert!(matches!(outcome.output().result(), ResultStatus::Unobstructed));
     }
 
@@ -239,7 +260,7 @@ mod tests {
             gps_to_nys(40.705, -73.950, 30.0),
             5_000_000_000.0,
         );
-        let outcome = evaluate_points(input, &provider).await.unwrap();
+        let outcome = evaluate_points(input, &provider, &EmptyObstructionProvider).await.unwrap();
         assert!(matches!(outcome.output().result(), ResultStatus::Obstructed));
     }
 
