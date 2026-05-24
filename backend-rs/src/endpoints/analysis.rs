@@ -1,5 +1,3 @@
-use std::io::Cursor;
-use image::ImageFormat;
 use kml::Kml;
 use nalgebra::convert;
 use rocket::http::{Header, Status};
@@ -9,7 +7,7 @@ use rocket::response::Responder;
 use typed_floats::tf64::PositiveFinite;
 use uuid::Uuid;
 use crate::analysis::fresnel_kml::build_fresnel_kml;
-use crate::analysis::intersection_vis::tile_intersection_to_img;
+use crate::analysis::intersection_vis::tile_intersection_to_png;
 use crate::analysis::map_overview::PointEvaluationOverview;
 use crate::analysis::point_evaluation::{evaluate_points, valid_analysis_frequency, PointEvaluationInput, PointEvaluationOutput};
 use crate::providers::Providers;
@@ -85,7 +83,7 @@ pub async fn intersection_visualization(
     let Ok(tile_id) = TileId::parse(&tile_id) else { return Err(Status::BadRequest) };
     let analysis_outcome = providers.point_eval_result_provider().get(&analysis_id)?;
 
-    let Some(intersection_img) = tile_intersection_to_img(
+    let Some(png_bytes) = tile_intersection_to_png(
         analysis_outcome.result_full()
             .intersection()
             .rasterize_in_tile(tile_id)
@@ -93,8 +91,6 @@ pub async fn intersection_visualization(
         return Err(Status::NoContent);
     };
 
-    let mut png_bytes: Vec<u8> = Vec::new();
-    intersection_img.write_to(&mut Cursor::new(&mut png_bytes), ImageFormat::Png).unwrap();
     Ok(PngImage(png_bytes))
 }
 

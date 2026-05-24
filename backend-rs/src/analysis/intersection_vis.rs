@@ -1,10 +1,11 @@
 use image::{DynamicImage, ImageBuffer, Rgba};
 use ndarray::Array2;
 use typed_floats::tf64::PositiveFinite;
+use crate::analysis::png_encoder;
 
-const TILE_SIDE: usize = 500;
-const UPSCALE: usize = 8;
-const OUT_SIDE: usize = TILE_SIDE * UPSCALE;
+const TILE_SIDE: usize = png_encoder::TILE_SIDE;
+const UPSCALE: usize   = png_encoder::UPSCALE;
+const OUT_SIDE: usize  = png_encoder::OUT_SIDE;
 const BORDER: usize = 2;
 
 fn colormap(v: f64) -> [u8; 4] {
@@ -158,6 +159,29 @@ pub fn tile_intersection_to_img(intersection: Array2<Option<&PositiveFinite>>) -
         ImageBuffer::from_raw(OUT_SIDE as u32, OUT_SIDE as u32, raw)
             .expect("pixel buffer dimensions must match OUT_SIDE²×4"),
     ))
+}
+
+/// Encode the intersection raster as a PNG byte vector, or `None` if the intersection is empty.
+/// Uses the custom DEFLATE encoder which exploits image sparsity for fast encoding.
+pub fn tile_intersection_to_png(intersection: Array2<Option<&PositiveFinite>>) -> Option<Vec<u8>> {
+    if intersection.iter().all(|cell| cell.map_or(true, |v| *v == 0.0)) {
+        return None;
+    }
+
+    let mut source_filled = vec![false; TILE_SIDE * TILE_SIDE];
+    let mut cell_color    = vec![[0u8; 4]; TILE_SIDE * TILE_SIDE];
+
+    for sy in 0..TILE_SIDE {
+        for sx in 0..TILE_SIDE {
+            let Some(pf) = intersection[[sx, sy]] else { continue };
+            let v = f64::from(*pf);
+            if v == 0.0 { continue; }
+            source_filled[sy * TILE_SIDE + sx] = true;
+            cell_color[sy * TILE_SIDE + sx] = colormap(v);
+        }
+    }
+
+    Some(png_encoder::encode_png(&source_filled, &cell_color))
 }
 
 #[cfg(test)]
