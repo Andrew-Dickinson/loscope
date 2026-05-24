@@ -24,7 +24,7 @@ const MAX_ANALYSIS_FREQUENCY: f64 = 200_000_000_000.;
 const ALPHA_ZONE_FULL: f64 = 1.0;
 const ALPHA_ZONE_INNER: f64 = 0.6;
 
-const OCCLUSION_DISTANCE_USFT: f64 = 4.0;
+const OCCLUSION_DISTANCE_USFT: f64 = 6.0;
 
 #[derive(Serialize,Deserialize,SchemaWrite,SchemaRead,PartialEq)]
 pub enum ResultStatus {
