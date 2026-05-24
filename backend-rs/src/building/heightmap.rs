@@ -15,9 +15,8 @@ use crate::types::coords::{valid_nys_coordinate, NYSCoords2};
 use crate::types::errors::{AssetErr, BINParseError};
 use crate::types::tiles::{TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
 
-// This is an absurd number, we should never get anywhere close to this. A typical footprint spans
-// 1-4 tiles
 const MAX_TILES_PER_BUILDING_FOOTPRINT: u16 = 500;
+const FILTER_DISTANCE_Z_USFT: f64 = 15.0;
 
 #[derive(Debug)]
 pub enum HeightMapCreateErr {
@@ -152,6 +151,10 @@ impl<'a> RooftopHeightMapFactory<'a> {
             .and(&mask)
             .for_each(| val: &mut u16, m: &bool| if !m { *val = 0 } );
 
+        // Gently smooth out the generated heightmap to reduce noise due to building edges and
+        // missing data squares
+        filter_heightmap_outliers(&mut heightmap, &mask);
+
         Ok(RooftopHeightMap::new(
             bin_id,
             sw_corner,
@@ -163,6 +166,38 @@ impl<'a> RooftopHeightMapFactory<'a> {
 }
 
 
+
+fn filter_heightmap_outliers(heightmap: &mut Array2<u16>, mask: &Array2<bool>) {
+    const THRESHOLD_INCHES: f64 = FILTER_DISTANCE_Z_USFT * 12.0;
+    let original = heightmap.clone();
+    let (nrows, ncols) = (heightmap.nrows(), heightmap.ncols());
+
+    for xi in 0..nrows {
+        for yi in 0..ncols {
+            if !mask[[xi, yi]] { continue; }
+
+            let mut neighbor_sum = 0.0f64;
+            let mut neighbor_count = 0u32;
+            for dxi in [-1isize, 0, 1] {
+                for dyi in [-1isize, 0, 1] {
+                    if dxi == 0 && dyi == 0 { continue; }
+                    let Some(nx) = xi.checked_add_signed(dxi) else { continue; };
+                    let Some(ny) = yi.checked_add_signed(dyi) else { continue; };
+                    if nx >= nrows || ny >= ncols { continue; }
+                    if !mask[[nx, ny]] { continue; }
+                    neighbor_sum += f64::from(original[[nx, ny]]);
+                    neighbor_count += 1;
+                }
+            }
+
+            if neighbor_count == 0 { continue; }
+            let neighbor_avg = neighbor_sum / f64::from(neighbor_count);
+            if (f64::from(original[[xi, yi]]) - neighbor_avg).abs() > THRESHOLD_INCHES {
+                heightmap[[xi, yi]] = neighbor_avg.round() as u16;
+            }
+        }
+    }
+}
 
 pub fn get_intersecting_tiles(poly_nys: &Polygon) -> Result<(Vec<TileId>, Rect), HeightMapCreateErr> {
     let bounding_rect = poly_nys.bounding_rect()
@@ -247,6 +282,73 @@ mod tests {
             (x: x0, y: y1),
             (x: x0, y: y0),
         ]
+    }
+
+    // --- filter_heightmap_outliers ---
+
+    fn uniform_mask(shape: (usize, usize), val: bool) -> Array2<bool> {
+        Array2::from_elem(shape, val)
+    }
+
+    #[test]
+    fn filter_replaces_outlier_with_neighbor_average() {
+        // 3×3 grid, centre pixel is a clear outlier (500 in ≈ 41.7 ft above neighbours at 100 in).
+        // All pixels are masked. The 8 neighbours all equal 100, average = 100.
+        // 500 - 100 = 400 in = 33.3 ft > 15 ft threshold → centre replaced with 100.
+        let mut hm = Array2::<u16>::from_elem((3, 3), 100);
+        hm[[1, 1]] = 500;
+        let mask = uniform_mask((3, 3), true);
+        filter_heightmap_outliers(&mut hm, &mask);
+        assert_eq!(hm[[1, 1]], 100, "outlier should be replaced by neighbour average");
+        assert_eq!(hm[[0, 0]], 100, "non-outlier neighbours should be unchanged");
+    }
+
+    #[test]
+    fn filter_leaves_pixel_within_threshold_unchanged() {
+        // Centre pixel is 1500 in = 125 ft; neighbours are 1440 in = 120 ft.
+        // Difference = 60 in = 5 ft < 15 ft → no change.
+        let mut hm = Array2::<u16>::from_elem((3, 3), 1440);
+        hm[[1, 1]] = 1500;
+        let mask = uniform_mask((3, 3), true);
+        filter_heightmap_outliers(&mut hm, &mask);
+        assert_eq!(hm[[1, 1]], 1500, "pixel within threshold should not be replaced");
+    }
+
+    #[test]
+    fn filter_leaves_isolated_masked_pixel_unchanged() {
+        // Only the centre pixel is masked; it has no masked neighbours → no change.
+        let mut hm = Array2::<u16>::from_elem((3, 3), 0);
+        hm[[1, 1]] = 999;
+        let mut mask = uniform_mask((3, 3), false);
+        mask[[1, 1]] = true;
+        filter_heightmap_outliers(&mut hm, &mask);
+        assert_eq!(hm[[1, 1]], 999, "pixel with no masked neighbours should not change");
+    }
+
+    #[test]
+    fn filter_does_not_touch_unmasked_pixels() {
+        // Corner pixel is unmasked and looks like an outlier — filter must ignore it.
+        let mut hm = Array2::<u16>::from_elem((3, 3), 100);
+        hm[[0, 0]] = 5000;
+        let mut mask = uniform_mask((3, 3), true);
+        mask[[0, 0]] = false;
+        filter_heightmap_outliers(&mut hm, &mask);
+        assert_eq!(hm[[0, 0]], 5000, "unmasked pixel must not be modified");
+    }
+
+    #[test]
+    fn filter_average_excludes_unmasked_neighbours() {
+        // Centre pixel = 1000 in; its 8 neighbours are all 100 in, but half are unmasked.
+        // Masked neighbours: 4 pixels at 100 in → avg = 100. Diff = 900 in = 75 ft > 15 ft.
+        let mut hm = Array2::<u16>::from_elem((3, 3), 100);
+        hm[[1, 1]] = 1000;
+        let mut mask = uniform_mask((3, 3), true);
+        mask[[0, 0]] = false;
+        mask[[0, 2]] = false;
+        mask[[2, 0]] = false;
+        mask[[2, 2]] = false;
+        filter_heightmap_outliers(&mut hm, &mask);
+        assert_eq!(hm[[1, 1]], 100, "outlier replaced using only masked neighbours");
     }
 
     // --- get_intersecting_tiles ---
