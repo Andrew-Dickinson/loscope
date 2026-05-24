@@ -16,14 +16,14 @@ import type { GeoJsonObject, Feature, Geometry, GeoJsonProperties } from 'geojso
 
 export interface AnalysisTile {
   id: string
-  bounds: [[number, number], [number, number]]  // [[lon_sw, lat_sw], [lon_ne, lat_ne]]
+  bounds: [[number, number], [number, number]]  // [[lat_sw, lon_sw], [lat_ne, lon_ne]]
   intersection_detected: boolean
 }
 
 export interface AnalysisOverview {
-  endpoints: [[number, number, number], [number, number, number]]  // [lon, lat, alt]
+  endpoints: [[number, number, number], [number, number, number]]  // [lat, lon, alt]
   tiles: AnalysisTile[]
-  overhead_ellipse_poly: [number, number][]  // [lon, lat] pairs
+  overhead_ellipse_poly: [number, number][]  // [lat, lon] pairs
 }
 
 interface TileMapProps {
@@ -41,7 +41,7 @@ function buildTilesGeoJson(tiles: AnalysisTile[]): GeoJsonObject {
   return {
     type: 'FeatureCollection',
     features: tiles.map(tile => {
-      const [[lon_sw, lat_sw], [lon_ne, lat_ne]] = tile.bounds
+      const [[lat_sw, lon_sw], [lat_ne, lon_ne]] = tile.bounds
       return {
         type: 'Feature',
         geometry: {
@@ -62,7 +62,7 @@ function buildTilesGeoJson(tiles: AnalysisTile[]): GeoJsonObject {
 
 // Build LOS line + endpoint markers as a GeoJSON FeatureCollection
 function buildLosGeoJson(endpoints: [[number, number, number], [number, number, number]]): GeoJsonObject {
-  const [[lon_a, lat_a], [lon_b, lat_b]] = endpoints
+  const [[lat_a, lon_a], [lat_b, lon_b]] = endpoints
   return {
     type: 'FeatureCollection',
     features: [
@@ -89,7 +89,7 @@ function buildLosGeoJson(endpoints: [[number, number, number], [number, number, 
 function buildEllipseGeoJson(poly: [number, number][]): GeoJsonObject {
   return {
     type: 'Feature',
-    geometry: { type: 'Polygon', coordinates: [poly as [number, number][]] },
+    geometry: { type: 'Polygon', coordinates: [poly.map(([lat, lon]) => [lon, lat])] },
     properties: {},
   } as GeoJsonObject
 }
@@ -98,7 +98,7 @@ function buildEllipseGeoJson(poly: [number, number][]): GeoJsonObject {
 function FitBounds({ endpoints }: { endpoints: [[number, number, number], [number, number, number]] }) {
   const map = useMap()
   useEffect(() => {
-    const [[lon_a, lat_a], [lon_b, lat_b]] = endpoints
+    const [[lat_a, lon_a], [lat_b, lon_b]] = endpoints
     const bounds: [[number, number], [number, number]] = [
       [Math.min(lat_a, lat_b) - 0.002, Math.min(lon_a, lon_b) - 0.002],
       [Math.max(lat_a, lat_b) + 0.002, Math.max(lon_a, lon_b) + 0.002],
@@ -138,7 +138,7 @@ export default function TileMap({ overview, analysisId }: TileMapProps) {
     setPanelOpen(true)
     const tile = overview.tiles.find(t => t.id === tileId)
     if (tile) {
-      const [[lon_sw, lat_sw], [lon_ne, lat_ne]] = tile.bounds
+      const [[lat_sw, lon_sw], [lat_ne, lon_ne]] = tile.bounds
       // Delay slightly so the map has time to resize to 60% before fitting
       setTimeout(() => mapRef.current?.fitBounds([[lat_sw, lon_sw], [lat_ne, lon_ne]], { padding: [40, 40] }), 80)
     }
@@ -155,7 +155,7 @@ export default function TileMap({ overview, analysisId }: TileMapProps) {
 
   // Approximate initial center; FitBounds will correct it
   const center: [number, number] = (() => {
-    const [[lon_a, lat_a], [lon_b, lat_b]] = overview.endpoints
+    const [[lat_a, lon_a], [lat_b, lon_b]] = overview.endpoints
     return [(lat_a + lat_b) / 2, (lon_a + lon_b) / 2]
   })()
 
@@ -181,7 +181,7 @@ export default function TileMap({ overview, analysisId }: TileMapProps) {
 
           {/* Intersection visualization overlays — one per tile where intersection detected */}
           {overview.tiles.filter(t => t.intersection_detected).map(tile => {
-            const [[lon_sw, lat_sw], [lon_ne, lat_ne]] = tile.bounds
+            const [[lat_sw, lon_sw], [lat_ne, lon_ne]] = tile.bounds
             return (
               <ImageOverlay
                 key={`overlay-${tile.id}`}

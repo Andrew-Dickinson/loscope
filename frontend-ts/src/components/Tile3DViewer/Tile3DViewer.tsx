@@ -6,7 +6,7 @@
  * - Heightmap: GET /api/tileview/terrain/heightRaster/<tileId> → TIFF decoded by geotiff.js
  * - Ortho texture: GET /api/tileview/terrain/orthoImage/<tileId>
  * - Obstruction OBJs: GET /api/tileview/terrain/obstructionObj/<type>/<id>/<tileId>
- * - Fresnel zone OBJ: GET /api/tileView/fresnelSliceObj/<analysisId>/<tileId>
+ * - Fresnel zone OBJ: GET /api/analysis/fresnelSliceObj/<analysisId>/<tileId>
  *
  * Tile obstruction_ids from GET /api/tileview/terrain/tileOverview/<tileId>
  * are keyed by type: { building: [id, ...], permit: [id, ...], ... }
@@ -76,7 +76,7 @@ function useTileData(tileId: string | null, analysisId: string | null): TileData
 
         // 2. Check if Fresnel zone OBJ is available (204 = not in this tile)
         const zoneRes = await fetch(
-          `/api/tileView/fresnelSliceObj/${analysisId}/${tileId}`,
+          `/api/analysis/fresnelSliceObj/${analysisId}/${tileId}`,
           { method: 'HEAD' }
         )
         const zoneAvailable = zoneRes.ok && zoneRes.status !== 204
@@ -193,7 +193,7 @@ function useObjLoader(url: string): THREE.Group | null {
 
 // ── Zone OBJ ──────────────────────────────────────────────────────────────────
 function ZoneObj({ analysisId, tileId, onLoaded, visible }: { analysisId: string; tileId: string; onLoaded: () => void; visible: boolean }) {
-  const obj = useObjLoader(`/api/tileView/fresnelSliceObj/${analysisId}/${tileId}`)
+  const obj = useObjLoader(`/api/analysis/fresnelSliceObj/${analysisId}/${tileId}`)
   const onLoadedRef = useRef(onLoaded)
   onLoadedRef.current = onLoaded
   useEffect(() => {
@@ -421,8 +421,11 @@ function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibilit
 
 // ── Obstruction overview fetching ────────────────────────────────────────────
 interface ObsOverview {
+  obstruction_id: string
   obstruction_type: string
   attributes: Record<string, string | number | null>
+  offset_nys: [number, number]
+  tile_ids: string[]
 }
 
 function useObstructionOverviews(obstructions: ObsEntry[]): Record<string, ObsOverview | null> {

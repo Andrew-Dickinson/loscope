@@ -22,17 +22,16 @@ async function toNys(lat: number, lon: number, alt_m: number): Promise<[number, 
   const res = await fetch('/api/coords/toNys', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ lat, lon, alt_m }),
+    body: JSON.stringify({ gps: [lat, lon, alt_m] }),
   })
   if (!res.ok) throw new Error(`Coordinate conversion failed: HTTP ${res.status}`)
-  const d = await res.json() as { nys_e: number; nys_n: number; nys_z: number }
-  return [d.nys_e, d.nys_n, d.nys_z]
+  const d = await res.json() as { nys: [number, number, number] }
+  return d.nys
 }
 
 interface SamplePointsResponse {
   sample_points: BackendSamplePoint[]
-  x_sw: number
-  y_sw: number
+  sw_offset: [number, number]
 }
 
 async function getSamplePoints(
@@ -59,13 +58,19 @@ async function analyzePoint(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      point_a_nys: [pt.measurement_point.nys_e, pt.measurement_point.nys_n, pt.measurement_point.nys_z],
+      point_a_nys: pt.sample_point.nys,
       point_b_nys: nysB,
-      frequency_ghz: freqGhz,
+      frequency_hz: freqGhz * 1e9,
     }),
   })
   if (!res.ok) throw new Error(`Analysis failed: HTTP ${res.status}`)
-  return res.json() as Promise<PointAnalysis>
+  const d = await res.json() as { id: string; result: string }
+  const resultMap: Record<string, string> = {
+    Unobstructed:        'unobstructed',
+    PartiallyObstructed: 'partially_obstructed',
+    Obstructed:          'obstructed',
+  }
+  return { id: d.id, result: resultMap[d.result] ?? d.result.toLowerCase() } as PointAnalysis
 }
 
 async function runConcurrent<T>(
@@ -126,7 +131,7 @@ export default function App() {
       }
 
       setLoading({ message: 'Loading rooftop sample points…' })
-      const { sample_points: points, x_sw, y_sw } = await getSamplePoints(values.bin_id, {
+      const { sample_points: points, sw_offset } = await getSamplePoints(values.bin_id, {
         mast_offset_ft: values.mast_offset_ft,
         sample_spacing: values.sample_spacing,
       })
@@ -135,7 +140,7 @@ export default function App() {
       setBuildingLabel(values.building_label ?? null)
       setNysB(nysBPoint)
       setSamplePoints(points)
-      setBuildingOffset({ x_sw, y_sw })
+      setBuildingOffset({ x_sw: sw_offset[0], y_sw: sw_offset[1] })
 
       if (points.length === 0) {
         setLoading(null)
@@ -202,10 +207,10 @@ export default function App() {
     setLoading({ message: 'Loading map overview…' })
 
     try {
-      const res = await fetch(`/api/analysis/overview/${analysis.analysis_id}`)
+      const res = await fetch(`/api/analysis/overview/${analysis.id}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const overview = await res.json() as AnalysisOverview
-      setActiveMap({ analysisId: analysis.analysis_id, overview })
+      setActiveMap({ analysisId: analysis.id, overview })
       setLoading(null)
     } catch (err) {
       setLoading({ message: String(err), isError: true })

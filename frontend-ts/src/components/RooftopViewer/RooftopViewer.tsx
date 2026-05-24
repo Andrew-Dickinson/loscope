@@ -15,21 +15,17 @@ import { buildVoronoiMaterial } from './VoronoiMaterial'
 import type { ThreeEvent } from '@react-three/fiber'
 
 export interface EncodedPoint {
-  x: number
-  y: number
-  z: number
-  nys_e: number
-  nys_n: number
-  nys_z: number
+  relative: [number, number, number]
+  nys: [number, number, number]
 }
 
 export interface BackendSamplePoint {
   display_point: EncodedPoint
-  measurement_point: EncodedPoint
+  sample_point: EncodedPoint
 }
 
 export interface PointAnalysis {
-  analysis_id: string
+  id: string
   result: string  // 'unobstructed' | 'partially_obstructed' | 'obstructed'
 }
 
@@ -62,8 +58,8 @@ function makeCustomPoint(
   const nys_n = local_y + y_sw
 
   return {
-    display_point:     { x: local_x, y: local_y, z: display_z, nys_e, nys_n, nys_z: display_z },
-    measurement_point: { x: local_x, y: local_y, z: meas_z,    nys_e, nys_n, nys_z: meas_z    },
+    display_point: { relative: [local_x, local_y, display_z], nys: [nys_e, nys_n, display_z] },
+    sample_point:  { relative: [local_x, local_y, meas_z],    nys: [nys_e, nys_n, meas_z]    },
   }
 }
 
@@ -84,9 +80,9 @@ function TerrainMesh({ objUrl, samplePoints, analyses, placementMode, onPlacemen
   useEffect(() => { onTerrainLoaded(obj) }, [obj, onTerrainLoaded])
 
   const voronoiPoints = useMemo(() => samplePoints.map((sp, i) => ({
-    x: sp.display_point.x,
-    y: sp.display_point.y,
-    z: sp.display_point.z,
+    x: sp.display_point.relative[0],
+    y: sp.display_point.relative[1],
+    z: sp.display_point.relative[2],
     status: analyses[i]?.result ?? '__pending__',
   })), [samplePoints, analyses])
 
@@ -182,12 +178,12 @@ function DirectionArrows({ samplePoints, analyses, nysB, hoveredSphereRef }: {
     const yAxis = new THREE.Vector3(0, 1, 0)
 
     samplePoints.forEach((sp, i) => {
-      const mp     = sp.measurement_point
+      const mp     = sp.sample_point
       const status = analyses[i]?.result ?? '__pending__'
 
-      const dx = nysB[0] - mp.nys_e
-      const dy = nysB[1] - mp.nys_n
-      const dz = nysB[2] - mp.nys_z
+      const dx = nysB[0] - mp.nys[0]
+      const dy = nysB[1] - mp.nys[1]
+      const dz = nysB[2] - mp.nys[2]
       const dir = new THREE.Vector3(dx, dz, -dy)
       if (dir.lengthSq() === 0) { entriesRef.current[i] = null; return }
       dir.normalize()
@@ -206,7 +202,7 @@ function DirectionArrows({ samplePoints, analyses, nysB, hoveredSphereRef }: {
 
       // Group anchored at the measurement point — scaling grows outward from there
       const arrowGroup = new THREE.Group()
-      arrowGroup.position.set(mp.x, mp.z, -mp.y)
+      arrowGroup.position.set(mp.relative[0], mp.relative[2], -mp.relative[1])
       arrowGroup.add(shaft)
       arrowGroup.add(head)
       root.add(arrowGroup)
@@ -358,8 +354,8 @@ function SphereGroup({ idxs, samplePoints, dummy, hoverable, clickable, onPointC
     const depth = depthRef.current
     if (!mesh) return
     idxs.forEach((ptIdx, i) => {
-      const mp = samplePoints[ptIdx].measurement_point
-      dummy.position.set(mp.x, mp.z, -mp.y)
+      const mp = samplePoints[ptIdx].sample_point
+      dummy.position.set(mp.relative[0], mp.relative[2], -mp.relative[1])
       dummy.scale.set(1, 1, 1)
       dummy.updateMatrix()
       mesh.setMatrixAt(i, dummy.matrix)
@@ -384,8 +380,8 @@ function SphereGroup({ idxs, samplePoints, dummy, hoverable, clickable, onPointC
     const applyScale = (globalIdx: number, scale: number) => {
       const instanceIdx = idxs.indexOf(globalIdx)
       if (instanceIdx === -1) return
-      const mp = samplePoints[globalIdx].measurement_point
-      dummy.position.set(mp.x, mp.z, -mp.y)
+      const mp = samplePoints[globalIdx].sample_point
+      dummy.position.set(mp.relative[0], mp.relative[2], -mp.relative[1])
       dummy.scale.set(scale, scale, scale)
       dummy.updateMatrix()
       mesh.setMatrixAt(instanceIdx, dummy.matrix)
@@ -672,8 +668,8 @@ function SphereOverlay({ samplePoints, analyses, hoveredSphereRef }: {
     const mesh = meshRef.current
     if (!mesh) return
     for (let i = 0; i < n; i++) {
-      const mp = samplePoints[i].measurement_point
-      dummy.position.set(mp.x, mp.z, -mp.y)
+      const mp = samplePoints[i].sample_point
+      dummy.position.set(mp.relative[0], mp.relative[2], -mp.relative[1])
       dummy.scale.set(1, 1, 1)
       dummy.updateMatrix()
       mesh.setMatrixAt(i, dummy.matrix)
@@ -711,8 +707,8 @@ function SphereOverlay({ samplePoints, analyses, hoveredSphereRef }: {
     if (cur !== prev) {
       const setScale = (idx: number, scale: number) => {
         if (idx < 0 || idx >= n) return
-        const mp = samplePoints[idx].measurement_point
-        dummy.position.set(mp.x, mp.z, -mp.y)
+        const mp = samplePoints[idx].sample_point
+        dummy.position.set(mp.relative[0], mp.relative[2], -mp.relative[1])
         dummy.scale.set(scale, scale, scale)
         dummy.updateMatrix()
         mesh.setMatrixAt(idx, dummy.matrix)

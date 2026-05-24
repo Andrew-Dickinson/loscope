@@ -264,7 +264,7 @@ export default function FarEndPicker({ binId, label, onConfirm, onCancel }: FarE
       body: JSON.stringify({ mast_offset_ft: 0, sample_spacing: 100 }),
     })
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then(d => setBuildingOffset({ x_sw: d.x_sw, y_sw: d.y_sw }))
+      .then(d => setBuildingOffset({ x_sw: d.sw_offset[0], y_sw: d.sw_offset[1] }))
       .catch(err => setLoadError(String(err)))
   }, [binId])
 
