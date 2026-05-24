@@ -5,3 +5,4 @@ pub mod angle_context;
 pub mod map_overview;
 pub mod intersection_vis;
 pub mod fresnel_kml;
+pub mod fresnel_zone_obj;
