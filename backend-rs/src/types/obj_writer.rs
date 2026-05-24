@@ -1,7 +1,55 @@
+use std::fmt::Write;
 use async_fn_stream::StreamEmitter;
+use ndarray::Array2;
 
 // This is humungous, we would ordinarily expect this to be <1000
 pub const MAX_OBJ_SIZE_USFT: usize = 200_000;
+
+/// Append OBJ geometry for one row of a u16 heightmap into `buf`, advancing `vi`.
+///
+/// - `skip_pixel(xi, yi, z_in)` → `true` to skip this pixel entirely.
+/// - `adj_side_z(adj_idx, adj_raw, z_in)` → given the neighbor's array index (`None` if
+///   out-of-bounds), its raw u16 height (0 when OOB), and this pixel's raw u16 height:
+///   return `Some(z_ft)` to draw a side face down to that elevation, or `None` to skip.
+pub fn append_obj_row(
+    xi: usize,
+    heightmap: &Array2<u16>,
+    vi: &mut usize,
+    buf: &mut String,
+    skip_pixel: impl Fn(usize, usize, u16) -> bool,
+    adj_side_z: impl Fn(Option<(usize, usize)>, u16, u16) -> Option<f64>,
+) {
+    for (yi, &z_in) in heightmap.row(xi).iter().enumerate() {
+        if skip_pixel(xi, yi, z_in) { continue; }
+        let z_ft = z_in as f64 / 12.0;
+        let (x1, y1) = (xi + 1, yi + 1);
+
+        let v = *vi + 1; *vi += 4;
+        let _ = write!(buf,
+            "v {xi} {yi} {z_ft:.3}\nv {x1} {yi} {z_ft:.3}\n\
+             v {x1} {y1} {z_ft:.3}\nv {xi} {y1} {z_ft:.3}\n\
+             f {v} {} {} {}\n", v+1, v+2, v+3);
+
+        for (dxi, dyi, ax, ay, bx, by) in [
+            ( 0isize, -1isize, xi, yi, x1, yi),
+            ( 0,       1,      x1, y1, xi, y1),
+            ( 1,       0,      x1, yi, x1, y1),
+            (-1,       0,      xi, y1, xi, yi),
+        ] {
+            let adj_idx = xi.checked_add_signed(dxi).zip(yi.checked_add_signed(dyi));
+            let adj_raw = adj_idx
+                .and_then(|(ax_i, ay_i)| heightmap.get([ax_i, ay_i]).copied())
+                .unwrap_or(0);
+            let Some(adj_z) = adj_side_z(adj_idx, adj_raw, z_in) else { continue; };
+
+            let v = *vi + 1; *vi += 4;
+            let _ = write!(buf,
+                "v {ax} {ay} {adj_z:.3}\nv {bx} {by} {adj_z:.3}\n\
+                 v {bx} {by} {z_ft:.3}\nv {ax} {ay} {z_ft:.3}\n\
+                 f {v} {} {} {}\n", v+1, v+2, v+3);
+        }
+    }
+}
 
 #[macro_export]
 macro_rules! yield_str {

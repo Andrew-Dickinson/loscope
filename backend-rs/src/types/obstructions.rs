@@ -6,14 +6,14 @@ use async_fn_stream::fn_stream;
 use derive_getters::Getters;
 use derive_new::new;
 use futures_util::Stream;
-use ndarray::{Array2, Axis};
+use ndarray::Array2;
 use rocket::serde::{Deserialize, Serialize};
 use tiff::decoder::{Decoder, DecodingResult};
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
 use crate::types::coords::NYSCoords2;
 use crate::types::errors::AssetErr;
-use crate::types::obj_writer::{RooftopObjWriter, MAX_OBJ_SIZE_USFT};
+use crate::types::obj_writer::{append_obj_row, MAX_OBJ_SIZE_USFT};
 use crate::types::tiles::{TileId};
 use crate::yield_str;
 
@@ -162,56 +162,39 @@ impl ObstructionRaster {
     }
 
     pub fn to_obj_stream(&self, type_: ObstructionType, id: ObstructionId) -> impl Stream<Item = String> {
-        let heightmap = &self.heightmap;
-
-        let heightmap_ft = heightmap.map(|z_in| f64::from(*z_in) / 12.0);
-        assert!(heightmap_ft.nrows() < MAX_OBJ_SIZE_USFT);
-        assert!(heightmap_ft.ncols() < MAX_OBJ_SIZE_USFT);
+        let heightmap = self.heightmap.clone();
+        assert!(heightmap.nrows() < MAX_OBJ_SIZE_USFT);
+        assert!(heightmap.ncols() < MAX_OBJ_SIZE_USFT);
 
         fn_stream(|e| async move {
-            yield_str!(e, "# Obstruction heightmap terrain\n");
-            e.emit(format!("# Obstruction id: {}\n", id)).await;
-            e.emit( format!("# Obstruction type: {}\n", type_)).await;
-            yield_str!(e, "# X = easting (local), Y = northing (local), Z = elevation (ft)\n");
-            yield_str!(e, "o heightmap\n\n");
+            e.emit(format!(
+                "# Obstruction heightmap terrain\n\
+                 # Obstruction id: {id}\n\
+                 # Obstruction type: {type_}\n\
+                 # X = easting (local), Y = northing (local), Z = elevation (ft)\n\
+                 o heightmap\n\n"
+            )).await;
 
-            let mut writer = RooftopObjWriter::new(&e);
+            let mut vi: usize = 0;
+            let mut buf = String::with_capacity(16 * 1024);
 
-            for (xi, col) in heightmap_ft.axis_iter(Axis(0)).into_iter().enumerate() {
-                for (yi, z_ft) in col.iter().enumerate() {
-                    if *z_ft == 0.0 { continue; }
-
-                    // as f64 is safe per assertions above about
-                    // max(xi, yi) = max(nrows, ncols) < MAX_OBJ_SIZE_USFT
-                    let (x0, y0) = (xi as f64, yi as f64);
-                    let (x1, y1) = (x0 + 1.0, y0 + 1.0);
-                    writer.write_horizontal_face(x0, x1, y0, y1, *z_ft).await;
-
-                    // Side faces
-                    for (dxi, dyi, ax, ay, bx, by) in [
-                        ( 0, -1, x0, y0, x1, y0),
-                        ( 0,  1, x1, y1, x0, y1),
-                        ( 1,  0, x1, y0, x1, y1),
-                        (-1,  0, x0, y1, x0, y0),
-                    ] {
-                        let (delta_xi, delta_yi): (i8, i8) = (dxi, dyi);
-                        let maybe_adj_z = xi.checked_add_signed(delta_xi.into())
-                            .zip(yi.checked_add_signed(delta_yi.into()))
-                            .and_then(|adj_xy| heightmap_ft.get([adj_xy.0, adj_xy.1]));
-
-                        // Unlike the rooftop, we want to draw vertical faces for the sides of
-                        // the obstruction, we fill in "gaps" from the sides of the obstruction
-                        // with 0.0 so we draw the sides into the ground
-                        let adj_z = maybe_adj_z.unwrap_or(&0.0);
-
-                        // To avoid duplicate vertical faces, the top face "wins", and we don't draw
-                        // the side if the adjacent pixel is below this one
-                        if adj_z >= &*z_ft { continue }
-
-                        writer.write_vertical_face(ax, bx, ay, by, *z_ft, *adj_z).await;
-                    }
+            for xi in 0..heightmap.nrows() {
+                append_obj_row(
+                    xi, &heightmap, &mut vi, &mut buf,
+                    |_xi, _yi, z_in| z_in == 0,
+                    // Draw side face down to adj_z whenever adj is strictly lower.
+                    // OOB neighbors get adj_raw=0, which is always < z_in (pixel is non-zero),
+                    // so the face is drawn to the ground — correct for building sides.
+                    |_adj_idx, adj_raw, z_in| {
+                        if adj_raw >= z_in { None } else { Some(adj_raw as f64 / 12.0) }
+                    },
+                );
+                if buf.len() >= 16 * 1024 {
+                    e.emit(std::mem::take(&mut buf)).await;
                 }
             }
+
+            if !buf.is_empty() { e.emit(buf).await; }
         })
     }
 }

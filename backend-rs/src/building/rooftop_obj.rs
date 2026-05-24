@@ -1,9 +1,7 @@
-use async_fn_stream::{fn_stream, StreamEmitter};
+use async_fn_stream::fn_stream;
 use futures_util::{Stream, StreamExt};
-use ndarray::Axis;
 use crate::building::heightmap::RooftopHeightMap;
-use crate::types::obj_writer::{RooftopObjWriter, MAX_OBJ_SIZE_USFT};
-use crate::yield_str;
+use crate::types::obj_writer::{append_obj_row, MAX_OBJ_SIZE_USFT};
 
 impl RooftopHeightMap {
     pub async fn to_rooftop_obj_string(&self) -> String {
@@ -14,65 +12,43 @@ impl RooftopHeightMap {
     }
 
     pub fn to_rooftop_obj_stream(&self) -> impl Stream<Item = String> {
-        // TODO: Should we add a field for this to RooftopHeightMap,
-        //  for actual ground approximation?
-        let z_ground = 0.0;
-
-        let heightmap = self.heightmap();
-        let mask = self.mask();
-
-        let heightmap_ft = heightmap.map(|z_in| f64::from(*z_in) / 12.0);
-        assert!(heightmap_ft.nrows() < MAX_OBJ_SIZE_USFT);
-        assert!(heightmap_ft.ncols() < MAX_OBJ_SIZE_USFT);
+        let heightmap = self.heightmap().clone();
+        let mask = self.mask().clone();
+        assert!(heightmap.nrows() < MAX_OBJ_SIZE_USFT);
+        assert!(heightmap.ncols() < MAX_OBJ_SIZE_USFT);
 
         fn_stream(|e| async move {
-            yield_str!(e, "# Building heightmap terrain\n");
-            yield_str!(e, "# X = easting (local), Y = northing (local), Z = elevation (ft)\n");
-            yield_str!(e, "o heightmap\n\n");
+            e.emit(
+                "# Building heightmap terrain\n\
+                 # X = easting (local), Y = northing (local), Z = elevation (ft)\n\
+                 o heightmap\n\n"
+                .to_string()
+            ).await;
 
-            let mut writer = RooftopObjWriter::new(&e);
+            let mut vi: usize = 0;
+            let mut buf = String::with_capacity(16 * 1024);
 
-            for (xi, col) in heightmap_ft.axis_iter(Axis(0)).into_iter().enumerate() {
-                for (yi, z_ft) in col.iter().enumerate() {
-                    if !mask.get([xi, yi]).expect("heightmap_ft.shape() != mask.shape()") { continue; }
-
-                    // as f64 is safe per assertions above about
-                    // max(xi, yi) = max(nrows, ncols) < MAX_OBJ_SIZE_USFT
-                    let (x0, y0) = (xi as f64, yi as f64);
-                    let (x1, y1) = (x0 + 1.0, y0 + 1.0);
-                    writer.write_horizontal_face(x0, x1, y0, y1, *z_ft).await;
-
-                    // Side faces
-                    for (dxi, dyi, ax, ay, bx, by) in [
-                        ( 0, -1, x0, y0, x1, y0),
-                        ( 0,  1, x1, y1, x0, y1),
-                        ( 1,  0, x1, y0, x1, y1),
-                        (-1,  0, x0, y1, x0, y0),
-                    ] {
-                        let (delta_xi, delta_yi): (i8, i8) = (dxi, dyi);
-                        let maybe_adj_z = xi.checked_add_signed(delta_xi.into())
-                            .zip(yi.checked_add_signed(delta_yi.into()))
-                            .filter(|adj_xy| *mask.get([adj_xy.0, adj_xy.1]).unwrap_or(&false))
-                            .and_then(|adj_xy| heightmap_ft.get([adj_xy.0, adj_xy.1]));
-
-                        // We trim off the outside edges of the building, and pit-marks
-                        // by skipping the side face for any adjecent pixel outside the mask,
-                        // or with a height of 0.0 (these are usually data errors sprinked into
-                        // the middle of the roof)
-                        let adj_z = match maybe_adj_z {
-                            Some(&adj_z) if adj_z == 0.0 => { continue;}
-                            None => { continue }
-                            Some(&adj_z) => { adj_z }
-                        };
-
-                        // To avoid duplicate vertical faces, the top face "wins", and we don't draw
-                        // the side if the adjacent pixel is below this one
-                        if adj_z > *z_ft { continue }
-
-                        writer.write_vertical_face(ax, bx, ay, by, *z_ft, adj_z).await;
-                    }
+            for xi in 0..heightmap.nrows() {
+                append_obj_row(
+                    xi, &heightmap, &mut vi, &mut buf,
+                    |xi, yi, _z_in| !mask[[xi, yi]],
+                    // Side face only when the neighbor is in the mask, non-zero, and not taller.
+                    // Outside-mask neighbors (adj_idx=None or mask=false) are trimmed edges — skip.
+                    // Zero-height in-mask neighbors are data errors — skip.
+                    |adj_idx, adj_raw, z_in| {
+                        let (adj_xi, adj_yi) = adj_idx?;
+                        if !mask.get([adj_xi, adj_yi]).copied().unwrap_or(false) { return None; }
+                        if adj_raw == 0 { return None; }
+                        if adj_raw > z_in { return None; }
+                        Some(adj_raw as f64 / 12.0)
+                    },
+                );
+                if buf.len() >= 16 * 1024 {
+                    e.emit(std::mem::take(&mut buf)).await;
                 }
             }
+
+            if !buf.is_empty() { e.emit(buf).await; }
         })
     }
 }

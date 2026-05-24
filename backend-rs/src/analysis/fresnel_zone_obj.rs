@@ -1,70 +1,96 @@
+use std::fmt::Write;
 use async_fn_stream::fn_stream;
 use futures_util::Stream;
 use ndarray::Axis;
 use uuid::Uuid;
-use crate::analysis::fresnel_zone::{FresnelZone};
-use crate::types::obj_writer::RooftopObjWriter;
+use crate::analysis::fresnel_zone::FresnelZone;
 use crate::types::tiles::TileId;
-use crate::yield_str;
 
 pub fn stream_fresnel_tile_slice_as_obj(analysis_id: Uuid, fresnel_zone: &FresnelZone, tile_id: TileId) -> impl Stream<Item = String> {
     let fresnel_raster = fresnel_zone.rasterize_in_tile(tile_id).mapv(|opt| opt.copied());
 
     fn_stream(|e| async move {
-        yield_str!(e, "# Fresnel zone slice \n");
-        e.emit(format!("# Analysis id: {}\n", analysis_id)).await;
-        e.emit( format!("# Tile Id: {}\n", &tile_id)).await;
-        yield_str!(e, "# X = easting (within tile), Y = northing (within tile), Z = elevation (ft)\n");
-        yield_str!(e, "o fresnel_zone\n\n");
+        e.emit(format!(
+            "# Fresnel zone slice\n\
+             # Analysis id: {analysis_id}\n\
+             # Tile Id: {tile_id}\n\
+             # X = easting (within tile), Y = northing (within tile), Z = elevation (ft)\n\
+             o fresnel_zone\n\n"
+        )).await;
 
-        let mut writer = RooftopObjWriter::new(&e);
+        let mut vi: usize = 0;
+        let mut buf = String::with_capacity(16 * 1024);
 
-        for (xi, col) in fresnel_raster.axis_iter(Axis(0)).into_iter().enumerate() {
+        for (xi, col) in fresnel_raster.axis_iter(Axis(0)).enumerate() {
             for (yi, maybe_zone_point) in col.iter().enumerate() {
                 let &Some(zone_point) = maybe_zone_point else { continue; };
-
-                let local_top = f64::from(zone_point.top()) / 12.0;
+                let local_top = f64::from(zone_point.top())    / 12.0;
                 let local_bot = f64::from(zone_point.bottom()) / 12.0;
+                let (x1, y1) = (xi + 1, yi + 1);
 
-                // as f64 is safe per assertions above about
-                // max(xi, yi) = max(nrows, ncols) < MAX_OBJ_SIZE_USFT
-                let (x0, y0) = (xi as f64, yi as f64);
-                let (x1, y1) = (x0 + 1.0, y0 + 1.0);
-                writer.write_horizontal_face(x0, x1, y0, y1, local_top).await;
-                writer.write_horizontal_face(x0, x1, y0, y1, local_bot).await;
+                // Top horizontal face (normal winding)
+                let v = vi + 1; vi += 4;
+                let _ = write!(buf,
+                    "v {xi} {yi} {local_top:.3}\nv {x1} {yi} {local_top:.3}\n\
+                     v {x1} {y1} {local_top:.3}\nv {xi} {y1} {local_top:.3}\n\
+                     f {v} {} {} {}\n", v+1, v+2, v+3);
+
+                // Bottom horizontal face (reversed winding — faces downward)
+                let v = vi + 1; vi += 4;
+                let _ = write!(buf,
+                    "v {xi} {y1} {local_bot:.3}\nv {x1} {y1} {local_bot:.3}\n\
+                     v {x1} {yi} {local_bot:.3}\nv {xi} {yi} {local_bot:.3}\n\
+                     f {v} {} {} {}\n", v+1, v+2, v+3);
 
                 // Side faces
                 for (dxi, dyi, ax, ay, bx, by) in [
-                    ( 0, -1, x0, y0, x1, y0),
-                    ( 0,  1, x1, y1, x0, y1),
-                    ( 1,  0, x1, y0, x1, y1),
-                    (-1,  0, x0, y1, x0, y0),
+                    ( 0isize, -1isize, xi, yi, x1, yi),
+                    ( 0,       1,      x1, y1, xi, y1),
+                    ( 1,       0,      x1, yi, x1, y1),
+                    (-1,       0,      xi, y1, xi, yi),
                 ] {
-                    let (delta_xi, delta_yi): (i8, i8) = (dxi, dyi);
-                    let maybe_adj_point = xi.checked_add_signed(delta_xi.into())
-                        .zip(yi.checked_add_signed(delta_yi.into()))
-                        .and_then(|adj_xy| fresnel_raster.get([adj_xy.0, adj_xy.1]).cloned())
-                        .flatten();
+                    let maybe_adj = xi.checked_add_signed(dxi)
+                        .zip(yi.checked_add_signed(dyi))
+                        .and_then(|(ax_i, ay_i)| fresnel_raster.get([ax_i, ay_i]).copied().flatten());
 
-                    match maybe_adj_point {
+                    match maybe_adj {
                         Some(adj_point) => {
-                            let adj_top = f64::from(adj_point.top()) / 12.0;
-                            let adj_bottom = f64::from(adj_point.bottom()) / 12.0;
-
-                            // To avoid duplicate vertical faces, the top face "wins", and we don't draw
-                            // the side if the adjacent pixel is below this one
-                            if adj_top >= local_top {
-                                writer.write_vertical_face(ax, bx, ay, by, adj_top, local_top).await;
+                            let adj_top = f64::from(adj_point.top())    / 12.0;
+                            let adj_bot = f64::from(adj_point.bottom()) / 12.0;
+                            // Draw where the neighbour protrudes above/below this cell.
+                            if adj_top > local_top {
+                                let v = vi + 1; vi += 4;
+                                let _ = write!(buf,
+                                    "v {ax} {ay} {local_top:.3}\nv {bx} {by} {local_top:.3}\n\
+                                     v {bx} {by} {adj_top:.3}\nv {ax} {ay} {adj_top:.3}\n\
+                                     f {v} {} {} {}\n", v+1, v+2, v+3);
                             }
-                            if adj_bottom >= local_bot {
-                                writer.write_vertical_face(ax, bx, ay, by, adj_bottom, local_bot).await;
+                            if adj_bot > local_bot {
+                                let v = vi + 1; vi += 4;
+                                let _ = write!(buf,
+                                    "v {ax} {ay} {local_bot:.3}\nv {bx} {by} {local_bot:.3}\n\
+                                     v {bx} {by} {adj_bot:.3}\nv {ax} {ay} {adj_bot:.3}\n\
+                                     f {v} {} {} {}\n", v+1, v+2, v+3);
                             }
                         }
-                        None => writer.write_vertical_face(ax, bx, ay, by, local_top, local_bot).await,
-                    };
+                        None => {
+                            // Exposed edge: full side from bottom to top
+                            let v = vi + 1; vi += 4;
+                            let _ = write!(buf,
+                                "v {ax} {ay} {local_bot:.3}\nv {bx} {by} {local_bot:.3}\n\
+                                 v {bx} {by} {local_top:.3}\nv {ax} {ay} {local_top:.3}\n\
+                                 f {v} {} {} {}\n", v+1, v+2, v+3);
+                        }
+                    }
                 }
             }
+
+            if buf.len() >= 16 * 1024 {
+                e.emit(std::mem::take(&mut buf)).await;
+            }
         }
+
+        if !buf.is_empty() { e.emit(buf).await; }
     })
 }
 
@@ -184,15 +210,12 @@ mod tests {
         );
         let obj = collect_zone_obj(id, &zone, tile()).await;
 
-        // Each point: 2 horiz faces + 4 side faces in isolation = 6 faces.
-        // Adjacent side logic: adj exists → check if adj_top >= local_top (240/12 >= 240/12 → true)
-        // → writer.write_vertical_face(adj_top, local_top) = zero-height face. Same for bot.
-        // The inner side IS written (adj exists, both adj_top >= local_top and adj_bot >= local_bot).
-        // So each pixel draws inner sides. Total faces = 2*(2+4) = 12... but we just verify > header-only.
+        // Each point has 2 horiz + 3 exposed outer side faces. The shared inner edge is suppressed
+        // because adj_top == local_top and adj_bot == local_bot (strict > check, not >=).
+        // Outer exposed sides: each point has 3 (the two end sides + the far side); the shared edge
+        // contributes 0 faces. Total = 2*(2+3) = 10 faces.
         let f_count = count_lines_starting_with(&obj, "f ");
-        assert!(f_count > 0, "should produce geometry for two-point zone");
-        // Both points have content, so at minimum 2 horiz top + 2 horiz bot = 4 faces
-        assert!(f_count >= 4);
+        assert_eq!(f_count, 10, "each point: 2 horiz + 3 outer sides; inner shared edge suppressed");
     }
 
     #[tokio::test]
