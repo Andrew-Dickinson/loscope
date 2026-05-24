@@ -1,8 +1,8 @@
 use derive_new::new;
 use geo::{Polygon, polygon};
-use crate::building::heightmap::BINId;
 use crate::types::errors::AssetErr;
 use wkt::TryFromWkt;
+use crate::building::bin_id::BINId;
 use crate::providers::backends::asset_fetcher::AssetType;
 use crate::providers::backends::string_provider::StringProvider;
 

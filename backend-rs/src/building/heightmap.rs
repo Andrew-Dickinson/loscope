@@ -6,14 +6,14 @@ use ndarray::{s, Array2, Zip};
 use arrayvec::ArrayString;
 use geo::{Polygon, Intersects, BoundingRect, Rect, Contains, point, Buffer, Convert};
 use rocket::http::Status;
+use rocket::serde::{Deserializer, Serializer};
+use serde::{Deserialize, Serialize};
+use crate::building::bin_id::BINId;
 use crate::providers::elevation_tile_provider::ElevationTileProvider;
 use crate::providers::footprint_provider::FootprintProvider;
 use crate::types::coords::{valid_nys_coordinate, NYSCoords2};
 use crate::types::errors::{AssetErr, BINParseError};
 use crate::types::tiles::{TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
-
-const BIN_LENGTH_CHARS: usize = 7;
-const PERMITTED_BIN_FIRST_CHAR: &[u8] = &[1, 2, 3, 4, 5];
 
 // This is an absurd number, we should never get anywhere close to this. A typical footprint spans
 // 1-4 tiles
@@ -37,41 +37,6 @@ impl From<HeightMapCreateErr> for Status {
             HeightMapCreateErr::InvalidFootprint(_) => Status::UnprocessableEntity,
             HeightMapCreateErr::AssetErr(ae) => Status::from(ae),
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct BINId(ArrayString<BIN_LENGTH_CHARS>);
-
-impl BINId {
-    pub fn parse(bin_id: &str) -> Result<BINId, BINParseError> {
-        let chars: Vec<char> = bin_id.chars().collect();
-
-        if chars.len() != BIN_LENGTH_CHARS {
-            return Err(BINParseError(format!("Invalid BIN ID: {bin_id}. Expected {BIN_LENGTH_CHARS} chars")));
-        }
-
-        let Some(first_digit) = chars[0].to_digit(10) else {
-            return Err(BINParseError(format!("Invalid BIN ID: {bin_id}. All characters must be digits")));
-        };
-        // Safety: first_digit < 10, so it will always fit into a u8
-        if !PERMITTED_BIN_FIRST_CHAR.contains(&(first_digit.try_into().unwrap())) {
-            return Err(BINParseError(format!("Invalid BIN ID: {bin_id}. First character must be one of {PERMITTED_BIN_FIRST_CHAR:?}")));
-        };
-
-        for c in chars {
-            if !c.is_digit(10) {
-                return Err(BINParseError(format!("Invalid BIN ID: {bin_id}. All characters must be digits")));
-            }
-        }
-
-        // Safety: The below .unwrap() is safe because we validate chars.len() == BIN_LENGTH_CHARS
-        // above, and BINId.0 is of type ArrayString<BIN_LENGTH_CHARS>
-        Ok(BINId(ArrayString::from(bin_id).unwrap()))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
     }
 }
 
@@ -282,55 +247,6 @@ mod tests {
             (x: x0, y: y1),
             (x: x0, y: y0),
         ]
-    }
-
-    // --- BINId::parse ---
-
-    #[test]
-    fn bin_id_parse_valid() {
-        let id = BINId::parse("1234567").unwrap();
-        assert_eq!(id.as_str(), "1234567");
-    }
-
-    #[test]
-    fn bin_id_parse_all_valid_first_chars() {
-        for c in [b'1', b'2', b'3', b'4', b'5'] {
-            let s = format!("{}000000", c as char);
-            assert!(BINId::parse(&s).is_ok(), "first char '{}' should be valid", c as char);
-        }
-    }
-
-    #[test]
-    fn bin_id_parse_too_short() {
-        assert!(BINId::parse("123456").is_err());
-    }
-
-    #[test]
-    fn bin_id_parse_too_long() {
-        assert!(BINId::parse("12345678").is_err());
-    }
-
-    #[test]
-    fn bin_id_parse_empty() {
-        assert!(BINId::parse("").is_err());
-    }
-
-    #[test]
-    fn bin_id_parse_first_char_zero() {
-        assert!(BINId::parse("0123456").is_err());
-    }
-
-    #[test]
-    fn bin_id_parse_first_char_six_to_nine() {
-        for c in [b'6', b'7', b'8', b'9'] {
-            let s = format!("{}000000", c as char);
-            assert!(BINId::parse(&s).is_err(), "first char '{}' should be invalid", c as char);
-        }
-    }
-
-    #[test]
-    fn bin_id_parse_non_digit() {
-        assert!(BINId::parse("1a34567").is_err());
     }
 
     // --- get_intersecting_tiles ---

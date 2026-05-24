@@ -227,7 +227,8 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use geo::polygon;
     use ndarray::Array2;
-    use crate::building::heightmap::{BINId, RooftopHeightMap};
+    use crate::building::bin_id::BINId;
+    use crate::building::heightmap::{RooftopHeightMap};
     use crate::types::coords::NYSCoords2;
 
     const SW_E: f64 = 500000.0;

@@ -5,13 +5,14 @@ use rocket::http::{ContentType, MediaType, Status};
 use rocket::response::stream::TextStream;
 use rocket::{Response, State};
 use wkt::ToWkt;
-use crate::building::heightmap::{get_intersecting_tiles, BINId, RooftopHeightMapFactory};
+use crate::building::heightmap::{get_intersecting_tiles, RooftopHeightMapFactory};
 use crate::providers::Providers;
 use crate::types::coords::{GPSCoords3, NYSCoords3};
 use crate::types::errors::AssetErr;
 use rocket::response::Debug;
 use rocket::serde::json::Json;
 use serde::Deserialize;
+use crate::building::bin_id::BINId;
 use crate::sample_points::point::SamplePoints;
 use crate::sample_points::sample_grid::sample_points_for_rooftop;
 
