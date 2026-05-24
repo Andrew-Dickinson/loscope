@@ -57,9 +57,8 @@ pub async fn get_terrain_raster(
     // TODO: Would it be better to use a CDN style direct browser file access for this?
     let tile = providers.elevation_tile_provider().get_elevation_tile(tile_id).await?;
 
-    let mut tiff_bytes = Vec::<u8>::with_capacity(
-        (2 * SUBGRID_TILE_SIDE_LENGTH_USFT * SUBGRID_TILE_SIDE_LENGTH_USFT) as usize
-    );
+    let width = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
+    let mut tiff_bytes = Vec::<u8>::with_capacity(2 * width * width);
     tile.write_to_tiff(Cursor::new(&mut tiff_bytes)).map_err(|_| Status::InternalServerError)?;
     Ok(TiffImage(tiff_bytes))
 }
