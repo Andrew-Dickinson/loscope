@@ -55,3 +55,116 @@ impl<'a> RooftopObjWriter<'a> {
         ).await;
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_fn_stream::fn_stream;
+    use futures_util::StreamExt;
+
+    // --- write_vertex ---
+
+    #[tokio::test]
+    async fn test_write_vertex_format() {
+        let out: Vec<String> = fn_stream(|e| async move {
+            RooftopObjWriter::new(&e).write_vertex(1.0, 2.0, 3.5).await;
+        }).collect().await;
+        assert_eq!(out, vec!["v 1 2 3.500\n"]);
+    }
+
+    #[tokio::test]
+    async fn test_write_vertex_z_precision() {
+        // z always uses exactly 3 decimal places regardless of the value
+        let out: Vec<String> = fn_stream(|e| async move {
+            let mut w = RooftopObjWriter::new(&e);
+            w.write_vertex(0.0, 0.0, 1.0).await;
+            w.write_vertex(0.0, 0.0, 1.5).await;
+            w.write_vertex(0.0, 0.0, 1.123456).await;
+        }).collect().await;
+        assert_eq!(out[0], "v 0 0 1.000\n");
+        assert_eq!(out[1], "v 0 0 1.500\n");
+        assert_eq!(out[2], "v 0 0 1.123\n");
+    }
+
+    #[tokio::test]
+    async fn test_write_vertex_returns_sequential_one_based_indices() {
+        fn_stream(|e| async move {
+            let mut w = RooftopObjWriter::new(&e);
+            assert_eq!(w.write_vertex(0.0, 0.0, 0.0).await, 1);
+            assert_eq!(w.write_vertex(0.0, 0.0, 0.0).await, 2);
+            assert_eq!(w.write_vertex(0.0, 0.0, 0.0).await, 3);
+        }).collect::<Vec<String>>().await;
+    }
+
+    // --- rect_face ---
+
+    #[tokio::test]
+    async fn test_rect_face_format() {
+        let out: Vec<String> = fn_stream(|e| async move {
+            RooftopObjWriter::new(&e).rect_face((3, 7, 12, 1)).await;
+        }).collect().await;
+        assert_eq!(out, vec!["f 3 7 12 1\n"]);
+    }
+
+    // --- write_horizontal_face ---
+
+    #[tokio::test]
+    async fn test_write_horizontal_face_output() {
+        let out: Vec<String> = fn_stream(|e| async move {
+            RooftopObjWriter::new(&e)
+                .write_horizontal_face(0.0, 1.0, 0.0, 1.0, 5.0).await;
+        }).collect().await;
+
+        // 4 vertices then 1 face
+        assert_eq!(out.len(), 5);
+        assert_eq!(out[0], "v 0 0 5.000\n"); // (x0, y0, z)
+        assert_eq!(out[1], "v 1 0 5.000\n"); // (x1, y0, z)
+        assert_eq!(out[2], "v 1 1 5.000\n"); // (x1, y1, z)
+        assert_eq!(out[3], "v 0 1 5.000\n"); // (x0, y1, z)
+        assert_eq!(out[4], "f 1 2 3 4\n");
+    }
+
+    // --- write_vertical_face ---
+
+    #[tokio::test]
+    async fn test_write_vertical_face_output() {
+        let out: Vec<String> = fn_stream(|e| async move {
+            RooftopObjWriter::new(&e)
+                .write_vertical_face(0.0, 1.0, 2.0, 3.0, 10.0, 5.0).await;
+        }).collect().await;
+
+        assert_eq!(out.len(), 5);
+        assert_eq!(out[0], "v 0 2 5.000\n");  // (ax, ay, z_bot)
+        assert_eq!(out[1], "v 1 3 5.000\n");  // (bx, by, z_bot)
+        assert_eq!(out[2], "v 1 3 10.000\n"); // (bx, by, z_top)
+        assert_eq!(out[3], "v 0 2 10.000\n"); // (ax, ay, z_top)
+        assert_eq!(out[4], "f 1 2 3 4\n");
+    }
+
+    // --- vertex index state ---
+
+    #[tokio::test]
+    async fn test_vertex_index_persists_across_face_writes() {
+        // After write_horizontal_face uses indices 1-4, the next vertex should be 5.
+        fn_stream(|e| async move {
+            let mut w = RooftopObjWriter::new(&e);
+            w.write_horizontal_face(0.0, 1.0, 0.0, 1.0, 0.0).await;
+            let next = w.write_vertex(0.0, 0.0, 0.0).await;
+            assert_eq!(next, 5);
+        }).collect::<Vec<String>>().await;
+    }
+
+    #[tokio::test]
+    async fn test_face_references_correct_indices_after_prior_vertices() {
+        // Vertices written before a face call should be referenced by correct indices.
+        let out: Vec<String> = fn_stream(|e| async move {
+            let mut w = RooftopObjWriter::new(&e);
+            w.write_vertex(0.0, 0.0, 0.0).await; // idx 1 (not part of next face)
+            w.write_horizontal_face(1.0, 2.0, 1.0, 2.0, 3.0).await;
+        }).collect().await;
+
+        // face should reference indices 2,3,4,5
+        assert_eq!(out.last().unwrap(), "f 2 3 4 5\n");
+    }
+}
