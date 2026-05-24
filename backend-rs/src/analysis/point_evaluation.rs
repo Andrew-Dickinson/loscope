@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::format;
 use derive_getters::Getters;
 use derive_new::new;
 use futures_util::StreamExt;
@@ -88,7 +89,12 @@ pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(
     let zone_inner = compute_fresnel_zone(&eval_input, ALPHA_ZONE_INNER);
     if zone_inner.is_empty() || zone_full.is_empty() {
         // degenerate case, endpoints are too close together
-        return todo!()
+        return Err(AssetErr::AssetNotFound(
+            format!(
+                "Invalid coordinate inputs: too close together: {:?} & {:?}",
+                endpoints.0,
+                endpoints.1)
+        ))
     }
 
     let tile_ids = get_intersecting_tiles(&zone_full);
