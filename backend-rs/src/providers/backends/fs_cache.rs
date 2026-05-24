@@ -1,5 +1,6 @@
-use std::fs::File;
-use std::path::PathBuf;
+use std::fs;
+use std::fs::{File, FileType};
+use std::path::{Path, PathBuf};
 use derive_new::new;
 use rand::Rng;
 use typed_path::{Utf8UnixPath};
@@ -10,6 +11,7 @@ use crate::types::errors::AssetErr;
 pub trait AssetProvider {
     // TODO: Strongly type asset_id?
     async fn get_asset(&self, asset_type: AssetType, asset_id: &str) -> Result<File, AssetErr>;
+    async fn list_assets_of_type(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr>;
     fn get_local_asset_path(&self, asset_type: AssetType, asset_id: &str) -> PathBuf;
 }
 
@@ -23,6 +25,22 @@ pub struct CachingAssetProvider {
 impl AssetProvider for CachingAssetProvider {
     fn get_local_asset_path<'a>(&self, asset_type: AssetType, asset_id: &'a str) -> PathBuf {
         self.cache_root.join(asset_type.as_ref()).join(asset_id)
+    }
+
+    async fn list_assets_of_type(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
+        let index_local_path = self.cache_root.join(asset_type.as_ref());
+        if index_local_path.exists() {
+            Ok(fs::read_dir(index_local_path)
+                .map_err(|e| AssetErr::LocalFileSystemError(
+                    format!("Error reading local cached obstruction index {}", e)
+                ))?.into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|e| e.is_file()).unwrap_or(false))
+                .filter_map(|f| f.file_name().into_string().ok())
+                .collect())
+        } else {
+            self.upstream_fetcher.list_assets(asset_type).await
+        }
     }
 
     async fn get_asset(&self, asset_type: AssetType, asset_id: &str) -> Result<File, AssetErr> {
@@ -106,6 +124,10 @@ mod tests {
                 Err(AssetErr::AssetNotFound("mock: not found".to_string()))
             }
         }
+
+        async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
+            panic!("MockAssetFetcher::list_assets")
+        }
     }
 
     struct DelayedMockFetcher { delay_ms: u64 }
@@ -123,6 +145,10 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
             file.write_all(b"fetched-content").unwrap();
             Ok(())
+        }
+
+        async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
+            panic!("DelayedMockFetcher::list_assets");
         }
     }
 

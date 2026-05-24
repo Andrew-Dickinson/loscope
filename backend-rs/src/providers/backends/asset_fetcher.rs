@@ -22,6 +22,7 @@ pub trait AssetFetcher {
     /// Downloads the asset from the specified remote_path of the specified asset type to the
     /// specified local path, if local_path is not successfully populated, returns Err(AssetErr)
     async fn fetch_asset(&self, asset_type: AssetType, remote_path: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr>;
+    async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr>;
 }
 
 #[derive(new)]
@@ -81,6 +82,33 @@ impl AssetFetcher for S3AssetFetcher {
         }
 
         Ok(())
+    }
+
+    async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
+        let bucket = self.bucket_name.as_str();
+        let prefix = self.asset_type_prefixes.get(&asset_type)
+            .ok_or(AssetErr::UnsupportedAssetType(format!("Unable to find {asset_type:?} prefix")))?;
+
+        Ok(self.client.list_objects_v2()
+            .bucket(bucket)
+            .prefix(prefix.as_str())
+            .into_paginator()
+            .send()
+            .try_collect()
+            .await
+            .map_err(|err| AssetErr::AssetDownloadError(
+                format!("Unable to list objects in prefix {prefix} from {bucket}: {err:?}")
+            ))?
+            .into_iter()
+            .flat_map(|o| o.contents.unwrap_or_default())
+            .filter_map(|obj| obj.key)
+            .map(Utf8UnixPathBuf::from)
+            .filter_map(
+                |path| path.strip_prefix(prefix).ok()
+                    .map(|p| p.to_string())
+            )
+            .collect::<Vec<_>>()
+        )
     }
 }
 

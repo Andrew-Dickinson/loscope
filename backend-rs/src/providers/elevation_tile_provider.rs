@@ -308,6 +308,10 @@ mod tests {
                 Err(e) => Err(AssetErr::LocalFileSystemError(format!("{e:?}"))),
             }
         }
+
+        async fn list_assets_of_type(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
+            panic!("MockAssetProvider::list_assets_of_type");
+        }
     }
 
     #[tokio::test]

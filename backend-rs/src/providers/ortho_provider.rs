@@ -117,6 +117,10 @@ mod tests {
                 Err(e) => Err(AssetErr::LocalFileSystemError(format!("{e:?}"))),
             }
         }
+
+        async fn list_assets_of_type(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
+            panic!("DelayedMockFetcher::list_assets_of_type");
+        }
     }
 
     // --- to_ortho_bounds ---
