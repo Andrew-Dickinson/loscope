@@ -48,7 +48,7 @@ pub async fn get_terrain_tile_overview(
 }
 
 
-#[get("/terrain/terrain/heightRaster/<tile_id>")]
+#[get("/terrain/heightRaster/<tile_id>")]
 pub async fn get_terrain_raster(
     tile_id: &str,
     providers: &State<Providers>
@@ -65,7 +65,7 @@ pub async fn get_terrain_raster(
 }
 
 
-#[get("/terrain/terrain/obstructionOverview/<obstruction_type>/<obstruction_id>")]
+#[get("/terrain/obstructionOverview/<obstruction_type>/<obstruction_id>")]
 pub async fn get_terrain_obstruction_meta(
     obstruction_type: &str,
     obstruction_id: &str,
@@ -85,7 +85,7 @@ pub async fn get_terrain_obstruction_meta(
 }
 
 
-#[get("/terrain/terrain/obstructionObj/<obstruction_type>/<obstruction_id>/<tile_id>")]
+#[get("/terrain/obstructionObj/<obstruction_type>/<obstruction_id>/<tile_id>")]
 pub async fn get_terrain_obstruction_obj(
     obstruction_type: &str,
     obstruction_id: &str,
