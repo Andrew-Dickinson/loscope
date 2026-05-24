@@ -43,6 +43,8 @@ impl AssetProvider for CachingAssetProvider {
             }
         }
 
+        // TODO: Expire cache so we don't leak and fill the disk
+
         println!("Calling upstream fetcher for {asset_type:?} {asset_id:?}");
 
         // Use a temp file with a random name to reduce the chance of a collision with another

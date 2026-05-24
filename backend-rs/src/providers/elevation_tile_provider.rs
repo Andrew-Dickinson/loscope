@@ -114,6 +114,9 @@ impl ElevationTileProvider for CachingElevationTileProvider {
             },
             Err(err) => {
                 if let AssetErr::AssetNotFound(_) = err {
+                    // As an optimization, we chose not to store tiles which are all zeros, but analyses may request these
+                    // TODO: Warn the user for the case where their analysis is trying to query a tile outside the city
+                    //     (might require an extra lookup here to see if the tile ID falls outside some kind of index)
                     let path = self.asset_provider.get_local_asset_path(AssetType::ElevationTile, asset_id);
                     let tile = ElevationTile::new_empty(tile_id);
                     File::create(path.as_path()).map_err(|err| err.to_string())
