@@ -13,6 +13,8 @@ pub const MAX_OBJ_SIZE_USFT: usize = 200_000;
 ///   return `Some(z_ft)` to draw a side face down to that elevation, or `None` to skip.
 pub fn append_obj_row(
     xi: usize,
+    x_offset: isize,
+    y_offset: isize,
     heightmap: &Array2<u16>,
     vi: &mut usize,
     buf: &mut String,
@@ -22,19 +24,22 @@ pub fn append_obj_row(
     for (yi, &z_in) in heightmap.row(xi).iter().enumerate() {
         if skip_pixel(xi, yi, z_in) { continue; }
         let z_ft = z_in as f64 / 12.0;
-        let (x1, y1) = (xi + 1, yi + 1);
+        let x0 = xi as isize + x_offset;
+        let y0 = yi as isize + y_offset;
+        let x1 = x0 + 1;
+        let y1 = y0 + 1;
 
         let v = *vi + 1; *vi += 4;
         let _ = write!(buf,
-            "v {xi} {yi} {z_ft:.3}\nv {x1} {yi} {z_ft:.3}\n\
-             v {x1} {y1} {z_ft:.3}\nv {xi} {y1} {z_ft:.3}\n\
+            "v {x0} {y0} {z_ft:.3}\nv {x1} {y0} {z_ft:.3}\n\
+             v {x1} {y1} {z_ft:.3}\nv {x0} {y1} {z_ft:.3}\n\
              f {v} {} {} {}\n", v+1, v+2, v+3);
 
         for (dxi, dyi, ax, ay, bx, by) in [
-            ( 0isize, -1isize, xi, yi, x1, yi),
-            ( 0,       1,      x1, y1, xi, y1),
-            ( 1,       0,      x1, yi, x1, y1),
-            (-1,       0,      xi, y1, xi, yi),
+            ( 0isize, -1isize, x0, y0, x1, y0),
+            ( 0,       1,      x1, y1, x0, y1),
+            ( 1,       0,      x1, y0, x1, y1),
+            (-1,       0,      x0, y1, x0, y0),
         ] {
             let adj_idx = xi.checked_add_signed(dxi).zip(yi.checked_add_signed(dyi));
             let adj_raw = adj_idx

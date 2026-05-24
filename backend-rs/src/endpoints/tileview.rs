@@ -29,6 +29,9 @@ pub struct TerrainTileOverview {
     obstruction_ids: HashMap<ObstructionType, Vec<ObstructionId>>,
 }
 
+// TODO: Port reprocessing?
+// TODO: Copy frontend over?
+
 #[get("/terrain/tileOverview/<tile_id>")]
 pub async fn get_terrain_tile_overview(
     tile_id: &str,
@@ -95,18 +98,24 @@ pub async fn get_terrain_obstruction_obj(
         .map_err(|_| Status::BadRequest)?;
     let obstruction_type: ObstructionType = ObstructionType::parse(obstruction_type)
         .map_err(|_| Status::BadRequest)?;
-    
+    let Ok(tile_id) = TileId::parse(tile_id) else { return Err(Status::BadRequest) };
+
     // TODO: Would it be better to use a CDN style direct browser file access for this?
     //  We would need to pre-create the OBJ files, and somehow embed the xy offset for the browser to apply relative
     //  to the terrain mesh
 
-    let obstruction = providers.obstruction_provider()
-        .get_obstruction_raster(&obstruction_type, obstruction_id)
-        .await?;
+    let (meta, obstruction) = tokio::try_join!(
+        providers.obstruction_provider().get_obstruction_meta(&obstruction_type, obstruction_id),
+        providers.obstruction_provider().get_obstruction_raster(&obstruction_type, obstruction_id),
+    )?;
+
+    let tile_sw = tile_id.get_sw_corner();
+    let x_offset = (*meta.sw_offset().easting() - *tile_sw.easting()) as isize;
+    let y_offset = (*meta.sw_offset().northing() - *tile_sw.northing()) as isize;
 
     let obj_stream = TextStream! {
         let mut stream = std::pin::pin!(
-            obstruction.to_obj_stream(obstruction_type.clone(), obstruction_id)
+            obstruction.to_obj_stream(obstruction_type.clone(), obstruction_id, x_offset, y_offset)
         );
         while let Some(chunk) = stream.next().await {
             yield chunk;

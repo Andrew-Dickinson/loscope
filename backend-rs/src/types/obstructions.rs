@@ -161,7 +161,7 @@ impl ObstructionRaster {
         Ok(ObstructionRaster { heightmap: image_data })
     }
 
-    pub fn to_obj_stream(&self, type_: ObstructionType, id: ObstructionId) -> impl Stream<Item = String> {
+    pub fn to_obj_stream(&self, type_: ObstructionType, id: ObstructionId, x_offset: isize, y_offset: isize) -> impl Stream<Item = String> {
         let heightmap = self.heightmap.clone();
         assert!(heightmap.nrows() < MAX_OBJ_SIZE_USFT);
         assert!(heightmap.ncols() < MAX_OBJ_SIZE_USFT);
@@ -171,7 +171,7 @@ impl ObstructionRaster {
                 "# Obstruction heightmap terrain\n\
                  # Obstruction id: {id}\n\
                  # Obstruction type: {type_}\n\
-                 # X = easting (local), Y = northing (local), Z = elevation (ft)\n\
+                 # X = easting (within tile), Y = northing (within tile), Z = elevation (ft)\n\
                  o heightmap\n\n"
             )).await;
 
@@ -180,7 +180,7 @@ impl ObstructionRaster {
 
             for xi in 0..heightmap.nrows() {
                 append_obj_row(
-                    xi, &heightmap, &mut vi, &mut buf,
+                    xi, x_offset, y_offset, &heightmap, &mut vi, &mut buf,
                     |_xi, _yi, z_in| z_in == 0,
                     // Draw side face down to adj_z whenever adj is strictly lower.
                     // OOB neighbors get adj_raw=0, which is always < z_in (pixel is non-zero),

@@ -30,7 +30,7 @@ impl RooftopHeightMap {
 
             for xi in 0..heightmap.nrows() {
                 append_obj_row(
-                    xi, &heightmap, &mut vi, &mut buf,
+                    xi, 0, 0, &heightmap, &mut vi, &mut buf,
                     |xi, yi, _z_in| !mask[[xi, yi]],
                     // Side face only when the neighbor is in the mask, non-zero, and not taller.
                     // Outside-mask neighbors (adj_idx=None or mask=false) are trimmed edges — skip.
