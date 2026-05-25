@@ -213,11 +213,11 @@ function ZoneObj({ analysisId, tileId, onLoaded, visible }: { analysisId: string
 }
 
 // ── Obstruction OBJ ───────────────────────────────────────────────────────────
-function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, onBoundsReady, visible }: {
+function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, onBoundsReady, visible, dimmed }: {
   type: string; obsId: string; tileId: string; color: number
   onHit: (key: string) => void; onLoaded: () => void
   onBoundsReady: (key: string, box: THREE.Box3) => void
-  visible: boolean
+  visible: boolean; dimmed: boolean
 }) {
   const obj = useObjLoader(`/api/tileview/terrain/obstructionObj/${type}/${obsId}/${tileId}`)
   const key = `${type}/${obsId}`
@@ -239,6 +239,18 @@ function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, onBoundsReady, vi
     onBoundsRef.current(key, new THREE.Box3().setFromObject(obj))
     onLoadedRef.current()
   }, [obj, color, key])
+
+  useEffect(() => {
+    if (!obj) return
+    obj.traverse(child => {
+      const mesh = child as THREE.Mesh
+      if (!mesh.isMesh) return
+      const mat = mesh.material as THREE.MeshStandardMaterial
+      mat.transparent = true
+      mat.opacity = dimmed ? 0.25 : 0.9
+      mat.needsUpdate = true
+    })
+  }, [obj, dimmed])
   const pointerDownPos = useRef<{ x: number; y: number } | null>(null)
 
   if (!obj) return null
@@ -322,11 +334,12 @@ interface SceneProps {
   obstructions: ObsEntry[]
   visibility: Record<string, boolean>
   frameKey: string | null
+  activeKey: string | null
   onObsClick: (key: string) => void
   onItemLoaded: (key: string) => void
 }
 
-function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibility, frameKey, onObsClick, onItemLoaded }: SceneProps) {
+function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibility, frameKey, activeKey, onObsClick, onItemLoaded }: SceneProps) {
   const [terrainInfo, setTerrainInfo] = useState<TerrainInfo | null>(null)
   const heightRange = terrainInfo?.heightRange ?? 1
   const midFt = terrainInfo ? (terrainInfo.minFt + terrainInfo.maxFt) / 2 : 0
@@ -402,6 +415,7 @@ function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibilit
           onLoaded={() => onItemLoaded(`${type}/${id}`)}
           onBoundsReady={handleBoundsReady}
           visible={visibility[`${type}/${id}`] !== false}
+          dimmed={activeKey !== null && activeKey !== `${type}/${id}`}
         />
       ))}
 
@@ -633,8 +647,8 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
   const [visibility, setVisibility] = useState<Record<string, boolean>>({})
   const [loadedKeys, setLoadedKeys] = useState<Record<string, true>>({})
 
-  // Reset visibility and loaded state when tile changes
-  useEffect(() => { setVisibility({}); setLoadedKeys({}) }, [tileId, analysisId])
+  // Reset visibility, loaded state, and selection when tile changes
+  useEffect(() => { setVisibility({}); setLoadedKeys({}); setActiveObs(null) }, [tileId, analysisId])
 
   const handleItemLoaded = useCallback((key: string) =>
     setLoadedKeys(prev => prev[key] ? prev : { ...prev, [key]: true })
@@ -680,6 +694,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
           camera={{ fov: 50, near: 0.5, far: 200000 }}
           gl={{ antialias: true }}
           style={{ background: '#0e1117' }}
+          onPointerMissed={() => setActiveObs(null)}
         >
           <Scene
             tileId={tileId}
@@ -689,6 +704,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
             obstructions={obstructions}
             visibility={visibility}
             frameKey={activeObs}
+            activeKey={activeObs}
             onObsClick={setActiveObs}
             onItemLoaded={handleItemLoaded}
           />
