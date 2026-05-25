@@ -1,9 +1,9 @@
-use std::fmt::Debug;
-use std::num::ParseIntError;
-use rocket::http::Status;
-use strum_macros::Display;
 use crate::meshdb::types;
 use crate::meshdb::types::ErrorResponse;
+use rocket::http::Status;
+use std::fmt::Debug;
+use std::num::ParseIntError;
+use strum_macros::Display;
 
 #[derive(Debug)]
 pub enum MeshDBError {
@@ -11,13 +11,16 @@ pub enum MeshDBError {
     DataError(String),
 }
 
-impl<T> From<progenitor_client::Error<T>> for MeshDBError where T: Debug {
+impl<T> From<progenitor_client::Error<T>> for MeshDBError
+where
+    T: Debug,
+{
     fn from(value: progenitor_client::Error<T>) -> Self {
         MeshDBError::ApiError(format!("Error calling MeshDB Api: {}", value))
     }
 }
 
-#[derive(Debug,Display)]
+#[derive(Debug, Display)]
 pub enum TileParseErr {
     MissingSeparator,
     InvalidSubgrid,
@@ -28,7 +31,7 @@ pub enum TileParseErr {
 #[derive(Debug)]
 pub struct BINParseError(pub String);
 
-#[derive(Debug,Display)]
+#[derive(Debug, Display)]
 pub enum AssetErr {
     AssetNotFound(String),
     AssetDownloadError(String),
@@ -59,7 +62,7 @@ impl From<AssetErr> for Status {
         match err {
             AssetErr::AssetContentError(_) => Status::UnprocessableEntity,
             AssetErr::AssetNotFound(_) => Status::NotFound,
-            _ => Status::InternalServerError
+            _ => Status::InternalServerError,
         }
     }
 }

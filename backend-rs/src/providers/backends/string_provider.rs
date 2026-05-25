@@ -1,25 +1,25 @@
-
-use tokio_rusqlite::{rusqlite, Connection};
 use crate::providers::backends::asset_fetcher::AssetType;
 use crate::types::errors::AssetErr;
+use tokio_rusqlite::{Connection, rusqlite};
 
 #[async_trait]
 pub trait StringProvider {
     // Get an asset string from a database backend. The logic for what `identifier` is, and
     // how it's used in a query is determined by the value of AssetType
-    async fn get_string(&self, asset_type: AssetType, identifier: &str) -> Result<String, AssetErr>;
+    async fn get_string(&self, asset_type: AssetType, identifier: &str)
+    -> Result<String, AssetErr>;
 }
 
 pub struct NYCDOBSqliteStringProvider {
-    db_connection: Connection
+    db_connection: Connection,
 }
 
 impl NYCDOBSqliteStringProvider {
     pub async fn new(db_file_path: &str) -> Result<Self, tokio_rusqlite::Error> {
         let db_connection = Connection::open(db_file_path).await?;
-        db_connection.call(
-            |conn| conn.execute("PRAGMA query_only=ON", ())
-        ).await?;
+        db_connection
+            .call(|conn| conn.execute("PRAGMA query_only=ON", ()))
+            .await?;
         Ok(NYCDOBSqliteStringProvider { db_connection })
     }
 }
@@ -27,17 +27,23 @@ impl NYCDOBSqliteStringProvider {
 #[cfg(test)]
 impl NYCDOBSqliteStringProvider {
     fn with_connection(conn: Connection) -> Self {
-        NYCDOBSqliteStringProvider { db_connection: conn }
+        NYCDOBSqliteStringProvider {
+            db_connection: conn,
+        }
     }
 }
 
 #[async_trait]
 impl StringProvider for NYCDOBSqliteStringProvider {
-    async fn get_string(&self, asset_type: AssetType, identifier: &str) -> Result<String, AssetErr> {
+    async fn get_string(
+        &self,
+        asset_type: AssetType,
+        identifier: &str,
+    ) -> Result<String, AssetErr> {
         if asset_type != AssetType::BuildingFootprintWKT {
-            return Err(AssetErr::UnsupportedAssetType(
-                format!("NYCDOBSqliteStringFetcher only supports BuildingFootprintWKT, got {asset_type}")
-            ))
+            return Err(AssetErr::UnsupportedAssetType(format!(
+                "NYCDOBSqliteStringFetcher only supports BuildingFootprintWKT, got {asset_type}"
+            )));
         }
 
         // The below code is all super BuildingFootprintWKT specific, but we Err-ed above in
@@ -94,10 +100,10 @@ mod tests {
     async fn make_provider(rows: &[(&str, &str)]) -> NYCDOBSqliteStringProvider {
         let conn = Connection::open(":memory:").await.unwrap();
         conn.call(|c| {
-            c.execute_batch(
-                "CREATE TABLE building_footprints (bin TEXT, the_geom TEXT)"
-            )
-        }).await.unwrap();
+            c.execute_batch("CREATE TABLE building_footprints (bin TEXT, the_geom TEXT)")
+        })
+        .await
+        .unwrap();
 
         for (bin, geom) in rows {
             let bin = bin.to_string();
@@ -107,7 +113,9 @@ mod tests {
                     "INSERT INTO building_footprints (bin, the_geom) VALUES (?1, ?2)",
                     rusqlite::params![bin, geom],
                 )
-            }).await.unwrap();
+            })
+            .await
+            .unwrap();
         }
 
         NYCDOBSqliteStringProvider::with_connection(conn)
@@ -116,14 +124,18 @@ mod tests {
     #[tokio::test]
     async fn returns_wkt_for_known_bin() {
         let provider = make_provider(&[("1000001", SAMPLE_WKT)]).await;
-        let result = provider.get_string(AssetType::BuildingFootprintWKT, "1000001").await;
+        let result = provider
+            .get_string(AssetType::BuildingFootprintWKT, "1000001")
+            .await;
         assert_eq!(result.unwrap(), SAMPLE_WKT);
     }
 
     #[tokio::test]
     async fn returns_not_found_for_missing_bin() {
         let provider = make_provider(&[]).await;
-        let result = provider.get_string(AssetType::BuildingFootprintWKT, "1000001").await;
+        let result = provider
+            .get_string(AssetType::BuildingFootprintWKT, "1000001")
+            .await;
         assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
     }
 
@@ -132,8 +144,11 @@ mod tests {
         let provider = make_provider(&[
             ("1000001", SAMPLE_WKT),
             ("1000001", "POLYGON((2 2, 3 2, 3 3, 2 3, 2 2))"),
-        ]).await;
-        let result = provider.get_string(AssetType::BuildingFootprintWKT, "1000001").await;
+        ])
+        .await;
+        let result = provider
+            .get_string(AssetType::BuildingFootprintWKT, "1000001")
+            .await;
         assert!(matches!(result, Err(AssetErr::AssetContentError(_))));
     }
 
@@ -147,7 +162,9 @@ mod tests {
     #[tokio::test]
     async fn does_not_return_row_for_different_bin() {
         let provider = make_provider(&[("2000001", SAMPLE_WKT)]).await;
-        let result = provider.get_string(AssetType::BuildingFootprintWKT, "1000001").await;
+        let result = provider
+            .get_string(AssetType::BuildingFootprintWKT, "1000001")
+            .await;
         assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
     }
 }

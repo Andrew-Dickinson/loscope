@@ -1,13 +1,13 @@
-use std::fs::File;
-use std::io::{Read};
-use std::sync::Arc;
-use derive_new::new;
-use image::{DynamicImage};
-use crate::util::openjpg2k::decode_jp2_region;
-use crate::providers::backends::asset_fetcher::{AssetType};
-use crate::providers::backends::fs_cache::{AssetProvider};
+use crate::providers::backends::asset_fetcher::AssetType;
+use crate::providers::backends::fs_cache::AssetProvider;
 use crate::types::errors::AssetErr;
-use crate::types::tiles::{TileId, LAS_TILE_SIDE_LENGTH_USFT};
+use crate::types::tiles::{LAS_TILE_SIDE_LENGTH_USFT, TileId};
+use crate::util::openjpg2k::decode_jp2_region;
+use derive_new::new;
+use image::DynamicImage;
+use std::fs::File;
+use std::io::Read;
+use std::sync::Arc;
 
 const _ORTHO_IMAGE_SIZE_PIXELS: u16 = 5000;
 const ORTHO_SCALE_PX_PER_USFT: u8 = 2;
@@ -17,9 +17,8 @@ pub trait OrthoProvider {
     async fn get_ortho(&self, tile_id: TileId) -> Result<DynamicImage, AssetErr>;
 }
 
-
 #[derive(new)]
-pub struct CachingOrthoProvider  {
+pub struct CachingOrthoProvider {
     asset_provider: Arc<dyn AssetProvider + Send + Sync>,
 }
 
@@ -27,22 +26,31 @@ pub struct CachingOrthoProvider  {
 impl OrthoProvider for CachingOrthoProvider {
     async fn get_ortho(&self, tile_id: TileId) -> Result<DynamicImage, AssetErr> {
         let fname = tile_id.las_tile_id().ortho_fname();
-        let mut asset_handle = self.asset_provider.get_asset(AssetType::OrthoImage, &fname).await?;
+        let mut asset_handle = self
+            .asset_provider
+            .get_asset(AssetType::OrthoImage, &fname)
+            .await?;
 
-
-        let asset_size = asset_handle.metadata().or_else(
-            |read_err| Err(AssetErr::AssetContentError(
-                format!("Unable to read metadata from asset {fname}: {read_err}")
-            )))?.len();
+        let asset_size = asset_handle
+            .metadata()
+            .or_else(|read_err| {
+                Err(AssetErr::AssetContentError(format!(
+                    "Unable to read metadata from asset {fname}: {read_err}"
+                )))
+            })?
+            .len();
 
         // Safety: This unwrap() would only throw if asset_size > max usize, which could only happen
         // when usize is < u64, and we are trying to load an asset that wouldn't fit into memory,
         // in which case a panic is justified (since the Vec wouldn't be able to alloc anyway)
         let mut asset_buf: Vec<u8> = Vec::with_capacity(asset_size.try_into().unwrap());
-        asset_handle.read_to_end(&mut asset_buf).or_else(
-            |read_err| Err(AssetErr::AssetContentError(
-                    format!("Unable to read content from asset {fname}: {read_err}")
-                )))?;
+        asset_handle
+            .read_to_end(&mut asset_buf)
+            .or_else(|read_err| {
+                Err(AssetErr::AssetContentError(format!(
+                    "Unable to read content from asset {fname}: {read_err}"
+                )))
+            })?;
 
         let bounds = to_ortho_bounds(tile_id.subgrid_id().relative_bounds());
         let rgba_img = decode_jp2_region(
@@ -50,17 +58,19 @@ impl OrthoProvider for CachingOrthoProvider {
             bounds.0.into(),
             bounds.1.into(),
             bounds.2.into(),
-            bounds.3.into()
-        ).or_else(
-            |read_err| Err(AssetErr::AssetContentError(
-                format!("Unable to read content from asset {fname}: {read_err}")
-            )))?;
+            bounds.3.into(),
+        )
+        .or_else(|read_err| {
+            Err(AssetErr::AssetContentError(format!(
+                "Unable to read content from asset {fname}: {read_err}"
+            )))
+        })?;
 
         Ok(DynamicImage::ImageRgba8(rgba_img))
     }
 }
 
-fn to_ortho_bounds(usft_sw_rel_bounds: (u16, u16, u16, u16)) -> (u16, u16, u16, u16){
+fn to_ortho_bounds(usft_sw_rel_bounds: (u16, u16, u16, u16)) -> (u16, u16, u16, u16) {
     let ortho_scale_px_per_usft_u16: u16 = ORTHO_SCALE_PX_PER_USFT.into();
     let top_left = (
         usft_sw_rel_bounds.0 * ortho_scale_px_per_usft_u16,
@@ -70,7 +80,7 @@ fn to_ortho_bounds(usft_sw_rel_bounds: (u16, u16, u16, u16)) -> (u16, u16, u16, 
         // (relative_bounds() returns the SW corner of the subgrid tile, relative to the
         // SW corner of the LAS tile)
         (LAS_TILE_SIDE_LENGTH_USFT - usft_sw_rel_bounds.3 - usft_sw_rel_bounds.1)
-            * ortho_scale_px_per_usft_u16
+            * ortho_scale_px_per_usft_u16,
     );
 
     // Convert from x,y,w,h to x0,y0,x1,y1
@@ -78,7 +88,7 @@ fn to_ortho_bounds(usft_sw_rel_bounds: (u16, u16, u16, u16)) -> (u16, u16, u16, 
         top_left.0,
         top_left.1,
         top_left.0 + usft_sw_rel_bounds.2 * ortho_scale_px_per_usft_u16,
-        top_left.1 + usft_sw_rel_bounds.3 * ortho_scale_px_per_usft_u16
+        top_left.1 + usft_sw_rel_bounds.3 * ortho_scale_px_per_usft_u16,
     )
 }
 
@@ -112,13 +122,18 @@ mod tests {
 
         async fn get_asset(&self, _: AssetType, _: &str) -> Result<File, AssetErr> {
             match &self.result {
-                Ok(path) => File::open(path).map_err(|e| AssetErr::LocalFileSystemError(e.to_string())),
+                Ok(path) => {
+                    File::open(path).map_err(|e| AssetErr::LocalFileSystemError(e.to_string()))
+                }
                 Err(AssetErr::AssetNotFound(msg)) => Err(AssetErr::AssetNotFound(msg.clone())),
                 Err(e) => Err(AssetErr::LocalFileSystemError(format!("{e:?}"))),
             }
         }
 
-        async fn list_assets_of_type(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
+        async fn list_assets_of_type(
+            &self,
+            asset_type: AssetType,
+        ) -> Result<Vec<String>, AssetErr> {
             panic!("DelayedMockFetcher::list_assets_of_type");
         }
     }
@@ -134,13 +149,19 @@ mod tests {
     #[test]
     fn ortho_bounds_ne_subgrid() {
         // Subgrid (4,4): NE corner → top-left pixel origin of image
-        assert_eq!(to_ortho_bounds((2000, 2000, 500, 500)), (4000, 0, 5000, 1000));
+        assert_eq!(
+            to_ortho_bounds((2000, 2000, 500, 500)),
+            (4000, 0, 5000, 1000)
+        );
     }
 
     #[test]
     fn ortho_bounds_middle_subgrid() {
         // Subgrid (2,3): x0=1000*2=2000, y_tl=(2500-500-1500)*2=1000
-        assert_eq!(to_ortho_bounds((1000, 1500, 500, 500)), (2000, 1000, 3000, 2000));
+        assert_eq!(
+            to_ortho_bounds((1000, 1500, 500, 500)),
+            (2000, 1000, 3000, 2000)
+        );
     }
 
     #[test]
@@ -185,12 +206,10 @@ mod tests {
 
     #[tokio::test]
     async fn get_ortho_returns_image_for_valid_jp2() {
-        let jp2_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/resources/002205.jp2");
+        let jp2_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/resources/002205.jp2");
 
-        let provider = CachingOrthoProvider::new(
-            Arc::new(MockAssetProvider::returning_file(jp2_path))
-        );
+        let provider =
+            CachingOrthoProvider::new(Arc::new(MockAssetProvider::returning_file(jp2_path)));
         let result = provider.get_ortho(tile_002205()).await;
         assert!(result.is_ok(), "expected Ok, got {result:?}");
         let result = result.unwrap();
@@ -200,11 +219,9 @@ mod tests {
 
     #[tokio::test]
     async fn get_ortho_propagates_asset_not_found() {
-        let provider = CachingOrthoProvider::new(
-            Arc::new(
-                MockAssetProvider::returning_err(AssetErr::AssetNotFound("mock: not found".into()))
-            )
-        );
+        let provider = CachingOrthoProvider::new(Arc::new(MockAssetProvider::returning_err(
+            AssetErr::AssetNotFound("mock: not found".into()),
+        )));
         let result = provider.get_ortho(tile_002205()).await;
         assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
     }
@@ -213,15 +230,14 @@ mod tests {
     async fn get_ortho_returns_content_error_for_corrupt_file() {
         let temp_dir = test_temp_dir!();
         let bad_path = temp_dir.as_path_untracked().join("bad.jp2");
-        File::create(&bad_path).unwrap().write_all(b"not-an-image").unwrap();
+        File::create(&bad_path)
+            .unwrap()
+            .write_all(b"not-an-image")
+            .unwrap();
 
-        let provider = CachingOrthoProvider::new(
-            Arc::new(
-                MockAssetProvider::returning_file(bad_path)
-            )
-        );
+        let provider =
+            CachingOrthoProvider::new(Arc::new(MockAssetProvider::returning_file(bad_path)));
         let result = provider.get_ortho(tile_002205()).await;
         assert!(matches!(result, Err(AssetErr::AssetContentError(_))));
     }
 }
-

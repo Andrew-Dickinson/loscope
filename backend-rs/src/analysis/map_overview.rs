@@ -1,90 +1,91 @@
-use std::cmp::PartialEq;
-use derive_getters::Getters;
-use derive_new::new;
-use rocket::serde::{Deserialize, Serialize};
 use crate::analysis::point_evaluation::{PointEvaluationOutcome, ResultStatus};
 use crate::types::coords::{GPSCoords2, GPSCoords3, NYSCoords2, NYSCoords3};
 use crate::types::tiles::TileId;
 use crate::util::coord_conversion::with_coord_converter;
+use derive_getters::Getters;
+use derive_new::new;
+use rocket::serde::{Deserialize, Serialize};
+use std::cmp::PartialEq;
 
-#[derive(new,Serialize,Deserialize)]
+#[derive(new, Serialize, Deserialize)]
 pub struct TileResult {
     id: TileId,
     bounds: (GPSCoords2, GPSCoords2),
     intersection_detected: bool,
 }
 
-
-#[derive(new,Getters,Serialize,Deserialize)]
+#[derive(new, Getters, Serialize, Deserialize)]
 pub struct PointEvaluationOverview {
     endpoints: (GPSCoords3, GPSCoords3),
     tiles: Vec<TileResult>,
-    overhead_ellipse_poly: Vec<GPSCoords2>
+    overhead_ellipse_poly: Vec<GPSCoords2>,
 }
 
 impl From<&PointEvaluationOutcome> for PointEvaluationOverview {
     fn from(value: &PointEvaluationOutcome) -> Self {
-        with_coord_converter(
-            |converter| {
-                let input = value.output().input();
-                PointEvaluationOverview {
-                    endpoints: (
-                        converter.to_gps3(input.point_a()),
-                        converter.to_gps3(input.point_b())
-                    ),
-                    tiles: value.tiles().iter().map(|&tile_id| {
-                        TileResult {
-                            id: tile_id,
-                            bounds: {
-                                let tile_bounds = tile_id.get_bounds();
-                                let (tile_w, tile_s) = tile_bounds.min().x_y();
-                                let (tile_e, tile_n) = tile_bounds.max().x_y();
+        with_coord_converter(|converter| {
+            let input = value.output().input();
+            PointEvaluationOverview {
+                endpoints: (
+                    converter.to_gps3(input.point_a()),
+                    converter.to_gps3(input.point_b()),
+                ),
+                tiles: value
+                    .tiles()
+                    .iter()
+                    .map(|&tile_id| TileResult {
+                        id: tile_id,
+                        bounds: {
+                            let tile_bounds = tile_id.get_bounds();
+                            let (tile_w, tile_s) = tile_bounds.min().x_y();
+                            let (tile_e, tile_n) = tile_bounds.max().x_y();
 
-                                (
-                                    converter.to_gps2(&NYSCoords2::new(tile_w.into(), tile_s.into())),
-                                    converter.to_gps2(&NYSCoords2::new(tile_e.into(), tile_n.into()))
-                                )
-                            },
-                            intersection_detected: *value.output().result() != ResultStatus::Unobstructed &&
-                                value.result_full()
+                            (
+                                converter.to_gps2(&NYSCoords2::new(tile_w.into(), tile_s.into())),
+                                converter.to_gps2(&NYSCoords2::new(tile_e.into(), tile_n.into())),
+                            )
+                        },
+                        intersection_detected: *value.output().result()
+                            != ResultStatus::Unobstructed
+                            && value
+                                .result_full()
                                 .intersection()
                                 .max_in_tile(tile_id)
                                 .cloned()
                                 .map(f64::from)
                                 .unwrap_or(0.0)
-                                 > 0.0
-                        }
-                    }).collect(),
-                    overhead_ellipse_poly: generate_ellipse_poly(
-                            input.point_a(),
-                            input.point_b(),
-                            *input.frequency_hz(),
-                        )
-                        .map(|coords| converter.to_gps2(&coords))
-                        .collect()
-                }
+                                > 0.0,
+                    })
+                    .collect(),
+                overhead_ellipse_poly: generate_ellipse_poly(
+                    input.point_a(),
+                    input.point_b(),
+                    *input.frequency_hz(),
+                )
+                .map(|coords| converter.to_gps2(&coords))
+                .collect(),
             }
-        )
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-    use std::sync::OnceLock;
-    use ndarray::{Array1, Array2};
-    use uuid::Uuid;
     use super::*;
     use crate::analysis::point_evaluation::{
-        IntersectionResult, PointEvaluationInput,
-        PointEvaluationOutcome, PointEvaluationOutput, ResultStatus, ZoneEvaluation,
+        IntersectionResult, PointEvaluationInput, PointEvaluationOutcome, PointEvaluationOutput,
+        ResultStatus, ZoneEvaluation,
     };
     use crate::types::obstructions::ObstructionTypesFilter;
     use crate::types::stairstep::StairStepGrid;
     use crate::types::tiles::TileId;
     use crate::util::coord_conversion::{
-        init_coord_converter_factory, CoordinateConverter, with_coord_converter,
+        CoordinateConverter, init_coord_converter_factory, with_coord_converter,
     };
+    use ndarray::{Array1, Array2};
+    use std::collections::HashSet;
+    use std::sync::OnceLock;
+    use uuid::Uuid;
 
     static SETUP: OnceLock<()> = OnceLock::new();
 
@@ -116,7 +117,10 @@ mod tests {
         tiles: HashSet<TileId>,
     ) -> PointEvaluationOutcome {
         let input = PointEvaluationInput::new(
-            point_a, point_b, 2_400_000_000.0, ObstructionTypesFilter::All,
+            point_a,
+            point_b,
+            2_400_000_000.0,
+            ObstructionTypesFilter::All,
         );
         let output = PointEvaluationOutput::new(Uuid::new_v4(), input, ResultStatus::Unobstructed);
         PointEvaluationOutcome::new(output, empty_zone(), empty_zone(), tiles)

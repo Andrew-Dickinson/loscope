@@ -1,27 +1,27 @@
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::fs::File;
-use std::{fmt, io};
-use std::str::FromStr;
+use crate::types::coords::NYSCoords2;
+use crate::types::errors::AssetErr;
+use crate::types::obj_writer::{MAX_OBJ_SIZE_USFT, append_obj_row};
+use crate::types::tiles::TileId;
+use crate::yield_str;
 use async_fn_stream::fn_stream;
 use derive_getters::Getters;
 use derive_new::new;
 use futures_util::Stream;
 use ndarray::Array2;
-use rocket::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use rocket::serde::de::{Error, SeqAccess, Unexpected, Visitor};
+use rocket::serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::fs::File;
+use std::str::FromStr;
+use std::{fmt, io};
 use strum::ParseError;
-use strum_macros::{Display, EnumString, AsRefStr};
+use strum_macros::{AsRefStr, Display, EnumString};
 use tiff::decoder::{Decoder, DecodingResult};
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
-use crate::types::coords::NYSCoords2;
-use crate::types::errors::AssetErr;
-use crate::types::obj_writer::{append_obj_row, MAX_OBJ_SIZE_USFT};
-use crate::types::tiles::{TileId};
-use crate::yield_str;
 
-#[derive(SchemaWrite,SchemaRead)]
+#[derive(SchemaWrite, SchemaRead)]
 pub enum ObstructionTypesFilter {
     All,
     Specific(Vec<ObstructionType>),
@@ -31,7 +31,7 @@ impl ObstructionTypesFilter {
     pub fn includes(&self, type_: &ObstructionType) -> bool {
         match self {
             ObstructionTypesFilter::All => true,
-            ObstructionTypesFilter::Specific(allowed_types) => allowed_types.contains(&type_)
+            ObstructionTypesFilter::Specific(allowed_types) => allowed_types.contains(&type_),
         }
     }
 }
@@ -45,13 +45,11 @@ impl Default for ObstructionTypesFilter {
 impl Serialize for ObstructionTypesFilter {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         match self {
-            ObstructionTypesFilter::All => {serializer.serialize_str("*")},
-            ObstructionTypesFilter::Specific(allowed_types) => {
-                allowed_types.serialize(serializer)
-            }
+            ObstructionTypesFilter::All => serializer.serialize_str("*"),
+            ObstructionTypesFilter::Specific(allowed_types) => allowed_types.serialize(serializer),
         }
     }
 }
@@ -59,7 +57,7 @@ impl Serialize for ObstructionTypesFilter {
 impl<'de> Deserialize<'de> for ObstructionTypesFilter {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de>
+        D: Deserializer<'de>,
     {
         pub struct ObstructionTypesFilterVisitor;
         impl<'de> Visitor<'de> for ObstructionTypesFilterVisitor {
@@ -73,7 +71,7 @@ impl<'de> Deserialize<'de> for ObstructionTypesFilter {
             {
                 if input_str == "*" {
                     Ok(ObstructionTypesFilter::All)
-                } else  {
+                } else {
                     Err(Error::invalid_value(Unexpected::Str(input_str), &self))
                 }
             }
@@ -85,9 +83,8 @@ impl<'de> Deserialize<'de> for ObstructionTypesFilter {
                 let mut specifics = Vec::new();
                 while let Some(item) = seq.next_element()? {
                     specifics.push(
-                        ObstructionType::parse(item).map_err(
-                            |_| Error::invalid_value(Unexpected::Str(item), &self)
-                        )?
+                        ObstructionType::parse(item)
+                            .map_err(|_| Error::invalid_value(Unexpected::Str(item), &self))?,
                     );
                 }
                 Ok(ObstructionTypesFilter::Specific(specifics))
@@ -98,15 +95,27 @@ impl<'de> Deserialize<'de> for ObstructionTypesFilter {
     }
 }
 
-#[derive(Debug,Eq,Serialize,Deserialize,Hash,PartialEq,Clone,SchemaWrite,SchemaRead,EnumString,AsRefStr)]
+#[derive(
+    Debug,
+    Eq,
+    Serialize,
+    Deserialize,
+    Hash,
+    PartialEq,
+    Clone,
+    SchemaWrite,
+    SchemaRead,
+    EnumString,
+    AsRefStr,
+)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
-pub enum  ObstructionType {
+pub enum ObstructionType {
     ActivePermits,
     ApprovedJobApplications,
     NewConstructionCo,
     NewConstructionFootprints,
-    RecentJobApplications
+    RecentJobApplications,
 }
 
 pub type ObstructionId = Uuid;
@@ -150,7 +159,6 @@ struct ObstructionMetaDeHelper {
 }
 
 impl ObstructionMeta {
-
     fn try_from(h: ObstructionMetaDeHelper, type_: ObstructionType) -> Result<Self, String> {
         let sw_offset = match h.sw_offset {
             Some(coords) => coords,
@@ -158,11 +166,17 @@ impl ObstructionMeta {
                 (Some(x), Some(y)) => NYSCoords2::new(x, y),
                 _ => return Err(
                     "missing offset: need either `offset_nys` or both `x_offset` and `y_offset`"
-                        .to_string()
+                        .to_string(),
                 ),
             },
         };
-        Ok(ObstructionMeta { id: h.id, type_: type_, attributes: h.attributes, sw_offset, tile_ids: h.tile_ids })
+        Ok(ObstructionMeta {
+            id: h.id,
+            type_: type_,
+            attributes: h.attributes,
+            sw_offset,
+            tile_ids: h.tile_ids,
+        })
     }
 }
 
@@ -180,12 +194,16 @@ pub struct ObstructionMeta {
     sw_offset: NYSCoords2,
 
     // Tiles intersected by the footprint
-    tile_ids: Vec<TileId>
+    tile_ids: Vec<TileId>,
 }
 
 impl ObstructionMeta {
-    pub fn from_json<R>(reader: R, obstruction_type: ObstructionType) -> Result<Self, serde_json::Error>
-        where R: io::Read
+    pub fn from_json<R>(
+        reader: R,
+        obstruction_type: ObstructionType,
+    ) -> Result<Self, serde_json::Error>
+    where
+        R: io::Read,
     {
         let obstruction_meta_internal: ObstructionMetaDeHelper = serde_json::from_reader(reader)?;
 
@@ -213,12 +231,15 @@ impl ObstructionRaster {
         &self.heightmap
     }
 
-    pub fn read_from_tiff(obstruction_id: ObstructionId, file: File) -> Result<ObstructionRaster, AssetErr> {
+    pub fn read_from_tiff(
+        obstruction_id: ObstructionId,
+        file: File,
+    ) -> Result<ObstructionRaster, AssetErr> {
         let io = std::io::BufReader::new(file);
 
         // We would love to use a try here to scope the ?s but it's only available in nightly,
         // so a closure it is
-        let inner = move || -> Result<Array2::<u16>, Box<dyn std::error::Error>> {
+        let inner = move || -> Result<Array2<u16>, Box<dyn std::error::Error>> {
             let mut reader = Decoder::new(io)?;
             let image_data = reader.read_image()?;
             let width: usize = reader.dimensions()?.0.try_into()?;
@@ -227,8 +248,9 @@ impl ObstructionRaster {
             let colortype = reader.colortype()?;
             if colortype != tiff::ColorType::Gray(16) {
                 return Err(Box::new(io::Error::new(
-                    io::ErrorKind::InvalidData, format!("Invalid datatype: {:?}", colortype)
-                )))
+                    io::ErrorKind::InvalidData,
+                    format!("Invalid datatype: {:?}", colortype),
+                )));
             }
 
             if let DecodingResult::U16(image_data) = image_data {
@@ -236,22 +258,30 @@ impl ObstructionRaster {
                     .or_else(|arr_err| Err(Box::new(arr_err)))?)
             } else {
                 Err(Box::new(io::Error::new(
-                    io::ErrorKind::InvalidData, format!("Invalid datatype: {:?}", image_data)
+                    io::ErrorKind::InvalidData,
+                    format!("Invalid datatype: {:?}", image_data),
                 )))
             }
         };
 
-        let image_data = inner()
-            .or_else(|err| Err(
-                AssetErr::AssetContentError(
-                    format!("Error parsing obstruction tiff for id {obstruction_id}: {err}")
-                )
-            ))?;
+        let image_data = inner().or_else(|err| {
+            Err(AssetErr::AssetContentError(format!(
+                "Error parsing obstruction tiff for id {obstruction_id}: {err}"
+            )))
+        })?;
 
-        Ok(ObstructionRaster { heightmap: image_data })
+        Ok(ObstructionRaster {
+            heightmap: image_data,
+        })
     }
 
-    pub fn to_obj_stream(&self, type_: ObstructionType, id: ObstructionId, x_offset: isize, y_offset: isize) -> impl Stream<Item = String> {
+    pub fn to_obj_stream(
+        &self,
+        type_: ObstructionType,
+        id: ObstructionId,
+        x_offset: isize,
+        y_offset: isize,
+    ) -> impl Stream<Item = String> {
         let heightmap = self.heightmap.clone();
         assert!(heightmap.nrows() < MAX_OBJ_SIZE_USFT);
         assert!(heightmap.ncols() < MAX_OBJ_SIZE_USFT);
@@ -263,20 +293,30 @@ impl ObstructionRaster {
                  # Obstruction type: {type_}\n\
                  # X = easting (within tile), Y = northing (within tile), Z = elevation (ft)\n\
                  o heightmap\n\n"
-            )).await;
+            ))
+            .await;
 
             let mut vi: usize = 0;
             let mut buf = String::with_capacity(16 * 1024);
 
             for xi in 0..heightmap.nrows() {
                 append_obj_row(
-                    xi, x_offset, y_offset, &heightmap, &mut vi, &mut buf,
+                    xi,
+                    x_offset,
+                    y_offset,
+                    &heightmap,
+                    &mut vi,
+                    &mut buf,
                     |_xi, _yi, z_in| z_in == 0,
                     // Draw side face down to adj_z whenever adj is strictly lower.
                     // OOB neighbors get adj_raw=0, which is always < z_in (pixel is non-zero),
                     // so the face is drawn to the ground — correct for building sides.
                     |_adj_idx, adj_raw, z_in| {
-                        if adj_raw >= z_in { None } else { Some(adj_raw as f64 / 12.0) }
+                        if adj_raw >= z_in {
+                            None
+                        } else {
+                            Some(adj_raw as f64 / 12.0)
+                        }
                     },
                 );
                 if buf.len() >= 16 * 1024 {
@@ -284,16 +324,18 @@ impl ObstructionRaster {
                 }
             }
 
-            if !buf.is_empty() { e.emit(buf).await; }
+            if !buf.is_empty() {
+                e.emit(buf).await;
+            }
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-    use rocket::yansi::Paint;
     use super::*;
+    use rocket::yansi::Paint;
+    use std::io::Cursor;
 
     const LEGACY_PAYLOAD: &str = r#"{
         "obstruction_id": "83167e5c-c108-4d85-905c-6dc3224cc367",
@@ -318,7 +360,10 @@ mod tests {
     #[test]
     fn legacy_payload_deserializes_offset() {
         let meta: ObstructionMeta = ObstructionMeta::from_json(
-            Cursor::new(LEGACY_PAYLOAD.to_string().into_bytes()), ObstructionType::ActivePermits).unwrap();
+            Cursor::new(LEGACY_PAYLOAD.to_string().into_bytes()),
+            ObstructionType::ActivePermits,
+        )
+        .unwrap();
         assert_eq!(*meta.sw_offset.easting(), 1003728.0);
         assert_eq!(*meta.sw_offset.northing(), 235953.0);
     }
@@ -326,26 +371,44 @@ mod tests {
     #[test]
     fn legacy_payload_deserializes_attributes() {
         let meta: ObstructionMeta = ObstructionMeta::from_json(
-            Cursor::new(LEGACY_PAYLOAD.to_string().into_bytes()), ObstructionType::ActivePermits).unwrap();
+            Cursor::new(LEGACY_PAYLOAD.to_string().into_bytes()),
+            ObstructionType::ActivePermits,
+        )
+        .unwrap();
         assert_eq!(meta.attributes.len(), 7);
 
-        assert!(matches!(meta.attributes.get("bin"), Some(AttributeValue::String(s)) if s == "2129799"));
-        assert!(matches!(meta.attributes.get("ground_elevation"), Some(AttributeValue::Number(_))));
-        assert!(matches!(meta.attributes.get("construction_year"), Some(AttributeValue::Number(_))));
+        assert!(
+            matches!(meta.attributes.get("bin"), Some(AttributeValue::String(s)) if s == "2129799")
+        );
+        assert!(matches!(
+            meta.attributes.get("ground_elevation"),
+            Some(AttributeValue::Number(_))
+        ));
+        assert!(matches!(
+            meta.attributes.get("construction_year"),
+            Some(AttributeValue::Number(_))
+        ));
     }
 
     #[test]
     fn legacy_payload_serializes_attributes_back_out() {
         let meta: ObstructionMeta = ObstructionMeta::from_json(
             Cursor::new(LEGACY_PAYLOAD.to_string().into_bytes()),
-            ObstructionType::ActivePermits
-        ).unwrap();
+            ObstructionType::ActivePermits,
+        )
+        .unwrap();
         let json: serde_json::Value = serde_json::to_value(&meta).unwrap();
 
         let attrs = json.get("attributes").expect("attributes key missing");
         assert_eq!(attrs.get("bin").and_then(|v| v.as_str()), Some("2129799"));
-        assert_eq!(attrs.get("ground_elevation").and_then(|v| v.as_f64()), Some(34.0));
-        assert_eq!(attrs.get("construction_year").and_then(|v| v.as_f64()), Some(2025.0));
+        assert_eq!(
+            attrs.get("ground_elevation").and_then(|v| v.as_f64()),
+            Some(34.0)
+        );
+        assert_eq!(
+            attrs.get("construction_year").and_then(|v| v.as_f64()),
+            Some(2025.0)
+        );
     }
 
     // --- ObstructionTypesFilter::includes tests ---
@@ -373,14 +436,23 @@ mod tests {
 
     #[test]
     fn serialize_all_produces_star_literal() {
-        assert_eq!(serde_json::to_string(&ObstructionTypesFilter::All).unwrap(), r#""*""#);
+        assert_eq!(
+            serde_json::to_string(&ObstructionTypesFilter::All).unwrap(),
+            r#""*""#
+        );
     }
 
     #[test]
     fn serialize_specific_produces_array_of_type_strings() {
-        let filter = ObstructionTypesFilter::Specific(vec![ObstructionType::ActivePermits, ObstructionType::NewConstructionCo]);
+        let filter = ObstructionTypesFilter::Specific(vec![
+            ObstructionType::ActivePermits,
+            ObstructionType::NewConstructionCo,
+        ]);
         let v: serde_json::Value = serde_json::to_value(&filter).unwrap();
-        assert_eq!(v, serde_json::json!(["active_permits", "new_construction_co"]));
+        assert_eq!(
+            v,
+            serde_json::json!(["active_permits", "new_construction_co"])
+        );
     }
 
     // --- ObstructionTypesFilter deserialize tests ---
@@ -393,7 +465,8 @@ mod tests {
 
     #[test]
     fn deserialize_array_produces_specific() {
-        let filter: ObstructionTypesFilter = serde_json::from_str(r#"["active_permits", "new_construction_co"]"#).unwrap();
+        let filter: ObstructionTypesFilter =
+            serde_json::from_str(r#"["active_permits", "new_construction_co"]"#).unwrap();
         assert!(filter.includes(&ObstructionType::ActivePermits));
         assert!(filter.includes(&ObstructionType::NewConstructionCo));
         assert!(!filter.includes(&ObstructionType::RecentJobApplications));
@@ -420,7 +493,10 @@ mod tests {
 
     #[test]
     fn roundtrip_specific() {
-        let original = ObstructionTypesFilter::Specific(vec![ObstructionType::RecentJobApplications, ObstructionType::ActivePermits]);
+        let original = ObstructionTypesFilter::Specific(vec![
+            ObstructionType::RecentJobApplications,
+            ObstructionType::ActivePermits,
+        ]);
         let json = serde_json::to_string(&original).unwrap();
         let roundtripped: ObstructionTypesFilter = serde_json::from_str(&json).unwrap();
         assert!(roundtripped.includes(&ObstructionType::RecentJobApplications));

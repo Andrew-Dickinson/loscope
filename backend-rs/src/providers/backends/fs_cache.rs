@@ -1,11 +1,11 @@
+use crate::providers::backends::asset_fetcher::{AssetFetcher, AssetType};
+use crate::types::errors::AssetErr;
+use derive_new::new;
+use rand::Rng;
 use std::fs;
 use std::fs::{File, FileType};
 use std::path::{Path, PathBuf};
-use derive_new::new;
-use rand::Rng;
-use typed_path::{Utf8UnixPath};
-use crate::providers::backends::asset_fetcher::{AssetFetcher, AssetType};
-use crate::types::errors::AssetErr;
+use typed_path::Utf8UnixPath;
 
 #[async_trait]
 pub trait AssetProvider {
@@ -30,14 +30,20 @@ impl AssetProvider for CachingAssetProvider {
         let index_local_path = self.cache_root.join(asset_type.as_ref());
         if index_local_path.exists() {
             let file_list: Vec<String> = fs::read_dir(index_local_path)
-                .map_err(|e| AssetErr::LocalFileSystemError(
-                    format!("Error reading local cached obstruction index {}", e)
-                ))?.into_iter()
+                .map_err(|e| {
+                    AssetErr::LocalFileSystemError(format!(
+                        "Error reading local cached obstruction index {}",
+                        e
+                    ))
+                })?
+                .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().map(|e| e.is_file()).unwrap_or(false))
                 .filter_map(|f| f.file_name().into_string().ok())
                 .collect();
-            if !file_list.is_empty() { return Ok(file_list); }
+            if !file_list.is_empty() {
+                return Ok(file_list);
+            }
         }
 
         self.upstream_fetcher.list_assets(asset_type).await
@@ -52,11 +58,9 @@ impl AssetProvider for CachingAssetProvider {
             Ok(file_handle) => return Ok(file_handle),
             Err(e) => {
                 if e.kind() != std::io::ErrorKind::NotFound {
-                    return Err(
-                        AssetErr::LocalFileSystemError(
-                            format!("Error checking for cached asset at {item_path:?}: {e}")
-                        )
-                    )
+                    return Err(AssetErr::LocalFileSystemError(format!(
+                        "Error checking for cached asset at {item_path:?}: {e}"
+                    )));
                 }
             }
         }
@@ -73,39 +77,41 @@ impl AssetProvider for CachingAssetProvider {
         //  this for real
         let temp_path_buf = {
             let mut temp = item_path_buf.clone().into_os_string();
-            temp.push(format!("-{:05}.tmp", rand::thread_rng().gen_range(1..100_000)));
+            temp.push(format!(
+                "-{:05}.tmp",
+                rand::thread_rng().gen_range(1..100_000)
+            ));
             PathBuf::from(temp)
         };
         let temp_path = temp_path_buf.as_path();
 
         let remote_path = Utf8UnixPath::new(asset_id);
-        self.upstream_fetcher.fetch_asset(asset_type, remote_path, temp_path).await?;
+        self.upstream_fetcher
+            .fetch_asset(asset_type, remote_path, temp_path)
+            .await?;
 
         std::fs::rename(temp_path, item_path).map_err(|err| {
-            AssetErr::LocalFileSystemError(
-                format!("Failed to move temp file {temp_path:?} to {item_path:?}: {err}")
-            )
+            AssetErr::LocalFileSystemError(format!(
+                "Failed to move temp file {temp_path:?} to {item_path:?}: {err}"
+            ))
         })?;
 
-        Ok(
-          File::open(item_path)
-            .or_else(|err| Err(
-                AssetErr::LocalFileSystemError(
-                    format!("Unable to open fetched file at {item_path:?}: {err}")
-                )
-            ))?
-        )
+        Ok(File::open(item_path).or_else(|err| {
+            Err(AssetErr::LocalFileSystemError(format!(
+                "Unable to open fetched file at {item_path:?}: {err}"
+            )))
+        })?)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::errors::AssetErr;
     use std::io::Read;
     use std::path::Path;
     use test_temp_dir::test_temp_dir;
     use typed_path::Utf8UnixPath;
-    use crate::types::errors::AssetErr;
 
     struct MockAssetFetcher {
         should_succeed: bool,
@@ -113,7 +119,12 @@ mod tests {
 
     #[async_trait]
     impl AssetFetcher for MockAssetFetcher {
-        async fn fetch_asset(&self, _: AssetType, _: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr> {
+        async fn fetch_asset(
+            &self,
+            _: AssetType,
+            _: &Utf8UnixPath,
+            local_path: &Path,
+        ) -> Result<(), AssetErr> {
             if self.should_succeed {
                 if let Some(parent) = local_path.parent() {
                     std::fs::create_dir_all(parent).unwrap();
@@ -131,11 +142,18 @@ mod tests {
     }
 
     // None => returns Err, Some(v) => returns Ok(v)
-    struct ListMockFetcher { assets: Option<Vec<String>> }
+    struct ListMockFetcher {
+        assets: Option<Vec<String>>,
+    }
 
     #[async_trait]
     impl AssetFetcher for ListMockFetcher {
-        async fn fetch_asset(&self, _: AssetType, _: &Utf8UnixPath, _: &Path) -> Result<(), AssetErr> {
+        async fn fetch_asset(
+            &self,
+            _: AssetType,
+            _: &Utf8UnixPath,
+            _: &Path,
+        ) -> Result<(), AssetErr> {
             panic!("ListMockFetcher::fetch_asset not expected")
         }
         async fn list_assets(&self, _: AssetType) -> Result<Vec<String>, AssetErr> {
@@ -146,11 +164,18 @@ mod tests {
         }
     }
 
-    struct DelayedMockFetcher { delay_ms: u64 }
+    struct DelayedMockFetcher {
+        delay_ms: u64,
+    }
 
     #[async_trait]
     impl AssetFetcher for DelayedMockFetcher {
-        async fn fetch_asset(&self, _: AssetType, _: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr> {
+        async fn fetch_asset(
+            &self,
+            _: AssetType,
+            _: &Utf8UnixPath,
+            local_path: &Path,
+        ) -> Result<(), AssetErr> {
             use std::io::Write;
             if let Some(parent) = local_path.parent() {
                 std::fs::create_dir_all(parent).unwrap();
@@ -183,8 +208,14 @@ mod tests {
         let cache_root = temp_dir.as_path_untracked().to_path_buf();
 
         let (p1, p2) = (
-            CachingAssetProvider::new(Box::new(DelayedMockFetcher { delay_ms: 5 }), cache_root.clone()),
-            CachingAssetProvider::new(Box::new(DelayedMockFetcher { delay_ms: 100 }), cache_root.clone()),
+            CachingAssetProvider::new(
+                Box::new(DelayedMockFetcher { delay_ms: 5 }),
+                cache_root.clone(),
+            ),
+            CachingAssetProvider::new(
+                Box::new(DelayedMockFetcher { delay_ms: 100 }),
+                cache_root.clone(),
+            ),
         );
 
         let (r1, r2) = tokio::join!(
@@ -208,11 +239,16 @@ mod tests {
 
         // Fetcher always errors — success proves it was never called
         let provider = CachingAssetProvider::new(
-            Box::new(MockAssetFetcher { should_succeed: false }),
+            Box::new(MockAssetFetcher {
+                should_succeed: false,
+            }),
             cache_root,
         );
 
-        let mut file = provider.get_asset(AssetType::OrthoImage, "test.jpg").await.unwrap();
+        let mut file = provider
+            .get_asset(AssetType::OrthoImage, "test.jpg")
+            .await
+            .unwrap();
         assert_eq!(read_file_contents(&mut file), "cached-content");
     }
 
@@ -222,11 +258,16 @@ mod tests {
         let cache_root = temp_dir.as_path_untracked().to_path_buf();
 
         let provider = CachingAssetProvider::new(
-            Box::new(MockAssetFetcher { should_succeed: true }),
+            Box::new(MockAssetFetcher {
+                should_succeed: true,
+            }),
             cache_root.clone(),
         );
 
-        let mut file = provider.get_asset(AssetType::OrthoImage, "test.jpg").await.unwrap();
+        let mut file = provider
+            .get_asset(AssetType::OrthoImage, "test.jpg")
+            .await
+            .unwrap();
         assert_eq!(read_file_contents(&mut file), "fetched-content");
 
         // File should now be present in the cache
@@ -239,7 +280,9 @@ mod tests {
         let cache_root = temp_dir.as_path_untracked().to_path_buf();
 
         let provider = CachingAssetProvider::new(
-            Box::new(MockAssetFetcher { should_succeed: false }),
+            Box::new(MockAssetFetcher {
+                should_succeed: false,
+            }),
             cache_root,
         );
 
@@ -255,11 +298,16 @@ mod tests {
         let cache_root = temp_dir.as_path_untracked().to_path_buf();
         // Cache dir for ObstructionIndex is absent — upstream should be called.
         let provider = CachingAssetProvider::new(
-            Box::new(ListMockFetcher { assets: Some(vec!["a.json".into(), "b.json".into()]) }),
+            Box::new(ListMockFetcher {
+                assets: Some(vec!["a.json".into(), "b.json".into()]),
+            }),
             cache_root,
         );
 
-        let mut result = provider.list_assets_of_type(AssetType::ObstructionIndex).await.unwrap();
+        let mut result = provider
+            .list_assets_of_type(AssetType::ObstructionIndex)
+            .await
+            .unwrap();
         result.sort();
         assert_eq!(result, vec!["a.json", "b.json"]);
     }
@@ -268,12 +316,12 @@ mod tests {
     async fn list_assets_no_cache_dir_propagates_upstream_error() {
         let temp_dir = test_temp_dir!();
         let cache_root = temp_dir.as_path_untracked().to_path_buf();
-        let provider = CachingAssetProvider::new(
-            Box::new(ListMockFetcher { assets: None }),
-            cache_root,
-        );
+        let provider =
+            CachingAssetProvider::new(Box::new(ListMockFetcher { assets: None }), cache_root);
 
-        let result = provider.list_assets_of_type(AssetType::ObstructionIndex).await;
+        let result = provider
+            .list_assets_of_type(AssetType::ObstructionIndex)
+            .await;
         assert!(matches!(result, Err(AssetErr::AssetDownloadError(_))));
     }
 
@@ -288,11 +336,16 @@ mod tests {
 
         // Upstream panics if called — success proves the cache was used.
         let provider = CachingAssetProvider::new(
-            Box::new(MockAssetFetcher { should_succeed: false }),
+            Box::new(MockAssetFetcher {
+                should_succeed: false,
+            }),
             cache_root,
         );
 
-        let mut result = provider.list_assets_of_type(AssetType::ObstructionIndex).await.unwrap();
+        let mut result = provider
+            .list_assets_of_type(AssetType::ObstructionIndex)
+            .await
+            .unwrap();
         result.sort();
         assert_eq!(result, vec!["buildings.json", "towers.json"]);
     }
@@ -304,11 +357,16 @@ mod tests {
         std::fs::create_dir_all(cache_root.join("ObstructionIndex")).unwrap();
         // Cache dir for ObstructionIndex is empty — upstream should be called.
         let provider = CachingAssetProvider::new(
-            Box::new(ListMockFetcher { assets: Some(vec!["a.json".into(), "b.json".into()]) }),
+            Box::new(ListMockFetcher {
+                assets: Some(vec!["a.json".into(), "b.json".into()]),
+            }),
             cache_root,
         );
 
-        let mut result = provider.list_assets_of_type(AssetType::ObstructionIndex).await.unwrap();
+        let mut result = provider
+            .list_assets_of_type(AssetType::ObstructionIndex)
+            .await
+            .unwrap();
         result.sort();
         assert_eq!(result, vec!["a.json", "b.json"]);
     }
@@ -323,11 +381,16 @@ mod tests {
         std::fs::create_dir_all(cache_dir.join("subdir")).unwrap();
 
         let provider = CachingAssetProvider::new(
-            Box::new(MockAssetFetcher { should_succeed: false }),
+            Box::new(MockAssetFetcher {
+                should_succeed: false,
+            }),
             cache_root,
         );
 
-        let result = provider.list_assets_of_type(AssetType::ObstructionIndex).await.unwrap();
+        let result = provider
+            .list_assets_of_type(AssetType::ObstructionIndex)
+            .await
+            .unwrap();
         assert_eq!(result, vec!["real.json"]);
     }
 }

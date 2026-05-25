@@ -1,14 +1,14 @@
+use crate::types::coords::GPSCoords3;
+use eproj::{Coordinate3, Projector, SpatialReferenceIdentifier};
+use kml::types::{
+    AltitudeMode, Coord, Element, Geometry, LineString, LineStyle, LinearRing, MultiGeometry,
+    Placemark, PolyStyle, Polygon, Style,
+};
+use kml::{Kml, KmlDocument, KmlVersion};
+use nalgebra::{Matrix3, Vector3};
 use std::collections::HashMap;
 use std::f64::consts::PI;
 use uuid::Uuid;
-use nalgebra::{Matrix3, Vector3};
-use eproj::{Coordinate3, Projector, SpatialReferenceIdentifier};
-use kml::{Kml, KmlDocument, KmlVersion};
-use kml::types::{
-    AltitudeMode, Coord, Element, Geometry, LineString, LinearRing,
-    LineStyle, MultiGeometry, Placemark, Polygon, PolyStyle, Style,
-};
-use crate::types::coords::GPSCoords3;
 
 const SPEED_OF_LIGHT: f64 = 299_792_458.0;
 const LAT_SEGMENTS: usize = 24;
@@ -18,15 +18,25 @@ const LON_SEGMENTS: usize = 48;
 type Wgs84 = (f64, f64, f64);
 
 fn make_geo_to_ecef() -> Projector {
-    Projector::new(SpatialReferenceIdentifier::Epsg4979, SpatialReferenceIdentifier::Epsg4978).unwrap()
+    Projector::new(
+        SpatialReferenceIdentifier::Epsg4979,
+        SpatialReferenceIdentifier::Epsg4978,
+    )
+    .unwrap()
 }
 
 fn make_ecef_to_geo() -> Projector {
-    Projector::new(SpatialReferenceIdentifier::Epsg4978, SpatialReferenceIdentifier::Epsg4979).unwrap()
+    Projector::new(
+        SpatialReferenceIdentifier::Epsg4978,
+        SpatialReferenceIdentifier::Epsg4979,
+    )
+    .unwrap()
 }
 
 fn geo_to_ecef(proj: &Projector, lon: f64, lat: f64, alt: f64) -> Vector3<f64> {
-    proj.convert(Coordinate3::new(lon, lat, alt)).unwrap().into()
+    proj.convert(Coordinate3::new(lon, lat, alt))
+        .unwrap()
+        .into()
 }
 
 fn ecef_to_geo(proj: &Projector, xyz: Vector3<f64>) -> Wgs84 {
@@ -39,11 +49,7 @@ fn enu_rotation_matrix(lon_deg: f64, lat_deg: f64) -> Matrix3<f64> {
     let lat = lat_deg.to_radians();
     let (sl, cl) = (lon.sin(), lon.cos());
     let (sp, cp) = (lat.sin(), lat.cos());
-    Matrix3::new(
-        -sl,   -sp * cl,  cp * cl,
-         cl,   -sp * sl,  cp * sl,
-         0.0,   cp,       sp,
-    )
+    Matrix3::new(-sl, -sp * cl, cp * cl, cl, -sp * sl, cp * sl, 0.0, cp, sp)
 }
 
 fn enu_to_ecef(g2e: &Projector, enu: Vector3<f64>, origin: Wgs84) -> Vector3<f64> {
@@ -56,9 +62,14 @@ fn ecef_to_enu(g2e: &Projector, xyz: Vector3<f64>, origin: Wgs84) -> Vector3<f64
     enu_rotation_matrix(lon, lat).transpose() * (xyz - geo_to_ecef(g2e, lon, lat, alt))
 }
 
-fn rotation_align_z_to_los(g2e: &Projector, start: Wgs84, end: Wgs84, origin: Wgs84) -> Matrix3<f64> {
+fn rotation_align_z_to_los(
+    g2e: &Projector,
+    start: Wgs84,
+    end: Wgs84,
+    origin: Wgs84,
+) -> Matrix3<f64> {
     let start_enu = ecef_to_enu(g2e, geo_to_ecef(g2e, start.0, start.1, start.2), origin);
-    let end_enu   = ecef_to_enu(g2e, geo_to_ecef(g2e, end.0,   end.1,   end.2),   origin);
+    let end_enu = ecef_to_enu(g2e, geo_to_ecef(g2e, end.0, end.1, end.2), origin);
     let d_raw = end_enu - start_enu;
     let d = d_raw / d_raw.norm();
     let z = Vector3::new(0.0, 0.0, 1.0);
@@ -74,9 +85,15 @@ fn rotation_align_z_to_los(g2e: &Projector, start: Wgs84, end: Wgs84, origin: Wg
     let (c, s) = (angle.cos(), angle.sin());
     let (kx, ky, kz) = (axis.x, axis.y, axis.z);
     Matrix3::new(
-        c + kx*kx*(1.0-c),       kx*ky*(1.0-c) - kz*s,  kx*kz*(1.0-c) + ky*s,
-        ky*kx*(1.0-c) + kz*s,   c + ky*ky*(1.0-c),      ky*kz*(1.0-c) - kx*s,
-        kz*kx*(1.0-c) - ky*s,   kz*ky*(1.0-c) + kx*s,  c + kz*kz*(1.0-c),
+        c + kx * kx * (1.0 - c),
+        kx * ky * (1.0 - c) - kz * s,
+        kx * kz * (1.0 - c) + ky * s,
+        ky * kx * (1.0 - c) + kz * s,
+        c + ky * ky * (1.0 - c),
+        ky * kz * (1.0 - c) - kx * s,
+        kz * kx * (1.0 - c) - ky * s,
+        kz * ky * (1.0 - c) + kx * s,
+        c + kz * kz * (1.0 - c),
     )
 }
 
@@ -119,7 +136,12 @@ fn ellipsoid_polygons(
     polygons
 }
 
-pub fn build_fresnel_kml(analysis_id: &Uuid, start: GPSCoords3, end: GPSCoords3, frequency_hz: f64) -> Kml {
+pub fn build_fresnel_kml(
+    analysis_id: &Uuid,
+    start: GPSCoords3,
+    end: GPSCoords3,
+    frequency_hz: f64,
+) -> Kml {
     let g2e = make_geo_to_ecef();
     let e2g = make_ecef_to_geo();
 
@@ -127,8 +149,8 @@ pub fn build_fresnel_kml(analysis_id: &Uuid, start: GPSCoords3, end: GPSCoords3,
     let end_wgs84: Wgs84 = (*end.lon(), *end.lat(), *end.alt_m());
 
     let start_ecef = geo_to_ecef(&g2e, start_wgs84.0, start_wgs84.1, start_wgs84.2);
-    let end_ecef   = geo_to_ecef(&g2e, end_wgs84.0,   end_wgs84.1,   end_wgs84.2);
-    let distance   = (end_ecef - start_ecef).norm();
+    let end_ecef = geo_to_ecef(&g2e, end_wgs84.0, end_wgs84.1, end_wgs84.2);
+    let distance = (end_ecef - start_ecef).norm();
 
     let wavelength = SPEED_OF_LIGHT / frequency_hz;
     let semi_major = distance / 2.0 + wavelength / 4.0;
@@ -136,7 +158,13 @@ pub fn build_fresnel_kml(analysis_id: &Uuid, start: GPSCoords3, end: GPSCoords3,
     let center_wgs84 = ecef_to_geo(&e2g, (start_ecef + end_ecef) / 2.0);
 
     let polygons = ellipsoid_polygons(
-        &g2e, &e2g, start_wgs84, end_wgs84, center_wgs84, semi_major, semi_minor,
+        &g2e,
+        &e2g,
+        start_wgs84,
+        end_wgs84,
+        center_wgs84,
+        semi_major,
+        semi_minor,
     );
 
     let fresnel_style = Kml::Style(Style {
@@ -164,7 +192,7 @@ pub fn build_fresnel_kml(analysis_id: &Uuid, start: GPSCoords3, end: GPSCoords3,
         geometry: Some(Geometry::LineString(LineString {
             coords: vec![
                 Coord::new(start_wgs84.0, start_wgs84.1, Some(start_wgs84.2)),
-                Coord::new(end_wgs84.0,   end_wgs84.1,   Some(end_wgs84.2)),
+                Coord::new(end_wgs84.0, end_wgs84.1, Some(end_wgs84.2)),
             ],
             altitude_mode: AltitudeMode::Absolute,
             ..Default::default()
@@ -172,22 +200,26 @@ pub fn build_fresnel_kml(analysis_id: &Uuid, start: GPSCoords3, end: GPSCoords3,
         ..Default::default()
     });
 
-    let geo_polygons: Vec<Geometry> = polygons.into_iter().map(|poly| {
-        let first = poly[0];
-        let mut coords: Vec<Coord> = poly.iter()
-            .map(|&(lon, lat, alt)| Coord::new(lon, lat, Some(alt)))
-            .collect();
-        coords.push(Coord::new(first.0, first.1, Some(first.2)));
-        Geometry::Polygon(Polygon {
-            outer: LinearRing {
-                coords,
+    let geo_polygons: Vec<Geometry> = polygons
+        .into_iter()
+        .map(|poly| {
+            let first = poly[0];
+            let mut coords: Vec<Coord> = poly
+                .iter()
+                .map(|&(lon, lat, alt)| Coord::new(lon, lat, Some(alt)))
+                .collect();
+            coords.push(Coord::new(first.0, first.1, Some(first.2)));
+            Geometry::Polygon(Polygon {
+                outer: LinearRing {
+                    coords,
+                    altitude_mode: AltitudeMode::Absolute,
+                    ..Default::default()
+                },
                 altitude_mode: AltitudeMode::Absolute,
                 ..Default::default()
-            },
-            altitude_mode: AltitudeMode::Absolute,
-            ..Default::default()
+            })
         })
-    }).collect();
+        .collect();
 
     let ellipsoid_placemark = Kml::Placemark(Placemark {
         style_url: Some("#fresnel".to_string()),
@@ -203,13 +235,20 @@ pub fn build_fresnel_kml(analysis_id: &Uuid, start: GPSCoords3, end: GPSCoords3,
 
     Kml::KmlDocument(KmlDocument {
         version: KmlVersion::V22,
-        attrs: HashMap::from([("xmlns".to_string(), "http://www.opengis.net/kml/2.2".to_string())]),
-        elements: vec![
-            Kml::Document {
-                attrs: HashMap::new(),
-                elements: vec![name_el, fresnel_style, los_style, los_placemark, ellipsoid_placemark],
-            },
-        ],
+        attrs: HashMap::from([(
+            "xmlns".to_string(),
+            "http://www.opengis.net/kml/2.2".to_string(),
+        )]),
+        elements: vec![Kml::Document {
+            attrs: HashMap::new(),
+            elements: vec![
+                name_el,
+                fresnel_style,
+                los_style,
+                los_placemark,
+                ellipsoid_placemark,
+            ],
+        }],
     })
 }
 
@@ -217,8 +256,12 @@ pub fn build_fresnel_kml(analysis_id: &Uuid, start: GPSCoords3, end: GPSCoords3,
 mod tests {
     use super::*;
 
-    fn nyc() -> GPSCoords3 { GPSCoords3::new(40.7128, -74.0060, 100.0) }
-    fn albany() -> GPSCoords3 { GPSCoords3::new(42.6526, -73.7562, 150.0) }
+    fn nyc() -> GPSCoords3 {
+        GPSCoords3::new(40.7128, -74.0060, 100.0)
+    }
+    fn albany() -> GPSCoords3 {
+        GPSCoords3::new(42.6526, -73.7562, 150.0)
+    }
     const FREQ_900MHZ: f64 = 900e6;
 
     pub(crate) fn fresnel_semi_minor(distance: f64, frequency_hz: f64) -> f64 {
@@ -309,7 +352,7 @@ mod tests {
                         let c0 = &ls.coords[0];
                         let c1 = &ls.coords[1];
                         assert!((c0.x - (-74.0060)).abs() < 1e-9); // lon
-                        assert!((c0.y - 40.7128).abs() < 1e-9);    // lat
+                        assert!((c0.y - 40.7128).abs() < 1e-9); // lat
                         assert!((c1.x - (-73.7562)).abs() < 1e-9);
                         assert!((c1.y - 42.6526).abs() < 1e-9);
                     }
@@ -378,14 +421,14 @@ mod tests {
     #[test]
     fn fresnel_radius_grows_with_lower_frequency() {
         let r_high = fresnel_semi_minor(100_000.0, 5_800e6);
-        let r_low  = fresnel_semi_minor(100_000.0,   900e6);
+        let r_low = fresnel_semi_minor(100_000.0, 900e6);
         assert!(r_low > r_high, "lower frequency => larger Fresnel zone");
     }
 
     #[test]
     fn fresnel_radius_grows_with_longer_link() {
-        let r_short = fresnel_semi_minor(10_000.0,  FREQ_900MHZ);
-        let r_long  = fresnel_semi_minor(100_000.0, FREQ_900MHZ);
+        let r_short = fresnel_semi_minor(10_000.0, FREQ_900MHZ);
+        let r_long = fresnel_semi_minor(100_000.0, FREQ_900MHZ);
         assert!(r_long > r_short, "longer link => larger Fresnel zone");
     }
 

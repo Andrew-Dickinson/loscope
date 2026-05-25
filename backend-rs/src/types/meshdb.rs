@@ -1,15 +1,15 @@
+use crate::building::bin_id::BINId;
 use derive_new::new;
 use serde::{Deserialize, Serialize};
-use crate::building::bin_id::BINId;
 
-#[derive(Debug,new,Serialize,Deserialize)]
+#[derive(Debug, new, Serialize, Deserialize)]
 pub enum MeshdbBINSource {
     NN,
-    Install
+    Install,
 }
 
-#[derive(Debug,new,Serialize,Deserialize)]
+#[derive(Debug, new, Serialize, Deserialize)]
 pub struct NumberLookupResponse {
     bin: BINId,
-    source: MeshdbBINSource
+    source: MeshdbBINSource,
 }

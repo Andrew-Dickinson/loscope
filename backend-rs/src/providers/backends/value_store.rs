@@ -1,7 +1,7 @@
+use crate::types::errors::AssetErr;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
-use crate::types::errors::AssetErr;
 
 pub trait ValueStore {
     fn put(&self, key: String, value: Vec<u8>) -> Result<(), AssetErr>;
@@ -36,7 +36,10 @@ mod tests {
     #[test]
     fn get_missing_key_returns_not_found() {
         let store = InMemoryValueStore::new();
-        assert!(matches!(store.get("missing".into()), Err(AssetErr::AssetNotFound(_))));
+        assert!(matches!(
+            store.get("missing".into()),
+            Err(AssetErr::AssetNotFound(_))
+        ));
     }
 
     #[test]
@@ -68,25 +71,29 @@ mod tests {
 
 impl ValueStore for InMemoryValueStore {
     fn put(&self, key: String, value: Vec<u8>) -> Result<(), AssetErr> {
-        self.map.lock()
-            .or_else(|e| Err(
-                AssetErr::AssetDownloadError(
-                    format!("Failed to aquire lock putting {key}: {:?}", e)
-                )
-            ))?
+        self.map
+            .lock()
+            .or_else(|e| {
+                Err(AssetErr::AssetDownloadError(format!(
+                    "Failed to aquire lock putting {key}: {:?}",
+                    e
+                )))
+            })?
             .insert(key, value);
         Ok(())
     }
 
     fn get(&self, key: String) -> Result<Vec<u8>, AssetErr> {
-        self.map.lock()
-            .or_else(|e| Err(
-                AssetErr::AssetDownloadError(
-                    format!("Failed to aquire lock putting {key}: {:?}", e)
-                )
-            ))?
-            .get(&key).ok_or(
-                AssetErr::AssetNotFound(format!("Key {} not found", key))
-            ).cloned()
+        self.map
+            .lock()
+            .or_else(|e| {
+                Err(AssetErr::AssetDownloadError(format!(
+                    "Failed to aquire lock putting {key}: {:?}",
+                    e
+                )))
+            })?
+            .get(&key)
+            .ok_or(AssetErr::AssetNotFound(format!("Key {} not found", key)))
+            .cloned()
     }
 }

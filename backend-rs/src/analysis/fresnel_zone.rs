@@ -1,14 +1,14 @@
-use std::{usize};
-use std::ops::RangeInclusive;
-use derive_more::From;
-use rocket::serde::{Deserialize, Serialize};
-use wincode::{SchemaRead, SchemaWrite};
 use crate::analysis::angle_context::AngleContext;
 use crate::analysis::point_evaluation::PointEvaluationInput;
-use nalgebra::{Matrix3, Matrix4, SMatrix, Vector4};
-use ndarray::{Array1, Array2};
 use crate::types::coords::NYSCoords2;
 use crate::types::stairstep::{StairStepGrid, WincodeGridElem};
+use derive_more::From;
+use nalgebra::{Matrix3, Matrix4, SMatrix, Vector4};
+use ndarray::{Array1, Array2};
+use rocket::serde::{Deserialize, Serialize};
+use std::ops::RangeInclusive;
+use std::usize;
+use wincode::{SchemaRead, SchemaWrite};
 
 const OFFSET_BUFFER: f64 = 500.0;
 const SPEED_OF_LIGHT_M_S: f64 = 299_792_458.0;
@@ -22,14 +22,24 @@ pub struct FresnelZonePoint(u16, u16);
 
 impl WincodeGridElem for FresnelZonePoint {
     type Wire = FresnelZonePoint;
-    fn into_wire(self) -> FresnelZonePoint { self }
-    fn from_wire(w: FresnelZonePoint) -> Self { w }
+    fn into_wire(self) -> FresnelZonePoint {
+        self
+    }
+    fn from_wire(w: FresnelZonePoint) -> Self {
+        w
+    }
 }
 
 impl FresnelZonePoint {
-    pub fn new(bottom: u16, top: u16) -> FresnelZonePoint { FresnelZonePoint(bottom, top) }
-    pub fn bottom(&self) -> u16 { self.0 }
-    pub fn top(&self) -> u16 { self.1 }
+    pub fn new(bottom: u16, top: u16) -> FresnelZonePoint {
+        FresnelZonePoint(bottom, top)
+    }
+    pub fn bottom(&self) -> u16 {
+        self.0
+    }
+    pub fn top(&self) -> u16 {
+        self.1
+    }
 }
 
 pub type FresnelZone = StairStepGrid<FresnelZonePoint>;
@@ -82,15 +92,17 @@ fn rotation_ellipsoid_to_nys(ctx: &AngleContext) -> Matrix4<f64> {
 /// 4×4 homogeneous translation matrix.
 fn translation_matrix(offset: (f64, f64, f64)) -> Matrix4<f64> {
     Matrix4::new(
-        1.0, 0.0, 0.0, offset.0, 0.0, 1.0, 0.0, offset.1, 0.0, 0.0, 1.0, offset.2, 0.0, 0.0,
-        0.0, 1.0,
+        1.0, 0.0, 0.0, offset.0, 0.0, 1.0, 0.0, offset.1, 0.0, 0.0, 1.0, offset.2, 0.0, 0.0, 0.0,
+        1.0,
     )
 }
 
 /// 4×4 homogeneous transform: NYS frame → ellipsoid frame (A_ellipsoid_to_nys inverted).
 fn nys_to_ellipsoid_transform(mid: (f64, f64, f64), ctx: &AngleContext) -> Matrix4<f64> {
     let a_ell_to_nys = translation_matrix(mid) * rotation_ellipsoid_to_nys(ctx);
-    a_ell_to_nys.try_inverse().expect("rotation is always invertible")
+    a_ell_to_nys
+        .try_inverse()
+        .expect("rotation is always invertible")
 }
 
 /// Integer grid [ceil(lo), floor(hi)] inclusive.
@@ -138,9 +150,11 @@ fn ellipse_half_width(c: &Matrix3<f64>) -> Option<f64> {
     Some(x2.sqrt())
 }
 
-
 /// Sample the centred ellipse conic at each x, returning (lower_z, upper_z).
-fn sample_conic<I: Iterator<Item = f64>>(c: &Matrix3<f64>, x_vals: I) -> impl Iterator<Item = (f64, f64)> {
+fn sample_conic<I: Iterator<Item = f64>>(
+    c: &Matrix3<f64>,
+    x_vals: I,
+) -> impl Iterator<Item = (f64, f64)> {
     let a = c[(0, 0)];
     let b = c[(1, 0)];
     let cc = c[(1, 1)];
@@ -157,7 +171,10 @@ fn sample_conic<I: Iterator<Item = f64>>(c: &Matrix3<f64>, x_vals: I) -> impl It
     })
 }
 
-pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha: f64) -> FresnelZone {
+pub fn compute_fresnel_zone(
+    point_evaluation_input: &PointEvaluationInput,
+    alpha: f64,
+) -> FresnelZone {
     let pa: (f64, f64, f64) = point_evaluation_input.point_a().into();
     let mut pb: (f64, f64, f64) = point_evaluation_input.point_b().into();
     let mut delta = (pb.0 - pa.0, pb.1 - pa.1, pb.2 - pa.2);
@@ -269,28 +286,34 @@ pub fn compute_fresnel_zone(point_evaluation_input: &PointEvaluationInput, alpha
                 // Earth-curvature correction
                 let dx = xn as f64 - mid.0;
                 let axial = r1_dx * dx + r1_dy * dy;
-                let correction =
-                    (EARTH_RADIUS_USFT * EARTH_RADIUS_USFT - axial * axial).max(0.0).sqrt()
-                        - center_correction;
+                let correction = (EARTH_RADIUS_USFT * EARTH_RADIUS_USFT - axial * axial)
+                    .max(0.0)
+                    .sqrt()
+                    - center_correction;
 
-                values[[i,j]] = FresnelZonePoint::new(
+                values[[i, j]] = FresnelZonePoint::new(
                     to_u16(lower_z_nys - correction),
-                    to_u16(upper_z_nys - correction)
+                    to_u16(upper_z_nys - correction),
                 );
             });
     }
 
-    FresnelZone::new(values, widths, offsets, NYSCoords2::new(x_base as f64, y_base as f64))
+    FresnelZone::new(
+        values,
+        widths,
+        offsets,
+        NYSCoords2::new(x_base as f64, y_base as f64),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use approx::assert_relative_eq;
-    use crate::analysis::point_evaluation::{PointEvaluationInput};
+    use crate::analysis::point_evaluation::PointEvaluationInput;
     use crate::types::coords::{GPSCoords3, NYSCoords3};
     use crate::types::obstructions::ObstructionTypesFilter;
     use crate::util::coord_conversion::CoordinateConverter;
+    use approx::assert_relative_eq;
 
     fn gps_to_nys(lat: f64, lon: f64, alt_m: f64) -> NYSCoords3 {
         CoordinateConverter::new().to_nys_plane3(&GPSCoords3::new(lat, lon, alt_m))
@@ -338,10 +361,10 @@ mod tests {
         let result = rotation_ellipsoid_to_nys(&ctx);
 
         let expected = [
-            [ 0.30312669, -0.81488729,  0.49403736, 0.0],
-            [ 0.93725462,  0.34864563,  0.0,        0.0],
-            [-0.17224396,  0.4630388,   0.86944068, 0.0],
-            [ 0.0,         0.0,         0.0,        1.0],
+            [0.30312669, -0.81488729, 0.49403736, 0.0],
+            [0.93725462, 0.34864563, 0.0, 0.0],
+            [-0.17224396, 0.4630388, 0.86944068, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
         ];
 
         for row in 0..4 {
@@ -398,35 +421,59 @@ mod tests {
     #[test]
     fn test_normalize_ellipse() {
         let c = Matrix3::new(
-            0.00015217054611868413, 0.00017090600184125422,  1.5442065871587545,
-            0.00017090600184125422, 0.0003558296484122786,  -0.8774557722289558,
-            1.5442065871587545,    -0.8774557722289558,     57294.55752986111,
+            0.00015217054611868413,
+            0.00017090600184125422,
+            1.5442065871587545,
+            0.00017090600184125422,
+            0.0003558296484122786,
+            -0.8774557722289558,
+            1.5442065871587545,
+            -0.8774557722289558,
+            57294.55752986111,
         );
 
         let (c_norm, u, v) = normalize_ellipse(&c).expect("normalize_ellipse returned None");
 
         let expected_norm = Matrix3::new(
-            0.00015217054611868413, 0.00017090600184125422, 0.0,
-            0.00017090600184125422, 0.0003558296484122786,  0.0,
-            0.0,                   0.0,                   -0.0369624448723276,
+            0.00015217054611868413,
+            0.00017090600184125422,
+            0.0,
+            0.00017090600184125422,
+            0.0003558296484122786,
+            0.0,
+            0.0,
+            0.0,
+            -0.0369624448723276,
         );
 
         for row in 0..3 {
             for col in 0..3 {
-                assert_relative_eq!(c_norm[(row, col)], expected_norm[(row, col)], epsilon = 1e-9);
+                assert_relative_eq!(
+                    c_norm[(row, col)],
+                    expected_norm[(row, col)],
+                    epsilon = 1e-9
+                );
             }
         }
 
         assert_relative_eq!(u, -28047.112648969174, max_relative = REL_TOL);
-        assert_relative_eq!(v,  15937.052135928374, max_relative = REL_TOL);
+        assert_relative_eq!(v, 15937.052135928374, max_relative = REL_TOL);
     }
 
     #[test]
     fn test_nys_to_ellipsoid_transform() {
-        let pa = (1039747.7086964573f64, 176152.26368097877, 328.08333333333337);
-        let pb = (982586.7467540047f64,  200608.30748196002, 32808.333333333336);
+        let pa = (
+            1039747.7086964573f64,
+            176152.26368097877,
+            328.08333333333337,
+        );
+        let pb = (982586.7467540047f64, 200608.30748196002, 32808.333333333336);
         let delta = (pb.0 - pa.0, pb.1 - pa.1, pb.2 - pa.2);
-        let mid = ((pa.0 + pb.0) / 2.0, (pa.1 + pb.1) / 2.0, (pa.2 + pb.2) / 2.0);
+        let mid = (
+            (pa.0 + pb.0) / 2.0,
+            (pa.1 + pb.1) / 2.0,
+            (pa.2 + pb.2) / 2.0,
+        );
         let dist = (delta.0 * delta.0 + delta.1 * delta.1 + delta.2 * delta.2).sqrt();
 
         let ctx = AngleContext::from_delta(delta);

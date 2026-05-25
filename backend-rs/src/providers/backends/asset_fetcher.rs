@@ -1,14 +1,14 @@
+use crate::types::errors::AssetErr;
+use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::operation::get_object::GetObjectError;
+use derive_new::new;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use aws_sdk_s3::error::SdkError;
-use aws_sdk_s3::operation::get_object::GetObjectError;
-use derive_new::new;
-use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
-use crate::types::errors::AssetErr;
 use strum_macros::{AsRefStr, Display};
 use tokio::fs;
+use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
 
 #[derive(Debug, Hash, Eq, PartialEq, AsRefStr, Display, Copy, Clone)]
 pub enum AssetType {
@@ -16,14 +16,19 @@ pub enum AssetType {
     ElevationTile,
     ObstructionIndex,
     Obstruction,
-    BuildingFootprintWKT
+    BuildingFootprintWKT,
 }
 
 #[async_trait]
 pub trait AssetFetcher {
     /// Downloads the asset from the specified remote_path of the specified asset type to the
     /// specified local path, if local_path is not successfully populated, returns Err(AssetErr)
-    async fn fetch_asset(&self, asset_type: AssetType, remote_path: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr>;
+    async fn fetch_asset(
+        &self,
+        asset_type: AssetType,
+        remote_path: &Utf8UnixPath,
+        local_path: &Path,
+    ) -> Result<(), AssetErr>;
     async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr>;
 }
 
@@ -36,41 +41,57 @@ pub struct S3AssetFetcher {
 
 #[async_trait]
 impl AssetFetcher for S3AssetFetcher {
-    async fn fetch_asset(&self, asset_type: AssetType, remote_path: &Utf8UnixPath, local_path: &Path) -> Result<(), AssetErr> {
-        let local_path_parent = local_path.parent().ok_or(
-            AssetErr::LocalFileSystemError(format!("Expected {local_path:?} to have valid parent"))
-        )?;
+    async fn fetch_asset(
+        &self,
+        asset_type: AssetType,
+        remote_path: &Utf8UnixPath,
+        local_path: &Path,
+    ) -> Result<(), AssetErr> {
+        let local_path_parent =
+            local_path
+                .parent()
+                .ok_or(AssetErr::LocalFileSystemError(format!(
+                    "Expected {local_path:?} to have valid parent"
+                )))?;
 
-        fs::create_dir_all(local_path_parent).await.map_err(
-            |err| AssetErr::LocalFileSystemError(
-                format!("Error creating directories for path {local_path_parent:?}: {err:?}")
-            )
-        )?;
+        fs::create_dir_all(local_path_parent).await.map_err(|err| {
+            AssetErr::LocalFileSystemError(format!(
+                "Error creating directories for path {local_path_parent:?}: {err:?}"
+            ))
+        })?;
 
-        let prefix = self.asset_type_prefixes.get(&asset_type)
-            .ok_or(AssetErr::UnsupportedAssetType(format!("Unable to find {asset_type:?} prefix")))?;
+        let prefix =
+            self.asset_type_prefixes
+                .get(&asset_type)
+                .ok_or(AssetErr::UnsupportedAssetType(format!(
+                    "Unable to find {asset_type:?} prefix"
+                )))?;
 
-        let mut temp_file = File::create(local_path)
-            .map_err(|err| AssetErr::LocalFileSystemError(format!("Error creating file {local_path:?}: {err:?}")))?;
+        let mut temp_file = File::create(local_path).map_err(|err| {
+            AssetErr::LocalFileSystemError(format!("Error creating file {local_path:?}: {err:?}"))
+        })?;
 
         let bucket = self.bucket_name.as_str();
         let key = prefix.clone().join(remote_path);
 
-        let mut result = self.client.get_object()
+        let mut result = self
+            .client
+            .get_object()
             .bucket(bucket)
             .key(key.as_str())
             .send()
             .await
             .map_err(|err| match err {
                 SdkError::ServiceError(err_details)
-                if matches!(err_details.err(), GetObjectError::NoSuchKey(_)) => {
-                    AssetErr::AssetNotFound(
-                        format!("{key} key not found in bucket {bucket}, {err_details:?}")
-                    )
+                    if matches!(err_details.err(), GetObjectError::NoSuchKey(_)) =>
+                {
+                    AssetErr::AssetNotFound(format!(
+                        "{key} key not found in bucket {bucket}, {err_details:?}"
+                    ))
                 }
-                err_details => AssetErr::AssetDownloadError(
-                    format!("Unable to download {key} from {bucket}: {err_details:?}")
-                )
+                err_details => AssetErr::AssetDownloadError(format!(
+                    "Unable to download {key} from {bucket}: {err_details:?}"
+                )),
             })?;
 
         while let Some(bytes) = result.body.try_next().await.map_err(|err| {
@@ -88,44 +109,48 @@ impl AssetFetcher for S3AssetFetcher {
 
     async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
         let bucket = self.bucket_name.as_str();
-        let prefix = self.asset_type_prefixes.get(&asset_type)
-            .ok_or(AssetErr::UnsupportedAssetType(format!("Unable to find {asset_type:?} prefix")))?;
+        let prefix =
+            self.asset_type_prefixes
+                .get(&asset_type)
+                .ok_or(AssetErr::UnsupportedAssetType(format!(
+                    "Unable to find {asset_type:?} prefix"
+                )))?;
 
-        Ok(self.client.list_objects_v2()
+        Ok(self
+            .client
+            .list_objects_v2()
             .bucket(bucket)
             .prefix(prefix.as_str())
             .into_paginator()
             .send()
             .try_collect()
             .await
-            .map_err(|err| AssetErr::AssetDownloadError(
-                format!("Unable to list objects in prefix {prefix} from {bucket}: {err:?}")
-            ))?
+            .map_err(|err| {
+                AssetErr::AssetDownloadError(format!(
+                    "Unable to list objects in prefix {prefix} from {bucket}: {err:?}"
+                ))
+            })?
             .into_iter()
             .flat_map(|o| o.contents.unwrap_or_default())
             .filter_map(|obj| obj.key)
             .map(Utf8UnixPathBuf::from)
-            .filter_map(
-                |path| path.strip_prefix(prefix).ok()
-                    .map(|p| p.to_string())
-            )
-            .collect::<Vec<_>>()
-        )
+            .filter_map(|path| path.strip_prefix(prefix).ok().map(|p| p.to_string()))
+            .collect::<Vec<_>>())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::errors::AssetErr;
     use aws_sdk_s3::operation::get_object::{GetObjectError, GetObjectOutput};
     use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Output;
     use aws_sdk_s3::primitives::ByteStream;
-    use aws_sdk_s3::types::error::NoSuchKey;
     use aws_sdk_s3::types::Object;
-    use aws_smithy_mocks::{mock, MockResponseInterceptor, Rule, RuleMode};
-    use test_temp_dir::{test_temp_dir, TestTempDir};
+    use aws_sdk_s3::types::error::NoSuchKey;
+    use aws_smithy_mocks::{MockResponseInterceptor, Rule, RuleMode, mock};
+    use test_temp_dir::{TestTempDir, test_temp_dir};
     use typed_path::Utf8UnixPath;
-    use crate::types::errors::AssetErr;
 
     fn setup(rule: Rule) -> (S3AssetFetcher, TestTempDir) {
         let interceptor = MockResponseInterceptor::new()
@@ -142,33 +167,33 @@ mod tests {
             S3AssetFetcher {
                 client: aws_sdk_s3::Client::from_conf(config),
                 bucket_name: String::from("test-bucket"),
-                asset_type_prefixes: HashMap::from([
-                    (AssetType::OrthoImage, Utf8UnixPathBuf::from("test-prefix/ortho-img")),
-                ])
+                asset_type_prefixes: HashMap::from([(
+                    AssetType::OrthoImage,
+                    Utf8UnixPathBuf::from("test-prefix/ortho-img"),
+                )]),
             },
-            test_temp_dir!()
+            test_temp_dir!(),
         )
     }
 
     #[tokio::test]
     async fn test_good_download() {
-        let (fetcher, temp_dir) = setup(
-            mock!(aws_sdk_s3::Client::get_object)
-                .then_output(|| GetObjectOutput::builder()
-                    .body(ByteStream::from_static("mock-image-bytes".as_bytes()))
-                    .build()
-                )
-        );
+        let (fetcher, temp_dir) = setup(mock!(aws_sdk_s3::Client::get_object).then_output(|| {
+            GetObjectOutput::builder()
+                .body(ByteStream::from_static("mock-image-bytes".as_bytes()))
+                .build()
+        }));
 
-        let temp_ortho_image_path = temp_dir.used_by(|path| {
-            path.join("ortho_image.jpg").to_path_buf()
-        });
+        let temp_ortho_image_path =
+            temp_dir.used_by(|path| path.join("ortho_image.jpg").to_path_buf());
 
-        let result = fetcher.fetch_asset(
-            AssetType::OrthoImage,
-            &Utf8UnixPath::new("photo.jpg"),
-            &temp_ortho_image_path,
-        ).await;
+        let result = fetcher
+            .fetch_asset(
+                AssetType::OrthoImage,
+                &Utf8UnixPath::new("photo.jpg"),
+                &temp_ortho_image_path,
+            )
+            .await;
 
         assert!(matches!(result, Ok(())));
 
@@ -180,20 +205,19 @@ mod tests {
     async fn test_asset_not_found() {
         let (fetcher, temp_dir) = setup(
             mock!(aws_sdk_s3::Client::get_object)
-                .then_error(|| GetObjectError::NoSuchKey(
-                    NoSuchKey::builder().build()
-                ))
+                .then_error(|| GetObjectError::NoSuchKey(NoSuchKey::builder().build())),
         );
 
-        let temp_ortho_image_path = temp_dir.used_by(|path| {
-            path.join("ortho_image.jpg").to_path_buf()
-        });
+        let temp_ortho_image_path =
+            temp_dir.used_by(|path| path.join("ortho_image.jpg").to_path_buf());
 
-        let result = fetcher.fetch_asset(
-            AssetType::OrthoImage,
-            &Utf8UnixPath::new("photo.jpg"),
-            &temp_ortho_image_path,
-        ).await;
+        let result = fetcher
+            .fetch_asset(
+                AssetType::OrthoImage,
+                &Utf8UnixPath::new("photo.jpg"),
+                &temp_ortho_image_path,
+            )
+            .await;
 
         assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
     }
@@ -202,37 +226,38 @@ mod tests {
     async fn test_unexpected_error() {
         let (fetcher, temp_dir) = setup(
             mock!(aws_sdk_s3::Client::get_object)
-                .then_error(|| GetObjectError::unhandled("simulated unexpected error"))
+                .then_error(|| GetObjectError::unhandled("simulated unexpected error")),
         );
 
-        let temp_ortho_image_path = temp_dir.used_by(|path| {
-            path.join("ortho_image.jpg").to_path_buf()
-        });
+        let temp_ortho_image_path =
+            temp_dir.used_by(|path| path.join("ortho_image.jpg").to_path_buf());
 
-        let result = fetcher.fetch_asset(
-            AssetType::OrthoImage,
-            &Utf8UnixPath::new("photo.jpg"),
-            &temp_ortho_image_path,
-        ).await;
+        let result = fetcher
+            .fetch_asset(
+                AssetType::OrthoImage,
+                &Utf8UnixPath::new("photo.jpg"),
+                &temp_ortho_image_path,
+            )
+            .await;
 
         assert!(matches!(result, Err(AssetErr::AssetDownloadError(_))));
     }
 
     #[tokio::test]
     async fn test_local_file_error() {
-        let (fetcher, _) = setup(
-            mock!(aws_sdk_s3::Client::get_object)
-                .then_output(|| GetObjectOutput::builder()
-                    .body(ByteStream::from_static("mock-image-bytes".as_bytes()))
-                    .build()
-                )
-        );
+        let (fetcher, _) = setup(mock!(aws_sdk_s3::Client::get_object).then_output(|| {
+            GetObjectOutput::builder()
+                .body(ByteStream::from_static("mock-image-bytes".as_bytes()))
+                .build()
+        }));
 
-        let result = fetcher.fetch_asset(
-            AssetType::OrthoImage,
-            &Utf8UnixPath::new("photo.jpg"),
-            &PathBuf::from("/nonexistent-not-a-real-directory-dont-create-me/photo.jpg"),
-        ).await;
+        let result = fetcher
+            .fetch_asset(
+                AssetType::OrthoImage,
+                &Utf8UnixPath::new("photo.jpg"),
+                &PathBuf::from("/nonexistent-not-a-real-directory-dont-create-me/photo.jpg"),
+            )
+            .await;
 
         assert!(matches!(result, Err(AssetErr::LocalFileSystemError(_))));
     }
@@ -251,9 +276,10 @@ mod tests {
         S3AssetFetcher {
             client: aws_sdk_s3::Client::from_conf(config),
             bucket_name: String::from("test-bucket"),
-            asset_type_prefixes: HashMap::from([
-                (AssetType::OrthoImage, Utf8UnixPathBuf::from("prefix/ortho")),
-            ]),
+            asset_type_prefixes: HashMap::from([(
+                AssetType::OrthoImage,
+                Utf8UnixPathBuf::from("prefix/ortho"),
+            )]),
         }
     }
 
@@ -265,14 +291,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_assets_strips_prefix() {
-        let fetcher = make_list_fetcher(
-            mock!(aws_sdk_s3::Client::list_objects_v2)
-                .then_output(|| ListObjectsV2Output::builder()
+        let fetcher =
+            make_list_fetcher(mock!(aws_sdk_s3::Client::list_objects_v2).then_output(|| {
+                ListObjectsV2Output::builder()
                     .contents(s3_object("prefix/ortho/a.tif"))
                     .contents(s3_object("prefix/ortho/sub/b.tif"))
                     .build()
-                )
-        );
+            }));
 
         let mut keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
         keys.sort();
@@ -283,7 +308,7 @@ mod tests {
     async fn test_list_assets_empty() {
         let fetcher = make_list_fetcher(
             mock!(aws_sdk_s3::Client::list_objects_v2)
-                .then_output(|| ListObjectsV2Output::builder().build())
+                .then_output(|| ListObjectsV2Output::builder().build()),
         );
 
         let keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
@@ -293,14 +318,13 @@ mod tests {
     #[tokio::test]
     async fn test_list_assets_filters_keys_outside_prefix() {
         // Objects whose key doesn't start with the prefix should be silently dropped.
-        let fetcher = make_list_fetcher(
-            mock!(aws_sdk_s3::Client::list_objects_v2)
-                .then_output(|| ListObjectsV2Output::builder()
+        let fetcher =
+            make_list_fetcher(mock!(aws_sdk_s3::Client::list_objects_v2).then_output(|| {
+                ListObjectsV2Output::builder()
                     .contents(s3_object("prefix/ortho/good.tif"))
                     .contents(s3_object("other-prefix/bad.tif"))
                     .build()
-                )
-        );
+            }));
 
         let keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
         assert_eq!(keys, vec!["good.tif"]);
@@ -308,12 +332,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_assets_s3_error() {
-        let fetcher = make_list_fetcher(
-            mock!(aws_sdk_s3::Client::list_objects_v2)
-                .then_error(|| aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error::unhandled(
-                    "simulated S3 error"
-                ))
-        );
+        let fetcher =
+            make_list_fetcher(mock!(aws_sdk_s3::Client::list_objects_v2).then_error(|| {
+                aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error::unhandled(
+                    "simulated S3 error",
+                )
+            }));
 
         let result = fetcher.list_assets(AssetType::OrthoImage).await;
         assert!(matches!(result, Err(AssetErr::AssetDownloadError(_))));
@@ -327,7 +351,7 @@ mod tests {
                 aws_sdk_s3::Config::builder()
                     .with_test_defaults()
                     .region(aws_config::Region::new("us-east-1"))
-                    .build()
+                    .build(),
             ),
             bucket_name: String::from("test-bucket"),
             asset_type_prefixes: HashMap::new(),
@@ -342,17 +366,17 @@ mod tests {
         // Two pages: first has a continuation token, second does not.
         let interceptor = MockResponseInterceptor::new()
             .rule_mode(RuleMode::Sequential)
-            .with_rule(&mock!(aws_sdk_s3::Client::list_objects_v2)
-                .then_output(|| ListObjectsV2Output::builder()
+            .with_rule(&mock!(aws_sdk_s3::Client::list_objects_v2).then_output(|| {
+                ListObjectsV2Output::builder()
                     .contents(s3_object("prefix/ortho/page1.tif"))
                     .next_continuation_token("token123")
                     .build()
-                ))
-            .with_rule(&mock!(aws_sdk_s3::Client::list_objects_v2)
-                .then_output(|| ListObjectsV2Output::builder()
+            }))
+            .with_rule(&mock!(aws_sdk_s3::Client::list_objects_v2).then_output(|| {
+                ListObjectsV2Output::builder()
                     .contents(s3_object("prefix/ortho/page2.tif"))
                     .build()
-                ));
+            }));
 
         let config = aws_sdk_s3::Config::builder()
             .with_test_defaults()
@@ -363,9 +387,10 @@ mod tests {
         let fetcher = S3AssetFetcher {
             client: aws_sdk_s3::Client::from_conf(config),
             bucket_name: String::from("test-bucket"),
-            asset_type_prefixes: HashMap::from([
-                (AssetType::OrthoImage, Utf8UnixPathBuf::from("prefix/ortho")),
-            ]),
+            asset_type_prefixes: HashMap::from([(
+                AssetType::OrthoImage,
+                Utf8UnixPathBuf::from("prefix/ortho"),
+            )]),
         };
 
         let mut keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();

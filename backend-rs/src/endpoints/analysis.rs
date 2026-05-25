@@ -1,21 +1,23 @@
-use futures_util::StreamExt;
-use kml::Kml;
-use nalgebra::convert;
-use rocket::http::{ContentType, Header, Status};
-use rocket::serde::json::Json;
-use rocket::{Response, State};
-use rocket::response::Responder;
-use rocket::response::stream::TextStream;
-use typed_floats::tf64::PositiveFinite;
-use uuid::Uuid;
 use crate::analysis::fresnel_kml::build_fresnel_kml;
 use crate::analysis::fresnel_zone_obj::stream_fresnel_tile_slice_as_obj;
 use crate::analysis::intersection_vis::tile_intersection_to_png;
 use crate::analysis::map_overview::PointEvaluationOverview;
-use crate::analysis::point_evaluation::{evaluate_points, valid_analysis_frequency, PointEvaluationInput, PointEvaluationOutput};
+use crate::analysis::point_evaluation::{
+    PointEvaluationInput, PointEvaluationOutput, evaluate_points, valid_analysis_frequency,
+};
 use crate::providers::Providers;
 use crate::types::tiles::TileId;
 use crate::util::coord_conversion::with_coord_converter;
+use futures_util::StreamExt;
+use kml::Kml;
+use nalgebra::convert;
+use rocket::http::{ContentType, Header, Status};
+use rocket::response::Responder;
+use rocket::response::stream::TextStream;
+use rocket::serde::json::Json;
+use rocket::{Response, State};
+use typed_floats::tf64::PositiveFinite;
+use uuid::Uuid;
 
 #[derive(Responder)]
 #[response(status = 200, content_type = "image/png")]
@@ -34,8 +36,8 @@ impl KmlDownload {
             content: kml.to_string(),
             disposition: Header::new(
                 "Content-Disposition",
-                format!("attachment; filename=\"fresnel-zone-{}.kml\"", analysis_id)
-            )
+                format!("attachment; filename=\"fresnel-zone-{}.kml\"", analysis_id),
+            ),
         }
     }
 }
@@ -43,7 +45,7 @@ impl KmlDownload {
 #[post("/analyzePointPair", format = "json", data = "<point_pair>")]
 pub async fn point_analysis(
     point_pair: Json<PointEvaluationInput>,
-    providers: &State<Providers>
+    providers: &State<Providers>,
 ) -> Result<Json<PointEvaluationOutput>, Status> {
     if !point_pair.point_a().valid() || !point_pair.point_b().valid() {
         return Err(Status::BadRequest);
@@ -56,12 +58,20 @@ pub async fn point_analysis(
         point_pair.into_inner(),
         providers.elevation_tile_provider().as_ref(),
         providers.obstruction_provider().as_ref(),
-    ).await
-        .map_err(|err| { eprintln!("{:?}", err); err })
-    ?;
+    )
+    .await
+    .map_err(|err| {
+        eprintln!("{:?}", err);
+        err
+    })?;
 
-    providers.point_eval_result_provider().put(&result)
-        .map_err(|err| { eprintln!("{:?}", err); err })
+    providers
+        .point_eval_result_provider()
+        .put(&result)
+        .map_err(|err| {
+            eprintln!("{:?}", err);
+            err
+        })
         .or_else(|_| Err(Status::InternalServerError))?;
 
     Ok(Json(result.into_output()))
@@ -70,7 +80,7 @@ pub async fn point_analysis(
 #[get("/overview/<analysis_id>")]
 pub async fn map_overview(
     analysis_id: &str,
-    providers: &State<Providers>
+    providers: &State<Providers>,
 ) -> Result<Json<PointEvaluationOverview>, Status> {
     let analysis_id = Uuid::parse_str(analysis_id).map_err(|_| Status::BadRequest)?;
     let analysis_outcome = providers.point_eval_result_provider().get(&analysis_id)?;
@@ -81,16 +91,19 @@ pub async fn map_overview(
 pub async fn intersection_visualization(
     analysis_id: &str,
     tile_id: &str,
-    providers: &State<Providers>
+    providers: &State<Providers>,
 ) -> Result<PngImage, Status> {
     let analysis_id = Uuid::parse_str(analysis_id).map_err(|_| Status::BadRequest)?;
-    let Ok(tile_id) = TileId::parse(&tile_id) else { return Err(Status::BadRequest) };
+    let Ok(tile_id) = TileId::parse(&tile_id) else {
+        return Err(Status::BadRequest);
+    };
     let analysis_outcome = providers.point_eval_result_provider().get(&analysis_id)?;
 
     let Some(png_bytes) = tile_intersection_to_png(
-        analysis_outcome.result_full()
+        analysis_outcome
+            .result_full()
             .intersection()
-            .rasterize_in_tile(tile_id)
+            .rasterize_in_tile(tile_id),
     ) else {
         return Err(Status::NoContent);
     };
@@ -102,13 +115,14 @@ pub async fn intersection_visualization(
 pub async fn get_fresnel_slice_obj(
     analysis_id: &str,
     tile_id: &str,
-    providers: &State<Providers>
+    providers: &State<Providers>,
 ) -> Result<(ContentType, TextStream![String]), Status> {
     let analysis_id = Uuid::parse_str(analysis_id).map_err(|_| Status::BadRequest)?;
-    let Ok(tile_id) = TileId::parse(&tile_id) else { return Err(Status::BadRequest) };
+    let Ok(tile_id) = TileId::parse(&tile_id) else {
+        return Err(Status::BadRequest);
+    };
 
-    let analysis = providers.point_eval_result_provider()
-        .get(&analysis_id)?;
+    let analysis = providers.point_eval_result_provider().get(&analysis_id)?;
 
     let obj_stream = TextStream! {
         let mut stream = std::pin::pin!(
@@ -122,25 +136,23 @@ pub async fn get_fresnel_slice_obj(
     Ok((ContentType::new("model", "obj"), obj_stream))
 }
 
-
 #[get("/fresnelKml/<analysis_id>")]
 pub async fn fresnel_kml(
     analysis_id: &str,
-    providers: &State<Providers>
+    providers: &State<Providers>,
 ) -> Result<KmlDownload, Status> {
     let analysis_id = Uuid::parse_str(analysis_id).map_err(|_| Status::BadRequest)?;
     let analysis_outcome = providers.point_eval_result_provider().get(&analysis_id)?;
     let original_inputs = analysis_outcome.output().input();
 
-    let kml = with_coord_converter(
-        |converter| build_fresnel_kml(
+    let kml = with_coord_converter(|converter| {
+        build_fresnel_kml(
             &analysis_id,
             converter.to_gps3(original_inputs.point_a()),
             converter.to_gps3(original_inputs.point_b()),
-            *original_inputs.frequency_hz()
+            *original_inputs.frequency_hz(),
         )
-    );
+    });
 
     Ok(KmlDownload::new(kml, &analysis_id))
 }
-

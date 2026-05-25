@@ -150,13 +150,12 @@ pub fn decode_jp2_region(
 
         let mut rgba = vec![0u8; num_pixels * 4];
         for i in 0..num_pixels {
-            rgba[i * 4]     = data_r[i].clamp(0, 255) as u8;
+            rgba[i * 4] = data_r[i].clamp(0, 255) as u8;
             rgba[i * 4 + 1] = data_g[i].clamp(0, 255) as u8;
             rgba[i * 4 + 2] = data_b[i].clamp(0, 255) as u8;
             rgba[i * 4 + 3] = data_a[i].clamp(0, 255) as u8;
         }
 
-        RgbaImage::from_raw(w, h, rgba)
-            .ok_or_else(|| "Failed to construct RgbaImage".into())
+        RgbaImage::from_raw(w, h, rgba).ok_or_else(|| "Failed to construct RgbaImage".into())
     }
 }

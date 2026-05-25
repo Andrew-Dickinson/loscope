@@ -1,19 +1,18 @@
-use std::sync::Arc;
-use std::time::Duration;
-use derive_new::new;
-use image::DynamicImage;
-use uuid::Uuid;
 use crate::building::bin_id::BINId;
 use crate::meshdb::types::ErrorResponse;
 use crate::providers::backends::fs_cache::AssetProvider;
 use crate::types::errors::{AssetErr, MeshDBError};
 use crate::types::meshdb::{MeshdbBINSource, NumberLookupResponse};
 use crate::types::tiles::TileId;
+use derive_new::new;
+use image::DynamicImage;
+use std::sync::Arc;
+use std::time::Duration;
+use uuid::Uuid;
 
 const MESHDB_BASE_URL: &str = "https://db.nycmesh.net";
 
-
-pub struct ProgenitorMeshDBProvider  {
+pub struct ProgenitorMeshDBProvider {
     meshdb_client: crate::meshdb::Client,
 }
 
@@ -35,7 +34,10 @@ impl ProgenitorMeshDBProvider {
             .unwrap();
 
         Self {
-            meshdb_client: crate::meshdb::Client { baseurl: MESHDB_BASE_URL.to_string(), client }
+            meshdb_client: crate::meshdb::Client {
+                baseurl: MESHDB_BASE_URL.to_string(),
+                client,
+            },
         }
     }
 
@@ -46,9 +48,15 @@ impl ProgenitorMeshDBProvider {
         }
     }
 
-    async fn get_bin_from_building_id(&self, building_id: &Uuid) -> Result<Option<BINId>, progenitor_client::Error> {
-        let building_response = self.meshdb_client
-            .api_v1_buildings_retrieve(&building_id).await?.into_inner();
+    async fn get_bin_from_building_id(
+        &self,
+        building_id: &Uuid,
+    ) -> Result<Option<BINId>, progenitor_client::Error> {
+        let building_response = self
+            .meshdb_client
+            .api_v1_buildings_retrieve(&building_id)
+            .await?
+            .into_inner();
         if let Some(bin_int) = building_response.bin {
             Ok(BINId::from_int(bin_int).ok())
         } else {
@@ -56,38 +64,66 @@ impl ProgenitorMeshDBProvider {
         }
     }
 
-    pub async fn resolve_nn_or_install_to_bin(&self, number: u32) -> Result<NumberLookupResponse, MeshDBError> {
-        let lookup_response = self.meshdb_client
-            .api_v1_disambiguate_number_retrieve(number.into()).await?.into_inner();
+    pub async fn resolve_nn_or_install_to_bin(
+        &self,
+        number: u32,
+    ) -> Result<NumberLookupResponse, MeshDBError> {
+        let lookup_response = self
+            .meshdb_client
+            .api_v1_disambiguate_number_retrieve(number.into())
+            .await?
+            .into_inner();
 
         if let Some(node_id) = lookup_response
             .supporting_data
-            .exact_match_node.and_then(|n| n.id) {
-            let node_response = self.meshdb_client.api_v1_nodes_retrieve(&node_id).await?.into_inner();
-            let building_ids: Vec<Uuid> = node_response.buildings.iter()
-                .filter_map(|b| b.id).collect();
+            .exact_match_node
+            .and_then(|n| n.id)
+        {
+            let node_response = self
+                .meshdb_client
+                .api_v1_nodes_retrieve(&node_id)
+                .await?
+                .into_inner();
+            let building_ids: Vec<Uuid> = node_response
+                .buildings
+                .iter()
+                .filter_map(|b| b.id)
+                .collect();
             for building_id in building_ids {
                 if let Some(bin) = self.get_bin_from_building_id(&building_id).await? {
-                    return Ok(NumberLookupResponse::new(bin, MeshdbBINSource::NN))
+                    return Ok(NumberLookupResponse::new(bin, MeshdbBINSource::NN));
                 }
             }
 
-            Err(MeshDBError::DataError(
-                format!("No buildings with valid BINs found for node: {}", node_id)
-            ))
-        } else if let Some(install_id) = lookup_response.supporting_data.exact_match_install.map(|inst| inst.id) {
-            let install_response = self.meshdb_client.api_v1_installs_retrieve(&install_id).await?.into_inner();
+            Err(MeshDBError::DataError(format!(
+                "No buildings with valid BINs found for node: {}",
+                node_id
+            )))
+        } else if let Some(install_id) = lookup_response
+            .supporting_data
+            .exact_match_install
+            .map(|inst| inst.id)
+        {
+            let install_response = self
+                .meshdb_client
+                .api_v1_installs_retrieve(&install_id)
+                .await?
+                .into_inner();
             if let Some(building_id) = install_response.building.id {
                 if let Some(bin) = self.get_bin_from_building_id(&building_id).await? {
-                    return Ok(NumberLookupResponse::new(bin, MeshdbBINSource::Install))
+                    return Ok(NumberLookupResponse::new(bin, MeshdbBINSource::Install));
                 }
             }
 
-            Err(MeshDBError::DataError(
-                format!("No buildings with valid BINs found for install: {}", install_id)
-            ))
+            Err(MeshDBError::DataError(format!(
+                "No buildings with valid BINs found for install: {}",
+                install_id
+            )))
         } else {
-            Err(MeshDBError::DataError(format!("{} is not a recognized NN or install number", number)))
+            Err(MeshDBError::DataError(format!(
+                "{} is not a recognized NN or install number",
+                number
+            )))
         }
     }
 }
@@ -95,8 +131,8 @@ impl ProgenitorMeshDBProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::{Mock, MockServer, ResponseTemplate};
     use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     const NODE_UUID: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     const BUILDING_UUID: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
@@ -130,7 +166,8 @@ mod tests {
     }
 
     fn node_response(node_id: &str, building_ids: &[&str]) -> serde_json::Value {
-        let buildings: Vec<serde_json::Value> = building_ids.iter()
+        let buildings: Vec<serde_json::Value> = building_ids
+            .iter()
             .map(|id| serde_json::json!({"id": id}))
             .collect();
         serde_json::json!({
@@ -207,8 +244,18 @@ mod tests {
     async fn nn_resolves_to_bin() {
         let server = MockServer::start().await;
         mount_disambiguate(&server, 1234, disambiguate_nn_response(NODE_UUID)).await;
-        mount_node(&server, NODE_UUID, node_response(NODE_UUID, &[BUILDING_UUID])).await;
-        mount_building(&server, BUILDING_UUID, building_response(BUILDING_UUID, Some(VALID_BIN))).await;
+        mount_node(
+            &server,
+            NODE_UUID,
+            node_response(NODE_UUID, &[BUILDING_UUID]),
+        )
+        .await;
+        mount_building(
+            &server,
+            BUILDING_UUID,
+            building_response(BUILDING_UUID, Some(VALID_BIN)),
+        )
+        .await;
 
         let provider = ProgenitorMeshDBProvider::new_for_test(&server.uri());
         let result = provider.resolve_nn_or_install_to_bin(1234).await.unwrap();
@@ -221,11 +268,24 @@ mod tests {
     async fn nn_no_buildings_with_valid_bin_returns_data_error() {
         let server = MockServer::start().await;
         mount_disambiguate(&server, 1234, disambiguate_nn_response(NODE_UUID)).await;
-        mount_node(&server, NODE_UUID, node_response(NODE_UUID, &[BUILDING_UUID])).await;
-        mount_building(&server, BUILDING_UUID, building_response(BUILDING_UUID, None)).await;
+        mount_node(
+            &server,
+            NODE_UUID,
+            node_response(NODE_UUID, &[BUILDING_UUID]),
+        )
+        .await;
+        mount_building(
+            &server,
+            BUILDING_UUID,
+            building_response(BUILDING_UUID, None),
+        )
+        .await;
 
         let provider = ProgenitorMeshDBProvider::new_for_test(&server.uri());
-        let err = provider.resolve_nn_or_install_to_bin(1234).await.unwrap_err();
+        let err = provider
+            .resolve_nn_or_install_to_bin(1234)
+            .await
+            .unwrap_err();
         assert!(matches!(err, MeshDBError::DataError(_)));
     }
 
@@ -233,12 +293,25 @@ mod tests {
     async fn nn_building_invalid_bin_returns_data_error() {
         let server = MockServer::start().await;
         mount_disambiguate(&server, 1234, disambiguate_nn_response(NODE_UUID)).await;
-        mount_node(&server, NODE_UUID, node_response(NODE_UUID, &[BUILDING_UUID])).await;
+        mount_node(
+            &server,
+            NODE_UUID,
+            node_response(NODE_UUID, &[BUILDING_UUID]),
+        )
+        .await;
         // INVALID_BIN starts with 9 which is not a valid first digit for BINId
-        mount_building(&server, BUILDING_UUID, building_response(BUILDING_UUID, Some(INVALID_BIN))).await;
+        mount_building(
+            &server,
+            BUILDING_UUID,
+            building_response(BUILDING_UUID, Some(INVALID_BIN)),
+        )
+        .await;
 
         let provider = ProgenitorMeshDBProvider::new_for_test(&server.uri());
-        let err = provider.resolve_nn_or_install_to_bin(1234).await.unwrap_err();
+        let err = provider
+            .resolve_nn_or_install_to_bin(1234)
+            .await
+            .unwrap_err();
         assert!(matches!(err, MeshDBError::DataError(_)));
     }
 
@@ -247,9 +320,24 @@ mod tests {
         let second_building = "dddddddd-dddd-dddd-dddd-dddddddddddd";
         let server = MockServer::start().await;
         mount_disambiguate(&server, 1234, disambiguate_nn_response(NODE_UUID)).await;
-        mount_node(&server, NODE_UUID, node_response(NODE_UUID, &[BUILDING_UUID, second_building])).await;
-        mount_building(&server, BUILDING_UUID, building_response(BUILDING_UUID, None)).await;
-        mount_building(&server, second_building, building_response(second_building, Some(2000000))).await;
+        mount_node(
+            &server,
+            NODE_UUID,
+            node_response(NODE_UUID, &[BUILDING_UUID, second_building]),
+        )
+        .await;
+        mount_building(
+            &server,
+            BUILDING_UUID,
+            building_response(BUILDING_UUID, None),
+        )
+        .await;
+        mount_building(
+            &server,
+            second_building,
+            building_response(second_building, Some(2000000)),
+        )
+        .await;
 
         let provider = ProgenitorMeshDBProvider::new_for_test(&server.uri());
         let result = provider.resolve_nn_or_install_to_bin(1234).await.unwrap();
@@ -264,8 +352,18 @@ mod tests {
     async fn install_resolves_to_bin() {
         let server = MockServer::start().await;
         mount_disambiguate(&server, 100, disambiguate_install_response(INSTALL_UUID)).await;
-        mount_install(&server, INSTALL_UUID, install_response(INSTALL_UUID, Some(BUILDING_UUID))).await;
-        mount_building(&server, BUILDING_UUID, building_response(BUILDING_UUID, Some(VALID_BIN))).await;
+        mount_install(
+            &server,
+            INSTALL_UUID,
+            install_response(INSTALL_UUID, Some(BUILDING_UUID)),
+        )
+        .await;
+        mount_building(
+            &server,
+            BUILDING_UUID,
+            building_response(BUILDING_UUID, Some(VALID_BIN)),
+        )
+        .await;
 
         let provider = ProgenitorMeshDBProvider::new_for_test(&server.uri());
         let result = provider.resolve_nn_or_install_to_bin(100).await.unwrap();
@@ -281,7 +379,10 @@ mod tests {
         mount_install(&server, INSTALL_UUID, install_response(INSTALL_UUID, None)).await;
 
         let provider = ProgenitorMeshDBProvider::new_for_test(&server.uri());
-        let err = provider.resolve_nn_or_install_to_bin(100).await.unwrap_err();
+        let err = provider
+            .resolve_nn_or_install_to_bin(100)
+            .await
+            .unwrap_err();
         assert!(matches!(err, MeshDBError::DataError(_)));
     }
 
@@ -289,11 +390,24 @@ mod tests {
     async fn install_building_no_valid_bin_returns_data_error() {
         let server = MockServer::start().await;
         mount_disambiguate(&server, 100, disambiguate_install_response(INSTALL_UUID)).await;
-        mount_install(&server, INSTALL_UUID, install_response(INSTALL_UUID, Some(BUILDING_UUID))).await;
-        mount_building(&server, BUILDING_UUID, building_response(BUILDING_UUID, None)).await;
+        mount_install(
+            &server,
+            INSTALL_UUID,
+            install_response(INSTALL_UUID, Some(BUILDING_UUID)),
+        )
+        .await;
+        mount_building(
+            &server,
+            BUILDING_UUID,
+            building_response(BUILDING_UUID, None),
+        )
+        .await;
 
         let provider = ProgenitorMeshDBProvider::new_for_test(&server.uri());
-        let err = provider.resolve_nn_or_install_to_bin(100).await.unwrap_err();
+        let err = provider
+            .resolve_nn_or_install_to_bin(100)
+            .await
+            .unwrap_err();
         assert!(matches!(err, MeshDBError::DataError(_)));
     }
 
@@ -305,7 +419,10 @@ mod tests {
         mount_disambiguate(&server, 9999, disambiguate_no_match_response()).await;
 
         let provider = ProgenitorMeshDBProvider::new_for_test(&server.uri());
-        let err = provider.resolve_nn_or_install_to_bin(9999).await.unwrap_err();
+        let err = provider
+            .resolve_nn_or_install_to_bin(9999)
+            .await
+            .unwrap_err();
         assert!(matches!(err, MeshDBError::DataError(_)));
     }
 
@@ -316,14 +433,18 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/disambiguate-number/"))
-            .respond_with(ResponseTemplate::new(500).set_body_json(
-                serde_json::json!({"detail": "internal server error"})
-            ))
+            .respond_with(
+                ResponseTemplate::new(500)
+                    .set_body_json(serde_json::json!({"detail": "internal server error"})),
+            )
             .mount(&server)
             .await;
 
         let provider = ProgenitorMeshDBProvider::new_for_test(&server.uri());
-        let err = provider.resolve_nn_or_install_to_bin(1234).await.unwrap_err();
+        let err = provider
+            .resolve_nn_or_install_to_bin(1234)
+            .await
+            .unwrap_err();
         assert!(matches!(err, MeshDBError::ApiError(_)));
     }
 }

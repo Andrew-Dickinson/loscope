@@ -1,18 +1,18 @@
+use crate::analysis::png_encoder;
 use image::{DynamicImage, ImageBuffer, Rgba};
 use ndarray::Array2;
 use typed_floats::tf64::PositiveFinite;
-use crate::analysis::png_encoder;
 
 const TILE_SIDE: usize = png_encoder::TILE_SIDE;
-const UPSCALE: usize   = png_encoder::UPSCALE;
-const OUT_SIDE: usize  = png_encoder::OUT_SIDE;
+const UPSCALE: usize = png_encoder::UPSCALE;
+const OUT_SIDE: usize = png_encoder::OUT_SIDE;
 const BORDER: usize = 2;
 
 fn colormap(v: f64) -> [u8; 4] {
     const STOPS: [f64; 5] = [0.0, 0.4, 0.6, 0.75, 1.0];
     const R: [f64; 5] = [255.0, 255.0, 210.0, 138.0, 214.0];
-    const G: [f64; 5] = [215.0, 105.0, 18.0,   0.0,   2.0];
-    const B: [f64; 5] = [  0.0,   0.0, 28.0,  16.0,  52.0];
+    const G: [f64; 5] = [215.0, 105.0, 18.0, 0.0, 2.0];
+    const B: [f64; 5] = [0.0, 0.0, 28.0, 16.0, 52.0];
     const LAST: usize = STOPS.len() - 1;
     if v <= STOPS[0] {
         return [R[0] as u8, G[0] as u8, B[0] as u8, 255];
@@ -37,7 +37,7 @@ fn colormap(v: f64) -> [u8; 4] {
 #[inline(always)]
 fn write_px(raw: &mut [u8], idx: usize, color: [u8; 4]) {
     let off = idx * 4;
-    raw[off]     = color[0];
+    raw[off] = color[0];
     raw[off + 1] = color[1];
     raw[off + 2] = color[2];
     raw[off + 3] = color[3];
@@ -46,7 +46,9 @@ fn write_px(raw: &mut [u8], idx: usize, color: [u8; 4]) {
 /// Converts a 500×500 intersection raster (indexed [easting, northing]) into a
 /// 4000×4000 RGBA image using a SunsetDark-inspired colormap, with a 2-pixel
 /// black outline around the filled region.
-pub fn tile_intersection_to_img(intersection: Array2<Option<&PositiveFinite>>) -> Option<DynamicImage> {
+pub fn tile_intersection_to_img(
+    intersection: Array2<Option<&PositiveFinite>>,
+) -> Option<DynamicImage> {
     // Build 4000×4000 pixel buffer: upscale 8x, flip north-up.
     // intersection[[x, y]]: x=easting (0..500), y=northing (0 = south).
     // Image row 0 = north (northing=499), col = easting, both repeated 8x.
@@ -65,9 +67,13 @@ pub fn tile_intersection_to_img(intersection: Array2<Option<&PositiveFinite>>) -
     for sy in 0..TILE_SIDE {
         let out_row_base = (TILE_SIDE - 1 - sy) * UPSCALE;
         for sx in 0..TILE_SIDE {
-            let Some(pf) = intersection[[sx, sy]] else { continue };
+            let Some(pf) = intersection[[sx, sy]] else {
+                continue;
+            };
             let v = f64::from(*pf);
-            if v == 0.0 { continue; }
+            if v == 0.0 {
+                continue;
+            }
 
             source_filled[sy * TILE_SIDE + sx] = true;
 
@@ -99,7 +105,9 @@ pub fn tile_intersection_to_img(intersection: Array2<Option<&PositiveFinite>>) -
     for sy in 0..TILE_SIDE {
         let out_row_base = (TILE_SIDE - 1 - sy) * UPSCALE;
         for sx in 0..TILE_SIDE {
-            if source_filled[sy * TILE_SIDE + sx] { continue; }
+            if source_filled[sy * TILE_SIDE + sx] {
+                continue;
+            }
             let (isx, isy) = (sx as isize, sy as isize);
             let out_col_base = sx * UPSCALE;
 
@@ -140,17 +148,37 @@ pub fn tile_intersection_to_img(intersection: Array2<Option<&PositiveFinite>>) -
                 }
             }
             // diagonal neighbors → single corner pixel each (Manhattan distance 1+1=2)
-            if sf(isx + 1, isy + 1) { // upper-right: corner (UPSCALE-1, 0)
-                write_px(&mut raw, out_row_base * OUT_SIDE + out_col_base + UPSCALE - 1, [0, 0, 0, 255]);
+            if sf(isx + 1, isy + 1) {
+                // upper-right: corner (UPSCALE-1, 0)
+                write_px(
+                    &mut raw,
+                    out_row_base * OUT_SIDE + out_col_base + UPSCALE - 1,
+                    [0, 0, 0, 255],
+                );
             }
-            if sf(isx - 1, isy + 1) { // upper-left: corner (0, 0)
-                write_px(&mut raw, out_row_base * OUT_SIDE + out_col_base, [0, 0, 0, 255]);
+            if sf(isx - 1, isy + 1) {
+                // upper-left: corner (0, 0)
+                write_px(
+                    &mut raw,
+                    out_row_base * OUT_SIDE + out_col_base,
+                    [0, 0, 0, 255],
+                );
             }
-            if sf(isx + 1, isy - 1) { // lower-right: corner (UPSCALE-1, UPSCALE-1)
-                write_px(&mut raw, (out_row_base + UPSCALE - 1) * OUT_SIDE + out_col_base + UPSCALE - 1, [0, 0, 0, 255]);
+            if sf(isx + 1, isy - 1) {
+                // lower-right: corner (UPSCALE-1, UPSCALE-1)
+                write_px(
+                    &mut raw,
+                    (out_row_base + UPSCALE - 1) * OUT_SIDE + out_col_base + UPSCALE - 1,
+                    [0, 0, 0, 255],
+                );
             }
-            if sf(isx - 1, isy - 1) { // lower-left: corner (0, UPSCALE-1)
-                write_px(&mut raw, (out_row_base + UPSCALE - 1) * OUT_SIDE + out_col_base, [0, 0, 0, 255]);
+            if sf(isx - 1, isy - 1) {
+                // lower-left: corner (0, UPSCALE-1)
+                write_px(
+                    &mut raw,
+                    (out_row_base + UPSCALE - 1) * OUT_SIDE + out_col_base,
+                    [0, 0, 0, 255],
+                );
             }
         }
     }
@@ -164,18 +192,25 @@ pub fn tile_intersection_to_img(intersection: Array2<Option<&PositiveFinite>>) -
 /// Encode the intersection raster as a PNG byte vector, or `None` if the intersection is empty.
 /// Uses the custom DEFLATE encoder which exploits image sparsity for fast encoding.
 pub fn tile_intersection_to_png(intersection: Array2<Option<&PositiveFinite>>) -> Option<Vec<u8>> {
-    if intersection.iter().all(|cell| cell.map_or(true, |v| *v == 0.0)) {
+    if intersection
+        .iter()
+        .all(|cell| cell.map_or(true, |v| *v == 0.0))
+    {
         return None;
     }
 
     let mut source_filled = vec![false; TILE_SIDE * TILE_SIDE];
-    let mut cell_color    = vec![[0u8; 4]; TILE_SIDE * TILE_SIDE];
+    let mut cell_color = vec![[0u8; 4]; TILE_SIDE * TILE_SIDE];
 
     for sy in 0..TILE_SIDE {
         for sx in 0..TILE_SIDE {
-            let Some(pf) = intersection[[sx, sy]] else { continue };
+            let Some(pf) = intersection[[sx, sy]] else {
+                continue;
+            };
             let v = f64::from(*pf);
-            if v == 0.0 { continue; }
+            if v == 0.0 {
+                continue;
+            }
             source_filled[sy * TILE_SIDE + sx] = true;
             cell_color[sy * TILE_SIDE + sx] = colormap(v);
         }
@@ -186,11 +221,13 @@ pub fn tile_intersection_to_png(intersection: Array2<Option<&PositiveFinite>>) -
 
 #[cfg(test)]
 mod tests {
+    use super::{OUT_SIDE, TILE_SIDE, UPSCALE, tile_intersection_to_img};
     use ndarray::Array2;
     use typed_floats::tf64::PositiveFinite;
-    use super::{tile_intersection_to_img, TILE_SIDE, UPSCALE, OUT_SIDE};
 
-    fn pf(v: f64) -> PositiveFinite { PositiveFinite::new(v).unwrap() }
+    fn pf(v: f64) -> PositiveFinite {
+        PositiveFinite::new(v).unwrap()
+    }
 
     fn rgba_at(img: &image::DynamicImage, col: u32, row: u32) -> [u8; 4] {
         use image::GenericImageView;
@@ -208,7 +245,8 @@ mod tests {
     #[test]
     fn all_zero_returns_none() {
         let zero = Some(PositiveFinite::default());
-        let grid: Array2<Option<&PositiveFinite>> = Array2::from_elem((TILE_SIDE, TILE_SIDE), zero.as_ref());
+        let grid: Array2<Option<&PositiveFinite>> =
+            Array2::from_elem((TILE_SIDE, TILE_SIDE), zero.as_ref());
         assert!(tile_intersection_to_img(grid).is_none());
     }
 
@@ -219,7 +257,8 @@ mod tests {
     #[test]
     fn single_cell_color_position_and_border() {
         let v = pf(0.1);
-        let mut grid: Array2<Option<&PositiveFinite>> = Array2::from_elem((TILE_SIDE, TILE_SIDE), None);
+        let mut grid: Array2<Option<&PositiveFinite>> =
+            Array2::from_elem((TILE_SIDE, TILE_SIDE), None);
         grid[[0, 0]] = Some(&v); // easting=0, northing=0 → SW corner
 
         let img = tile_intersection_to_img(grid).unwrap();
@@ -232,7 +271,11 @@ mod tests {
         for row in filled_row_start..filled_row_start + UPSCALE as u32 {
             for col in filled_col_start..filled_col_start + UPSCALE as u32 {
                 let px = rgba_at(&img, col, row);
-                assert_eq!(px, [255, 187, 0, 255], "filled pixel ({col},{row}) wrong color");
+                assert_eq!(
+                    px,
+                    [255, 187, 0, 255],
+                    "filled pixel ({col},{row}) wrong color"
+                );
             }
         }
 
@@ -253,8 +296,9 @@ mod tests {
     fn zero_value_pixels_are_transparent() {
         let zero = pf(0.0);
         let nonzero = pf(0.5);
-        let mut grid: Array2<Option<&PositiveFinite>> = Array2::from_elem((TILE_SIDE, TILE_SIDE), None);
-        grid[[1, 1]] = Some(&zero);     // easting=1,  northing=1 → should be transparent
+        let mut grid: Array2<Option<&PositiveFinite>> =
+            Array2::from_elem((TILE_SIDE, TILE_SIDE), None);
+        grid[[1, 1]] = Some(&zero); // easting=1,  northing=1 → should be transparent
         grid[[20, 1]] = Some(&nonzero); // easting=20, northing=1 → should be opaque (far away)
 
         let img = tile_intersection_to_img(grid).unwrap();
@@ -264,14 +308,20 @@ mod tests {
 
         // zero cell: easting=1 → cols 8..16, well clear of the nonzero cell's border
         for col in 8u32..16 {
-            assert_eq!(rgba_at(&img, col, row)[3], 0,
-                "zero-value pixel at col {col} should be transparent");
+            assert_eq!(
+                rgba_at(&img, col, row)[3],
+                0,
+                "zero-value pixel at col {col} should be transparent"
+            );
         }
 
         // non-zero cell: easting=20 → cols 160..168
         for col in 160u32..168 {
-            assert_eq!(rgba_at(&img, col, row)[3], 255,
-                "non-zero pixel at col {col} should be opaque");
+            assert_eq!(
+                rgba_at(&img, col, row)[3],
+                255,
+                "non-zero pixel at col {col} should be opaque"
+            );
         }
     }
 
@@ -280,7 +330,8 @@ mod tests {
     #[test]
     fn border_dilation_does_not_wrap_across_image_edges() {
         let v = pf(0.5);
-        let mut grid: Array2<Option<&PositiveFinite>> = Array2::from_elem((TILE_SIDE, TILE_SIDE), None);
+        let mut grid: Array2<Option<&PositiveFinite>> =
+            Array2::from_elem((TILE_SIDE, TILE_SIDE), None);
         grid[[0, TILE_SIDE - 1]] = Some(&v); // easting=0, northing=499 → image row 0, col 0
 
         let img = tile_intersection_to_img(grid).unwrap();
@@ -289,11 +340,17 @@ mod tests {
         // With wrapping dilation the border would spill to the bottom edge — verify it doesn't.
         for col in 0..OUT_SIDE as u32 {
             let px = rgba_at(&img, col, OUT_SIDE as u32 - 1);
-            assert_eq!(px[3], 0, "south edge col {col} should be transparent, not a wrapped border");
+            assert_eq!(
+                px[3], 0,
+                "south edge col {col} should be transparent, not a wrapped border"
+            );
         }
         for row in 0..OUT_SIDE as u32 {
             let px = rgba_at(&img, OUT_SIDE as u32 - 1, row);
-            assert_eq!(px[3], 0, "east edge row {row} should be transparent, not a wrapped border");
+            assert_eq!(
+                px[3], 0,
+                "east edge row {row} should be transparent, not a wrapped border"
+            );
         }
     }
 }

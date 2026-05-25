@@ -1,8 +1,8 @@
-pub mod tiles;
-pub mod errors;
 pub mod coords;
-pub mod stairstep;
-pub mod tuple_serde;
+pub mod errors;
 pub mod meshdb;
-pub mod obstructions;
 pub mod obj_writer;
+pub mod obstructions;
+pub mod stairstep;
+pub mod tiles;
+pub mod tuple_serde;

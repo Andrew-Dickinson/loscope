@@ -1,6 +1,6 @@
-use derive_new::new;
-use rocket::serde::{Serialize};
 use crate::types::coords::{NYSCoords2, NYSCoords3, RelativeCoords3};
+use derive_new::new;
+use rocket::serde::Serialize;
 
 #[derive(Serialize, new)]
 pub struct EncodedPoint {
@@ -14,7 +14,7 @@ pub struct SamplePoint {
     display_point: EncodedPoint,
 }
 
-#[derive(new,Serialize)]
+#[derive(new, Serialize)]
 pub struct SamplePoints {
     sample_points: Vec<SamplePoint>,
     sw_offset: NYSCoords2,

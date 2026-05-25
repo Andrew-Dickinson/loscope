@@ -1,16 +1,16 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::iter::{repeat_n};
-use derive_getters::Getters;
-use geo::{coord, Coord, Rect};
-use rocket::serde::{de, Deserializer, Serializer};
-use rocket::serde::de::{Error, SeqAccess, Visitor};
-use serde::{Deserialize, Serialize};
-use serde::de::Unexpected;
-use wincode::{SchemaRead, SchemaWrite};
-use crate::types::coords::{valid_nys_coordinate, NYSCoords2, MAX_NYS_COORD_VALUE};
+use crate::types::coords::{MAX_NYS_COORD_VALUE, NYSCoords2, valid_nys_coordinate};
 use crate::types::errors::TileParseErr;
 use crate::types::errors::TileParseErr::{InvalidLASTileId, InvalidSubgrid};
+use derive_getters::Getters;
+use geo::{Coord, Rect, coord};
+use rocket::serde::de::{Error, SeqAccess, Visitor};
+use rocket::serde::{Deserializer, Serializer, de};
+use serde::de::Unexpected;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::iter::repeat_n;
+use wincode::{SchemaRead, SchemaWrite};
 
 const TILE_ID_SEPARATOR: char = '_';
 const SUBGRID_ID_RADIX: u32 = 10;
@@ -43,30 +43,37 @@ pub struct TileId {
 }
 
 impl LASTileId {
-
     pub fn new(easting_base: u16, northing_base: u16) -> Self {
         // Safety: the below unwraps() will never panic, because the outcome of % 10 will always
         // fit into a u8
-        assert!(PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((northing_base % 10).try_into().unwrap())),
-                "Northing base % 10 must be one of PERMITTED_LAS_ID_COMPONENT_MODULI");
-        assert!(PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((easting_base % 10).try_into().unwrap())),
-                "Easting base % 10 must be one of PERMITTED_LAS_ID_COMPONENT_MODULI");
+        assert!(
+            PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((northing_base % 10).try_into().unwrap())),
+            "Northing base % 10 must be one of PERMITTED_LAS_ID_COMPONENT_MODULI"
+        );
+        assert!(
+            PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((easting_base % 10).try_into().unwrap())),
+            "Easting base % 10 must be one of PERMITTED_LAS_ID_COMPONENT_MODULI"
+        );
 
         let res = LASTileId(easting_base, northing_base);
         let corner_coords = res.get_sw_corner();
 
-        assert!(valid_nys_coordinate(*corner_coords.northing()),
-                "Northing must have a value which places the tile between \
-                MIN_NYS_COORD_VALUE and MAX_NYS_COORD_VALUE");
-        assert!(valid_nys_coordinate(*corner_coords.easting()),
-                "Easting must have a value which places the tile between \
-                MIN_NYS_COORD_VALUE and MAX_NYS_COORD_VALUE");
+        assert!(
+            valid_nys_coordinate(*corner_coords.northing()),
+            "Northing must have a value which places the tile between \
+                MIN_NYS_COORD_VALUE and MAX_NYS_COORD_VALUE"
+        );
+        assert!(
+            valid_nys_coordinate(*corner_coords.easting()),
+            "Easting must have a value which places the tile between \
+                MIN_NYS_COORD_VALUE and MAX_NYS_COORD_VALUE"
+        );
 
         res
     }
 
     pub fn parse(input_str: &str) -> Result<Self, TileParseErr> {
-        if !input_str.chars().all(|c| c.is_ascii_digit()){
+        if !input_str.chars().all(|c| c.is_ascii_digit()) {
             return Err(InvalidLASTileId);
         }
 
@@ -79,7 +86,7 @@ impl LASTileId {
         let northing_base: u16 = input_str[northing_start_idx..].parse()?;
         let mut easting_base = match northing_start_idx {
             0 => 1000,
-            _ => input_str[..northing_start_idx].parse()?
+            _ => input_str[..northing_start_idx].parse()?,
         };
 
         if easting_base < EASTING_BASE_ROLLOVER_BOUND {
@@ -88,11 +95,13 @@ impl LASTileId {
 
         // Safety: the below unwraps() will never panic, because the outcome of % 10 will always
         // fit into a u8
-        if    !PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((northing_base % 10).try_into().unwrap()))
-            || !PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((easting_base % 10).try_into().unwrap())) {
+        if !PERMITTED_LAS_ID_COMPONENT_MODULI.contains(&((northing_base % 10).try_into().unwrap()))
+            || !PERMITTED_LAS_ID_COMPONENT_MODULI
+                .contains(&((easting_base % 10).try_into().unwrap()))
+        {
             return Err(InvalidLASTileId);
         }
-            
+
         Ok(LASTileId::new(easting_base, northing_base))
     }
 
@@ -128,13 +137,21 @@ impl LASTileId {
     // on the 2500-usft tile grid: 0→0, 2→2500, 5→5000, 7→7500, 10→10000, …
     fn component_to_usft(component: u16) -> u32 {
         let base = u32::from(component) * u32::from(LAS_ID_UNIT_MUTIPLIER_TO_COORD);
-        if component % 10 == 2 || component % 10 == 7 { base + 500 } else { base }
+        if component % 10 == 2 || component % 10 == 7 {
+            base + 500
+        } else {
+            base
+        }
     }
 
     // Inverse of component_to_usft: returns the component whose tile SW corner is at or
     // below `usft`. Tiles repeat every 2500 usft in a 4-step cycle (→ mod 0, 2, 5, 7).
     fn usft_to_component(usft: f64) -> u16 {
-        assert!(usft >= 0.0 && usft <= MAX_NYS_COORD_VALUE, "Invalid value for coord conversion {}", usft);
+        assert!(
+            usft >= 0.0 && usft <= MAX_NYS_COORD_VALUE,
+            "Invalid value for coord conversion {}",
+            usft
+        );
         /// Safety: tile_block will not overflow, since due to the above
         /// assertion, max(tile_block) is 800, and:
         const _: () = assert!(
@@ -167,8 +184,10 @@ impl Display for LASTileId {
 
 impl SubgridId {
     pub fn new(x: u8, y: u8) -> Self {
-        assert!(x < SUBGRID_TILES_PER_SIDE && y < SUBGRID_TILES_PER_SIDE,
-            "SubgridId coordinates must be < {SUBGRID_TILES_PER_SIDE}, got ({x}, {y})");
+        assert!(
+            x < SUBGRID_TILES_PER_SIDE && y < SUBGRID_TILES_PER_SIDE,
+            "SubgridId coordinates must be < {SUBGRID_TILES_PER_SIDE}, got ({x}, {y})"
+        );
         SubgridId(x, y)
     }
 
@@ -183,8 +202,12 @@ impl SubgridId {
             input_str_chars.next().ok_or(InvalidSubgrid)?,
         );
 
-        let subgrid_x = subgrid_x_char.to_digit(SUBGRID_ID_RADIX).ok_or(InvalidSubgrid)?;
-        let subgrid_y = subgrid_y_char.to_digit(SUBGRID_ID_RADIX).ok_or(InvalidSubgrid)?;
+        let subgrid_x = subgrid_x_char
+            .to_digit(SUBGRID_ID_RADIX)
+            .ok_or(InvalidSubgrid)?;
+        let subgrid_y = subgrid_y_char
+            .to_digit(SUBGRID_ID_RADIX)
+            .ok_or(InvalidSubgrid)?;
 
         let side_len_u32: u32 = SUBGRID_TILES_PER_SIDE.into();
         if subgrid_x >= side_len_u32 || subgrid_y >= side_len_u32 {
@@ -193,7 +216,10 @@ impl SubgridId {
 
         // Safety: the unwrap() calls below are safe because SUBGRID_TILES_PER_SIDE << max(u8)
         // and we just validated these are both < SUBGRID_TILES_PER_SIDE
-        Ok(SubgridId::new(subgrid_x.try_into().unwrap(), subgrid_y.try_into().unwrap()))
+        Ok(SubgridId::new(
+            subgrid_x.try_into().unwrap(),
+            subgrid_y.try_into().unwrap(),
+        ))
     }
 
     // Returns the X, Y, W, H in usft relative to the SW corner of the tile
@@ -204,7 +230,7 @@ impl SubgridId {
             e_u16 * SUBGRID_TILE_SIDE_LENGTH_USFT,
             n_u16 * SUBGRID_TILE_SIDE_LENGTH_USFT,
             SUBGRID_TILE_SIDE_LENGTH_USFT,
-            SUBGRID_TILE_SIDE_LENGTH_USFT
+            SUBGRID_TILE_SIDE_LENGTH_USFT,
         )
     }
 }
@@ -219,15 +245,13 @@ impl TileId {
     pub fn parse(input_str: &str) -> Result<TileId, TileParseErr> {
         let (las_tile_id_str, subgrid_id_str) = match input_str.find(TILE_ID_SEPARATOR) {
             Some(i) if i > 0 => (&input_str[..i], &input_str[(i + 1)..]),
-            _ => return Err(TileParseErr::MissingSeparator)
+            _ => return Err(TileParseErr::MissingSeparator),
         };
 
-        Ok(
-            TileId {
-                las_tile_id: LASTileId::parse(las_tile_id_str)?,
-                subgrid_id: SubgridId::parse(subgrid_id_str)?
-            }
-        )
+        Ok(TileId {
+            las_tile_id: LASTileId::parse(las_tile_id_str)?,
+            subgrid_id: SubgridId::parse(subgrid_id_str)?,
+        })
     }
 
     pub fn tiff_fname(&self) -> String {
@@ -278,7 +302,10 @@ impl TileId {
         // coercions below safe
         assert!(subgrid_y < 5.0);
         assert!(subgrid_x < 5.0);
-        TileId { las_tile_id, subgrid_id: SubgridId::new(subgrid_x as u8, subgrid_y as u8) }
+        TileId {
+            las_tile_id,
+            subgrid_id: SubgridId::new(subgrid_x as u8, subgrid_y as u8),
+        }
     }
 
     pub fn from_adjacent_tile(starting: &TileId, offset: (isize, isize)) -> Self {
@@ -294,19 +321,32 @@ impl TileId {
                 // Safety: the following unwraps are safe because
                 // SUBGRID_TILE_SIDE_LENGTH_USFT = 500 fits into an isize (2**32) no problem, on
                 // any 32+ bit system
-                LASTileId::usft_to_component((starting_w + isize::try_from(SUBGRID_TILE_SIDE_LENGTH_USFT).unwrap() * total_x_tiles_from_las_corner) as f64),
-                LASTileId::usft_to_component((starting_s + isize::try_from(SUBGRID_TILE_SIDE_LENGTH_USFT).unwrap() * total_y_tiles_from_las_corner) as f64),
+                LASTileId::usft_to_component(
+                    (starting_w
+                        + isize::try_from(SUBGRID_TILE_SIDE_LENGTH_USFT).unwrap()
+                            * total_x_tiles_from_las_corner) as f64,
+                ),
+                LASTileId::usft_to_component(
+                    (starting_s
+                        + isize::try_from(SUBGRID_TILE_SIDE_LENGTH_USFT).unwrap()
+                            * total_y_tiles_from_las_corner) as f64,
+                ),
             ),
             subgrid_id: SubgridId::new(
                 // Safety: the following unwraps are safe because SUBGRID_TILES_PER_SIDE is a u8,
                 // therefore x % SUBGRID_TILES_PER_SIDE fits in a u8 for all x ∈ ℤ
-                u8::try_from(total_x_tiles_from_las_corner.rem_euclid(isize::from(SUBGRID_TILES_PER_SIDE))).unwrap(),
-                u8::try_from(total_y_tiles_from_las_corner.rem_euclid(isize::from(SUBGRID_TILES_PER_SIDE))).unwrap(),
-            )
+                u8::try_from(
+                    total_x_tiles_from_las_corner.rem_euclid(isize::from(SUBGRID_TILES_PER_SIDE)),
+                )
+                .unwrap(),
+                u8::try_from(
+                    total_y_tiles_from_las_corner.rem_euclid(isize::from(SUBGRID_TILES_PER_SIDE)),
+                )
+                .unwrap(),
+            ),
         }
     }
 }
-
 
 impl Display for TileId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -317,15 +357,14 @@ impl Display for TileId {
 impl Serialize for TileId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         self.to_string().serialize(serializer)
     }
 }
 
-
 impl<'de> Deserialize<'de> for TileId {
-    fn deserialize<D: Deserializer<'de>>(des: D) -> Result<Self, D::Error>{
+    fn deserialize<D: Deserializer<'de>>(des: D) -> Result<Self, D::Error> {
         pub struct TileIdVisitor;
         impl<'de> Visitor<'de> for TileIdVisitor {
             type Value = TileId;
@@ -336,9 +375,8 @@ impl<'de> Deserialize<'de> for TileId {
             where
                 E: Error,
             {
-                TileId::parse(input_str).map_err(
-                    |_| Error::invalid_type(Unexpected::Str(input_str), &self)
-                )
+                TileId::parse(input_str)
+                    .map_err(|_| Error::invalid_type(Unexpected::Str(input_str), &self))
             }
         }
 
@@ -407,11 +445,20 @@ mod tests {
 
     #[test]
     fn las_tile_id_ortho_fname() {
-        assert_eq!(LASTileId::parse("997125").unwrap().ortho_fname(), "997125.jp2");
-        assert_eq!(LASTileId::parse("235125").unwrap().ortho_fname(), "235125.jp2");
+        assert_eq!(
+            LASTileId::parse("997125").unwrap().ortho_fname(),
+            "997125.jp2"
+        );
+        assert_eq!(
+            LASTileId::parse("235125").unwrap().ortho_fname(),
+            "235125.jp2"
+        );
         assert_eq!(LASTileId::parse("125").unwrap().ortho_fname(), "000125.jp2");
         assert_eq!(LASTileId::parse("37").unwrap().ortho_fname(), "000037.jp2");
-        assert_eq!(LASTileId::parse("35125").unwrap().ortho_fname(), "035125.jp2");
+        assert_eq!(
+            LASTileId::parse("35125").unwrap().ortho_fname(),
+            "035125.jp2"
+        );
     }
 
     #[test]
@@ -487,7 +534,10 @@ mod tests {
 
     #[test]
     fn subgrid_relative_bounds_ne_corner() {
-        assert_eq!(SubgridId::new(4, 4).relative_bounds(), (2000, 2000, 500, 500));
+        assert_eq!(
+            SubgridId::new(4, 4).relative_bounds(),
+            (2000, 2000, 500, 500)
+        );
     }
 
     #[test]
@@ -504,7 +554,10 @@ mod tests {
 
     #[test]
     fn subgrid_relative_bounds_middle() {
-        assert_eq!(SubgridId::new(2, 3).relative_bounds(), (1000, 1500, 500, 500));
+        assert_eq!(
+            SubgridId::new(2, 3).relative_bounds(),
+            (1000, 1500, 500, 500)
+        );
     }
 
     #[test]
@@ -551,12 +604,18 @@ mod tests {
 
     #[test]
     fn tile_id_missing_separator() {
-        assert!(matches!(TileId::parse("500300"), Err(TileParseErr::MissingSeparator)));
+        assert!(matches!(
+            TileId::parse("500300"),
+            Err(TileParseErr::MissingSeparator)
+        ));
     }
 
     #[test]
     fn tile_id_separator_at_start() {
-        assert!(matches!(TileId::parse("_500300"), Err(TileParseErr::MissingSeparator)));
+        assert!(matches!(
+            TileId::parse("_500300"),
+            Err(TileParseErr::MissingSeparator)
+        ));
     }
 
     #[test]
@@ -623,7 +682,10 @@ mod tests {
 
     #[test]
     fn tile_id_tiff_fname() {
-        assert_eq!(TileId::parse("500300_23").unwrap().tiff_fname(), "500300_23.tif");
+        assert_eq!(
+            TileId::parse("500300_23").unwrap().tiff_fname(),
+            "500300_23.tif"
+        );
         assert_eq!(TileId::parse("125_00").unwrap().tiff_fname(), "125_00.tif");
     }
 
@@ -644,7 +706,6 @@ mod tests {
         assert_eq!(*corner.easting(), 501_000.0);
         assert_eq!(*corner.northing(), 301_500.0);
     }
-
 
     #[test]
     fn las_tile_id_sw_corner_mid_offset_7_23() {
@@ -692,7 +753,11 @@ mod tests {
             for y in 0..5u8 {
                 let id = format!("500300_{x}{y}");
                 let bounds = TileId::parse(&id).unwrap().get_bounds();
-                assert_eq!((bounds.width(), bounds.height()), (500, 500), "failed for subgrid {x}{y}");
+                assert_eq!(
+                    (bounds.width(), bounds.height()),
+                    (500, 500),
+                    "failed for subgrid {x}{y}"
+                );
             }
         }
     }
@@ -850,7 +915,8 @@ mod tests {
     fn tile_id_serde_roundtrip() {
         use rocket::serde::json::serde_json;
         let original = TileId::parse("987177_42").unwrap();
-        let restored: TileId = serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
+        let restored: TileId =
+            serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
         assert_eq!(original, restored);
     }
 

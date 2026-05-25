@@ -1,17 +1,17 @@
-use std::iter::repeat_n;
+use crate::types::coords::NYSCoords2;
+use crate::types::tiles::{SUBGRID_TILE_SIDE_LENGTH_USFT, TileId};
 use arrayvec::ArrayVec;
-use std::mem::MaybeUninit;
 use derive_getters::Getters;
 use derive_new::new;
 use futures_util::StreamExt;
-use ndarray::{s, Array1, Array2};
+use ndarray::{Array1, Array2, s};
 use rocket::serde::{Deserialize, Serialize};
+use std::iter::repeat_n;
+use std::mem::MaybeUninit;
 use typed_floats::tf64::PositiveFinite;
-use wincode::{ReadError, SchemaRead, SchemaWrite};
 use wincode::config::Config;
 use wincode::io::{Reader, Writer};
-use crate::types::coords::NYSCoords2;
-use crate::types::tiles::{TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
+use wincode::{ReadError, SchemaRead, SchemaWrite};
 
 /// Maps a StairStepGrid element type to a wincode-serializable wire form.
 ///
@@ -25,7 +25,9 @@ pub(crate) trait WincodeGridElem: Copy + Sized + 'static {
 
 impl WincodeGridElem for PositiveFinite {
     type Wire = f64;
-    fn into_wire(self) -> f64 { self.into() }
+    fn into_wire(self) -> f64 {
+        self.into()
+    }
     fn from_wire(w: f64) -> Self {
         PositiveFinite::try_from(w).expect("deserialized f64 is not a valid PositiveFinite")
     }
@@ -33,7 +35,7 @@ impl WincodeGridElem for PositiveFinite {
 
 /// Sparse Array2 representation, which uses an x-offset for each row in values to shift that row
 /// in the positive-x direction. The contents of row i in values are only valid up to widths[i]
-#[derive(new,Serialize,Deserialize,Getters)]
+#[derive(new, Serialize, Deserialize, Getters)]
 pub struct StairStepGrid<T> {
     values: Array2<T>,
     widths: Array1<usize>,
@@ -41,10 +43,15 @@ pub struct StairStepGrid<T> {
     base_offset: NYSCoords2,
 }
 
-impl<T> StairStepGrid<T> where T: Ord{
+impl<T> StairStepGrid<T>
+where
+    T: Ord,
+{
     pub fn max(&self) -> Option<&T> {
         assert_eq!(self.values.nrows(), self.widths.len());
-        self.values.rows().into_iter()
+        self.values
+            .rows()
+            .into_iter()
             .zip(self.widths.iter())
             .flat_map(|(row, &width)| row.into_iter().take(width))
             .max()
@@ -60,7 +67,11 @@ impl<T> StairStepGrid<T> {
         !self.widths.iter().any(|&w| w > 0)
     }
 
-    pub fn merge<U,V: Default,F: Fn(&T,&U,(usize, usize)) -> V>(&self, other: &StairStepGrid<U>, merge_fn: F) -> StairStepGrid<V> {
+    pub fn merge<U, V: Default, F: Fn(&T, &U, (usize, usize)) -> V>(
+        &self,
+        other: &StairStepGrid<U>,
+        merge_fn: F,
+    ) -> StairStepGrid<V> {
         let mut output: StairStepGrid<V> = StairStepGrid {
             values: Array2::default((self.values.shape()[0], self.values.shape()[1])),
             widths: self.widths.clone(),
@@ -79,9 +90,11 @@ impl<T> StairStepGrid<T> {
             let offset_x = self.offsets()[i];
             assert_eq!(other.offsets()[i], offset_x);
 
-            self_row.iter().zip(other_row.iter()).enumerate().for_each(|(j, (self_val, other_val))| {
-                output.values[[i,j]] = merge_fn(self_val, other_val, (offset_x, offset_y));
-            })
+            self_row.iter().zip(other_row.iter()).enumerate().for_each(
+                |(j, (self_val, other_val))| {
+                    output.values[[i, j]] = merge_fn(self_val, other_val, (offset_x, offset_y));
+                },
+            )
         }
 
         output
@@ -93,19 +106,30 @@ impl<T> StairStepGrid<T> {
         // Safety: rasterize_in_tile_iter is guaranteed to return a vec of the right size, so
         // this unwrap should never panic
         Array2::<Option<&T>>::from_shape_vec(
-            (SUBGRID_TILE_SIDE_LENGTH_USFT.into(), SUBGRID_TILE_SIDE_LENGTH_USFT.into()),
-            self.rasterize_in_tile_iter(tile_id).collect()
-        ).unwrap().reversed_axes()
+            (
+                SUBGRID_TILE_SIDE_LENGTH_USFT.into(),
+                SUBGRID_TILE_SIDE_LENGTH_USFT.into(),
+            ),
+            self.rasterize_in_tile_iter(tile_id).collect(),
+        )
+        .unwrap()
+        .reversed_axes()
     }
 
     fn rasterize_in_tile_iter(&self, tile_id: TileId) -> impl Iterator<Item = Option<&T>> + '_ {
         const TILE_SIDE: usize = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
 
         let step_base_offset = &self.base_offset;
-        let tile_base_offset  = tile_id.get_sw_corner();
+        let tile_base_offset = tile_id.get_sw_corner();
 
-        let step_base_offset = (step_base_offset.easting().floor() as usize, step_base_offset.northing().floor() as usize);
-        let tile_base_offset = (tile_base_offset.easting().floor() as usize, tile_base_offset.northing().floor() as usize);
+        let step_base_offset = (
+            step_base_offset.easting().floor() as usize,
+            step_base_offset.northing().floor() as usize,
+        );
+        let tile_base_offset = (
+            tile_base_offset.easting().floor() as usize,
+            tile_base_offset.northing().floor() as usize,
+        );
 
         (0..TILE_SIDE).flat_map(move |tile_i| {
             let mut row = ArrayVec::<Option<&T>, TILE_SIDE>::new();
@@ -113,7 +137,9 @@ impl<T> StairStepGrid<T> {
             let step_i = ((tile_i + tile_base_offset.1) as isize) - (step_base_offset.1 as isize);
 
             let Some(step_i) = usize::try_from(step_i)
-                .ok().filter(|step_i| *step_i < self.widths.len()) else {
+                .ok()
+                .filter(|step_i| *step_i < self.widths.len())
+            else {
                 row.extend(repeat_n(None, TILE_SIDE));
                 return row;
             };
@@ -139,12 +165,16 @@ impl<T> StairStepGrid<T> {
             let tile_columns_after_overlap = TILE_SIDE.strict_sub(tile_j_end);
 
             row.extend(repeat_n(None, tile_j_start));
-            row.extend(self.values.slice(s![step_i, step_j_start..step_j_end]).into_iter().map(Some));
+            row.extend(
+                self.values
+                    .slice(s![step_i, step_j_start..step_j_end])
+                    .into_iter()
+                    .map(Some),
+            );
             row.extend(repeat_n(None, tile_columns_after_overlap));
             row
         })
     }
-
 }
 
 unsafe impl<C: Config, T> SchemaWrite<C> for StairStepGrid<T>
@@ -161,14 +191,12 @@ where
         let wire_widths: Vec<usize> = src.widths.to_vec();
         let wire_offsets: Vec<usize> = src.offsets.to_vec();
         let wire_values: Vec<T::Wire> = src.values.iter().copied().map(T::into_wire).collect();
-        Ok(
-            <usize as SchemaWrite<C>>::size_of(&nrows)? +
-            <usize as SchemaWrite<C>>::size_of(&ncols)? +
-            <Vec<usize> as SchemaWrite<C>>::size_of(&wire_widths)? +
-            <Vec<usize> as SchemaWrite<C>>::size_of(&wire_offsets)? +
-            <NYSCoords2 as SchemaWrite<C>>::size_of(src.base_offset())? +
-            <Vec<T::Wire> as SchemaWrite<C>>::size_of(&wire_values)?
-        )
+        Ok(<usize as SchemaWrite<C>>::size_of(&nrows)?
+            + <usize as SchemaWrite<C>>::size_of(&ncols)?
+            + <Vec<usize> as SchemaWrite<C>>::size_of(&wire_widths)?
+            + <Vec<usize> as SchemaWrite<C>>::size_of(&wire_offsets)?
+            + <NYSCoords2 as SchemaWrite<C>>::size_of(src.base_offset())?
+            + <Vec<T::Wire> as SchemaWrite<C>>::size_of(&wire_values)?)
     }
 
     fn write(mut writer: impl Writer, src: &Self::Src) -> wincode::WriteResult<()> {
@@ -195,7 +223,10 @@ where
 {
     type Dst = StairStepGrid<T>;
 
-    fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> wincode::ReadResult<()> {
+    fn read(
+        mut reader: impl Reader<'de>,
+        dst: &mut MaybeUninit<Self::Dst>,
+    ) -> wincode::ReadResult<()> {
         let nrows = <usize as SchemaRead<'de, C>>::get(reader.by_ref())?;
         let ncols = <usize as SchemaRead<'de, C>>::get(reader.by_ref())?;
         let wire_widths = <Vec<usize> as SchemaRead<'de, C>>::get(reader.by_ref())?;
@@ -209,17 +240,22 @@ where
         let widths = Array1::from_vec(wire_widths);
         let offsets = Array1::from_vec(wire_offsets);
 
-        dst.write(StairStepGrid { values, widths, offsets, base_offset });
+        dst.write(StairStepGrid {
+            values,
+            widths,
+            offsets,
+            base_offset,
+        });
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use ndarray::{array, Array1, Array2};
+    use super::StairStepGrid;
     use crate::types::coords::NYSCoords2;
     use crate::types::tiles::TileId;
-    use super::StairStepGrid;
+    use ndarray::{Array1, Array2, array};
 
     fn make_grid<T: Clone>(
         values: Array2<T>,
@@ -239,8 +275,12 @@ mod tests {
     }
 
     // "500300_00" → SW corner (500000, 300000), NE (500500, 300500)
-    fn tile() -> TileId { TileId::parse("500300_00").unwrap() }
-    fn tile_sw() -> (f64, f64) { (500_000.0, 300_000.0) }
+    fn tile() -> TileId {
+        TileId::parse("500300_00").unwrap()
+    }
+    fn tile_sw() -> (f64, f64) {
+        (500_000.0, 300_000.0)
+    }
 
     // --- rasterize_in_tile ---
 
@@ -344,13 +384,21 @@ mod tests {
 
     #[test]
     fn is_empty_all_zero_widths() {
-        let grid = make_grid(Array2::<i32>::zeros((3, 4)), array![0, 0, 0], array![0, 0, 0]);
+        let grid = make_grid(
+            Array2::<i32>::zeros((3, 4)),
+            array![0, 0, 0],
+            array![0, 0, 0],
+        );
         assert!(grid.is_empty());
     }
 
     #[test]
     fn is_empty_one_nonzero_width() {
-        let grid = make_grid(Array2::<i32>::zeros((3, 4)), array![0, 2, 0], array![0, 0, 0]);
+        let grid = make_grid(
+            Array2::<i32>::zeros((3, 4)),
+            array![0, 2, 0],
+            array![0, 0, 0],
+        );
         assert!(!grid.is_empty());
     }
 
@@ -485,7 +533,10 @@ mod tests {
         let g2 = make_grid(b, array![1], array![7]);
 
         let captured = Cell::new((0usize, 0usize));
-        g1.merge(&g2, |_, _, coords| { captured.set(coords); 0 });
+        g1.merge(&g2, |_, _, coords| {
+            captured.set(coords);
+            0
+        });
 
         // offset_x comes from offsets[0]=7, offset_y is row index 0
         assert_eq!(captured.get(), (7, 0));

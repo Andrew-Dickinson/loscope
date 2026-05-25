@@ -1,24 +1,26 @@
-use std::collections::HashSet;
-use std::fmt::format;
-use derive_getters::Getters;
-use derive_new::new;
-use futures_util::StreamExt;
-use geo::algorithm::line_measures::Distance;
-use geo::{point, Euclidean, Point};
-use rocket::serde::{Deserialize, Serializer};
-use serde::Serialize;
-use typed_floats::tf64::PositiveFinite;
-use uuid::Uuid;
-use wincode::{SchemaRead, SchemaWrite};
-use crate::analysis::fresnel_zone::{compute_fresnel_zone, FresnelZone, FresnelZonePoint};
-use crate::analysis::tiles::{get_intersecting_tiles, TerrainFactory, TerrainGrid};
-use crate::providers::elevation_tile_provider::{CachingElevationTileProvider, ElevationTileProvider};
+use crate::analysis::fresnel_zone::{FresnelZone, FresnelZonePoint, compute_fresnel_zone};
+use crate::analysis::tiles::{TerrainFactory, TerrainGrid, get_intersecting_tiles};
+use crate::providers::elevation_tile_provider::{
+    CachingElevationTileProvider, ElevationTileProvider,
+};
 use crate::providers::obstruction_provider::ObstructionProvider;
 use crate::types::coords::{NYSCoords2, NYSCoords3};
 use crate::types::errors::AssetErr;
 use crate::types::obstructions::ObstructionTypesFilter;
 use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::TileId;
+use derive_getters::Getters;
+use derive_new::new;
+use futures_util::StreamExt;
+use geo::algorithm::line_measures::Distance;
+use geo::{Euclidean, Point, point};
+use rocket::serde::{Deserialize, Serializer};
+use serde::Serialize;
+use std::collections::HashSet;
+use std::fmt::format;
+use typed_floats::tf64::PositiveFinite;
+use uuid::Uuid;
+use wincode::{SchemaRead, SchemaWrite};
 
 const MIN_ANALYSIS_FREQUENCY: f64 = 1_000.;
 const MAX_ANALYSIS_FREQUENCY: f64 = 200_000_000_000.;
@@ -28,22 +30,22 @@ const ALPHA_ZONE_INNER: f64 = 0.6;
 
 const OCCLUSION_DISTANCE_USFT: f64 = 6.0;
 
-#[derive(Serialize,Deserialize,SchemaWrite,SchemaRead,PartialEq)]
+#[derive(Serialize, Deserialize, SchemaWrite, SchemaRead, PartialEq)]
 pub enum ResultStatus {
     Unobstructed,
     PartiallyObstructed, // alpha=1.0 blocked, alpha=0.6 clear
-    Obstructed, // alpha=0.6 blocked
+    Obstructed,          // alpha=0.6 blocked
 }
 
 pub type IntersectionResult = StairStepGrid<PositiveFinite>;
 
-#[derive(new,Serialize,Deserialize,SchemaWrite,SchemaRead,Getters)]
+#[derive(new, Serialize, Deserialize, SchemaWrite, SchemaRead, Getters)]
 pub struct ZoneEvaluation {
     zone: FresnelZone,
     intersection: IntersectionResult,
 }
 
-#[derive(new,Serialize,Deserialize,SchemaWrite,SchemaRead,Getters)]
+#[derive(new, Serialize, Deserialize, SchemaWrite, SchemaRead, Getters)]
 pub struct PointEvaluationInput {
     #[serde(rename = "point_a_nys")]
     point_a: NYSCoords3,
@@ -55,7 +57,7 @@ pub struct PointEvaluationInput {
     obstruction_types: ObstructionTypesFilter,
 }
 
-#[derive(Serialize,Deserialize,SchemaWrite,SchemaRead,new,Getters)]
+#[derive(Serialize, Deserialize, SchemaWrite, SchemaRead, new, Getters)]
 pub struct PointEvaluationOutput {
     id: Uuid,
 
@@ -65,7 +67,7 @@ pub struct PointEvaluationOutput {
     result: ResultStatus,
 }
 
-#[derive(new,Getters,Serialize,Deserialize,SchemaWrite,SchemaRead)]
+#[derive(new, Getters, Serialize, Deserialize, SchemaWrite, SchemaRead)]
 pub struct PointEvaluationOutcome {
     output: PointEvaluationOutput,
 
@@ -79,29 +81,36 @@ pub fn valid_analysis_frequency(frequency_hz: f64) -> bool {
     frequency_hz >= MIN_ANALYSIS_FREQUENCY && frequency_hz <= MAX_ANALYSIS_FREQUENCY
 }
 
-pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(dyn ElevationTileProvider + Send + Sync), obstruction_provider: &(dyn ObstructionProvider + Send + Sync)) -> Result<PointEvaluationOutcome, AssetErr> {
+pub async fn evaluate_points(
+    eval_input: PointEvaluationInput,
+    tile_provider: &(dyn ElevationTileProvider + Send + Sync),
+    obstruction_provider: &(dyn ObstructionProvider + Send + Sync),
+) -> Result<PointEvaluationOutcome, AssetErr> {
     let analysis_id = Uuid::new_v4();
 
     let terrain_factory = TerrainFactory::new(tile_provider, obstruction_provider);
 
-    let endpoints: (Point<f64>, Point<f64>) = (eval_input.point_a().into(), eval_input.point_b().into());
+    let endpoints: (Point<f64>, Point<f64>) =
+        (eval_input.point_a().into(), eval_input.point_b().into());
 
     let zone_full = compute_fresnel_zone(&eval_input, ALPHA_ZONE_FULL);
     let zone_inner = compute_fresnel_zone(&eval_input, ALPHA_ZONE_INNER);
     if zone_inner.is_empty() || zone_full.is_empty() {
         // degenerate case, endpoints are too close together
-        return Err(AssetErr::AssetNotFound(
-            format!(
-                "Invalid coordinate inputs: too close together: {:?} & {:?}",
-                endpoints.0,
-                endpoints.1)
-        ))
+        return Err(AssetErr::AssetNotFound(format!(
+            "Invalid coordinate inputs: too close together: {:?} & {:?}",
+            endpoints.0, endpoints.1
+        )));
     }
 
     let tile_ids = get_intersecting_tiles(&zone_full);
 
-    let terrain_full = terrain_factory.load_terrain_grid(&tile_ids, &zone_full, &eval_input.obstruction_types).await?;
-    let terrain_inner = terrain_factory.load_terrain_grid(&tile_ids, &zone_inner, &eval_input.obstruction_types).await?;
+    let terrain_full = terrain_factory
+        .load_terrain_grid(&tile_ids, &zone_full, &eval_input.obstruction_types)
+        .await?;
+    let terrain_inner = terrain_factory
+        .load_terrain_grid(&tile_ids, &zone_inner, &eval_input.obstruction_types)
+        .await?;
 
     let intersect_fn = |base_offset: &NYSCoords2| {
         let base_offset = base_offset.clone();
@@ -111,8 +120,10 @@ pub async fn evaluate_points(eval_input: PointEvaluationInput, tile_provider: &(
         }
     };
 
-    let intersection_full = zone_full.merge(&terrain_full, intersect_fn(terrain_full.base_offset()));
-    let intersection_inner = zone_inner.merge(&terrain_inner, intersect_fn(terrain_inner.base_offset()));
+    let intersection_full =
+        zone_full.merge(&terrain_full, intersect_fn(terrain_full.base_offset()));
+    let intersection_inner =
+        zone_inner.merge(&terrain_inner, intersect_fn(terrain_inner.base_offset()));
 
     // Safety: these unwraps only panic if the intersections are empty, which should only happen
     // in the degenerate case we Err-ed on above
@@ -149,7 +160,7 @@ fn intersect_inner(
     base_offset: &NYSCoords2,
     zone_point: &FresnelZonePoint,
     terrain: &u16,
-    coords: (usize, usize)
+    coords: (usize, usize),
 ) -> PositiveFinite {
     let top = zone_point.top();
     let bottom = zone_point.bottom();
@@ -170,9 +181,9 @@ fn intersect_inner(
     };
 
     let sample_point = point!(
-            x: coords.0 as f64 + base_offset.easting(),
-            y: coords.1 as f64 + base_offset.northing()
-        );
+        x: coords.0 as f64 + base_offset.easting(),
+        y: coords.1 as f64 + base_offset.northing()
+    );
 
     if Euclidean.distance_within(sample_point, endpoints.0, OCCLUSION_DISTANCE_USFT)
         || Euclidean.distance_within(sample_point, endpoints.1, OCCLUSION_DISTANCE_USFT)
@@ -184,22 +195,26 @@ fn intersect_inner(
 }
 
 impl PointEvaluationOutcome {
-    pub fn into_output(self) -> PointEvaluationOutput { self.output }
+    pub fn into_output(self) -> PointEvaluationOutput {
+        self.output
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use geo::point;
-    use ndarray::Array2;
     use super::*;
-    use std::collections::HashMap;
-    use async_trait::async_trait;
     use crate::providers::elevation_tile_provider::{ElevationTile, ElevationTileProvider};
     use crate::providers::obstruction_provider::ObstructionProvider;
     use crate::types::coords::{GPSCoords3, NYSCoords3};
-    use crate::types::obstructions::{ObstructionId, ObstructionMeta, ObstructionRaster, ObstructionType};
+    use crate::types::obstructions::{
+        ObstructionId, ObstructionMeta, ObstructionRaster, ObstructionType,
+    };
     use crate::types::tiles::TileId;
     use crate::util::coord_conversion::CoordinateConverter;
+    use async_trait::async_trait;
+    use geo::point;
+    use ndarray::Array2;
+    use std::collections::HashMap;
 
     fn gps_to_nys(lat: f64, lon: f64, alt_m: f64) -> NYSCoords3 {
         CoordinateConverter::new().to_nys_plane3(&GPSCoords3::new(lat, lon, alt_m))
@@ -209,19 +224,32 @@ mod tests {
         PointEvaluationInput::new(pa, pb, freq, ObstructionTypesFilter::default())
     }
 
-    struct FlatTileProvider { elevation_inches: u16 }
+    struct FlatTileProvider {
+        elevation_inches: u16,
+    }
 
     struct EmptyObstructionProvider;
 
     #[async_trait]
     impl ObstructionProvider for EmptyObstructionProvider {
-        async fn get_obstruction_ids_for_tile(&self, _tile_id: TileId) -> Result<HashMap<ObstructionType, Vec<ObstructionId>>, AssetErr> {
+        async fn get_obstruction_ids_for_tile(
+            &self,
+            _tile_id: TileId,
+        ) -> Result<HashMap<ObstructionType, Vec<ObstructionId>>, AssetErr> {
             Ok(HashMap::new())
         }
-        async fn get_obstruction_meta(&self, _obstruction_type: &ObstructionType, _obstruction_id: ObstructionId) -> Result<ObstructionMeta, AssetErr> {
+        async fn get_obstruction_meta(
+            &self,
+            _obstruction_type: &ObstructionType,
+            _obstruction_id: ObstructionId,
+        ) -> Result<ObstructionMeta, AssetErr> {
             unreachable!()
         }
-        async fn get_obstruction_raster(&self, _obstruction_type: &ObstructionType, _obstruction_id: ObstructionId) -> Result<ObstructionRaster, AssetErr> {
+        async fn get_obstruction_raster(
+            &self,
+            _obstruction_type: &ObstructionType,
+            _obstruction_id: ObstructionId,
+        ) -> Result<ObstructionRaster, AssetErr> {
             unreachable!()
         }
     }
@@ -230,7 +258,10 @@ mod tests {
     impl ElevationTileProvider for FlatTileProvider {
         async fn get_elevation_tile(&self, tile_id: TileId) -> Result<ElevationTile, AssetErr> {
             let side = usize::from(crate::types::tiles::SUBGRID_TILE_SIDE_LENGTH_USFT);
-            Ok(ElevationTile::new(tile_id, Array2::from_elem((side, side), self.elevation_inches)))
+            Ok(ElevationTile::new(
+                tile_id,
+                Array2::from_elem((side, side), self.elevation_inches),
+            ))
         }
     }
 
@@ -240,28 +271,42 @@ mod tests {
     async fn evaluate_points_flat_zero_terrain_is_unobstructed() {
         // Two antennas at the same height with flat zero terrain — the Fresnel zone
         // sits above the ground, so there should be no obstruction.
-        let provider = FlatTileProvider { elevation_inches: 0 };
+        let provider = FlatTileProvider {
+            elevation_inches: 0,
+        };
         let input = make_input(
             gps_to_nys(40.700, -73.960, 30.0),
             gps_to_nys(40.705, -73.950, 30.0),
             5_000_000_000.0,
         );
-        let outcome = evaluate_points(input, &provider, &EmptyObstructionProvider).await.unwrap();
-        assert!(matches!(outcome.output().result(), ResultStatus::Unobstructed));
+        let outcome = evaluate_points(input, &provider, &EmptyObstructionProvider)
+            .await
+            .unwrap();
+        assert!(matches!(
+            outcome.output().result(),
+            ResultStatus::Unobstructed
+        ));
     }
 
     #[tokio::test]
     async fn evaluate_points_max_terrain_is_obstructed() {
         // Terrain at u16::MAX completely fills the Fresnel zone — both the full and
         // inner zones are blocked, so the result must be Obstructed.
-        let provider = FlatTileProvider { elevation_inches: u16::MAX };
+        let provider = FlatTileProvider {
+            elevation_inches: u16::MAX,
+        };
         let input = make_input(
             gps_to_nys(40.700, -73.960, 30.0),
             gps_to_nys(40.705, -73.950, 30.0),
             5_000_000_000.0,
         );
-        let outcome = evaluate_points(input, &provider, &EmptyObstructionProvider).await.unwrap();
-        assert!(matches!(outcome.output().result(), ResultStatus::Obstructed));
+        let outcome = evaluate_points(input, &provider, &EmptyObstructionProvider)
+            .await
+            .unwrap();
+        assert!(matches!(
+            outcome.output().result(),
+            ResultStatus::Obstructed
+        ));
     }
 
     // --- valid_analysis_frequency ---
@@ -294,7 +339,10 @@ mod tests {
     // --- intersect_inner ---
 
     fn far_endpoints() -> (geo::Point, geo::Point) {
-        (point!(x: -10000.0, y: -10000.0), point!(x: 10000.0, y: 10000.0))
+        (
+            point!(x: -10000.0, y: -10000.0),
+            point!(x: 10000.0, y: 10000.0),
+        )
     }
 
     fn zero_offset() -> NYSCoords2 {

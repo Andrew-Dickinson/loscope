@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use geo::{Euclidean, InterpolatableLine, Length};
 use crate::building::heightmap::RooftopHeightMap;
 use crate::sample_points::point::SamplePoint;
 use crate::types::coords::NYSCoords3;
+use geo::{Euclidean, InterpolatableLine, Length};
+use std::collections::HashMap;
 
 // Sample points on a regular grid, centred in each spacing×spacing cell.
 // Returns (base_pts, cliff_pts). Cliff points share (easting, northing) with a base point
@@ -12,7 +12,7 @@ fn sample_grid(hm: &RooftopHeightMap, spacing: usize) -> (Vec<NYSCoords3>, Vec<N
 
     let heightmap = hm.heightmap();
     let mask = hm.mask();
-    let (w, h) = heightmap.dim();  // (easting_extent, northing_extent)
+    let (w, h) = heightmap.dim(); // (easting_extent, northing_extent)
     let sw_e = *hm.sw_offset().easting();
     let sw_n = *hm.sw_offset().northing();
 
@@ -51,7 +51,11 @@ fn sample_grid(hm: &RooftopHeightMap, spacing: usize) -> (Vec<NYSCoords3>, Vec<N
             if max_nbr_h - h_in > cliff_trigger_in {
                 let n_extra = ((max_nbr_h - h_in) / cliff_step_in) as usize;
                 for k in 1..=n_extra + 1 {
-                    cliff_pts.push(NYSCoords3::new(e, n, (h_in + k as f64 * cliff_step_in) / 12.0));
+                    cliff_pts.push(NYSCoords3::new(
+                        e,
+                        n,
+                        (h_in + k as f64 * cliff_step_in) / 12.0,
+                    ));
                 }
             }
         }
@@ -106,7 +110,10 @@ fn sample_perimeter(hm: &RooftopHeightMap, spacing: f64) -> Vec<NYSCoords3> {
                         }
                         let ne = ei as i64 + dei;
                         let nn = ni as i64 + dni;
-                        if ne >= 0 && ne < w as i64 && nn >= 0 && nn < h as i64
+                        if ne >= 0
+                            && ne < w as i64
+                            && nn >= 0
+                            && nn < h as i64
                             && mask[[ne as usize, nn as usize]]
                         {
                             ei = ne as usize;
@@ -149,12 +156,18 @@ fn cull_and_combine(
             })
         };
         (
-            base.into_iter().filter(|pt| !near_perim(pt)).collect::<Vec<_>>(),
-            cliff.into_iter().filter(|pt| !near_perim(pt)).collect::<Vec<_>>(),
+            base.into_iter()
+                .filter(|pt| !near_perim(pt))
+                .collect::<Vec<_>>(),
+            cliff
+                .into_iter()
+                .filter(|pt| !near_perim(pt))
+                .collect::<Vec<_>>(),
         )
     };
 
-    perim.into_iter()
+    perim
+        .into_iter()
         .chain(surviving_base)
         .chain(surviving_cliff)
         .collect()
@@ -181,11 +194,8 @@ fn apply_mast_offset(pts: Vec<NYSCoords3>, offset: f64) -> (Vec<NYSCoords3>, Vec
         }
         for idx in top_idx.values() {
             let pt = &measurement_pts[*idx];
-            measurement_pts[*idx] = NYSCoords3::new(
-                *pt.easting(),
-                *pt.northing(),
-                *pt.alt_usft() + offset,
-            );
+            measurement_pts[*idx] =
+                NYSCoords3::new(*pt.easting(), *pt.northing(), *pt.alt_usft() + offset);
         }
     }
 
@@ -214,22 +224,21 @@ pub fn sample_points_for_rooftop(
     display_pts
         .iter()
         .zip(measurement_pts.iter())
-        .map(|(dp, mp)| SamplePoint::new(
-            mp.encoded_from_base(&sw_nys),
-            dp.encoded_from_base(&sw_nys),
-        ))
+        .map(|(dp, mp)| {
+            SamplePoint::new(mp.encoded_from_base(&sw_nys), dp.encoded_from_base(&sw_nys))
+        })
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::building::bin_id::BINId;
+    use crate::building::heightmap::RooftopHeightMap;
+    use crate::types::coords::NYSCoords2;
     use approx::assert_abs_diff_eq;
     use geo::polygon;
     use ndarray::Array2;
-    use crate::building::bin_id::BINId;
-    use crate::building::heightmap::{RooftopHeightMap};
-    use crate::types::coords::NYSCoords2;
 
     const SW_E: f64 = 500000.0;
     const SW_N: f64 = 300000.0;
@@ -259,7 +268,9 @@ mod tests {
         )
     }
 
-    fn pt(e: f64, n: f64, z: f64) -> NYSCoords3 { NYSCoords3::new(e, n, z) }
+    fn pt(e: f64, n: f64, z: f64) -> NYSCoords3 {
+        NYSCoords3::new(e, n, z)
+    }
 
     // --- sample_grid ---
 
@@ -313,9 +324,8 @@ mod tests {
         // spacing=10: cliff_trigger=120 in, cliff_step=60 in
         // West sample (ei=5) has neighbour at (ei=15) with h=360, diff=240 > 120 → cliff
         // n_extra = floor(240/60) = 4, points at k=1..5 → z = 15,20,25,30,35 ft
-        let heights = Array2::from_shape_fn((20, 20), |(ei, _ni)| {
-            if ei < 10 { 120u16 } else { 360u16 }
-        });
+        let heights =
+            Array2::from_shape_fn((20, 20), |(ei, _ni)| if ei < 10 { 120u16 } else { 360u16 });
         let hm = make_hm(heights, Array2::from_elem((20, 20), true));
         let (_, cliff) = sample_grid(&hm, 10);
 
@@ -332,7 +342,11 @@ mod tests {
             .collect();
         assert_eq!(cliff_at_first.len(), 5);
         for &expected_z in &[15.0, 20.0, 25.0, 30.0, 35.0] {
-            assert!(cliff_at_first.iter().any(|&z| (z - expected_z).abs() < 1e-9));
+            assert!(
+                cliff_at_first
+                    .iter()
+                    .any(|&z| (z - expected_z).abs() < 1e-9)
+            );
         }
     }
 
@@ -376,8 +390,8 @@ mod tests {
     #[test]
     fn cull_and_combine_removes_points_within_radius() {
         let base = vec![
-            pt(0.0, 0.0, 10.0),      // at perim → culled
-            pt(100.0, 100.0, 10.0),  // far → kept
+            pt(0.0, 0.0, 10.0),     // at perim → culled
+            pt(100.0, 100.0, 10.0), // far → kept
         ];
         let cliff = vec![pt(1.0, 0.0, 20.0)]; // within radius → culled
         let perim = vec![pt(0.0, 0.0, 10.0)];

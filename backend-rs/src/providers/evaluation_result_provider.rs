@@ -1,8 +1,8 @@
-use derive_new::new;
-use uuid::Uuid;
 use crate::analysis::point_evaluation::PointEvaluationOutcome;
 use crate::providers::backends::value_store::ValueStore;
 use crate::types::errors::AssetErr;
+use derive_new::new;
+use uuid::Uuid;
 
 const KEY_PREFIX: &str = "PointEvaluationResult";
 
@@ -19,38 +19,51 @@ impl PointEvaluationResultProvider {
     pub fn put(&self, result: &PointEvaluationOutcome) -> Result<(), AssetErr> {
         self.value_store.put(
             PointEvaluationResultProvider::key(result.output().id()),
-            wincode::config::serialize(result, wincode::config::Configuration::default().disable_preallocation_size_limit())
-                .map_err(|e| AssetErr::AssetContentError(
-                    format!("Error serializing for result_id {}: {e}", result.output().id())
-                ))?
+            wincode::config::serialize(
+                result,
+                wincode::config::Configuration::default().disable_preallocation_size_limit(),
+            )
+            .map_err(|e| {
+                AssetErr::AssetContentError(format!(
+                    "Error serializing for result_id {}: {e}",
+                    result.output().id()
+                ))
+            })?,
         )
     }
 
     pub fn get(&self, result_id: &Uuid) -> Result<PointEvaluationOutcome, AssetErr> {
-        let resp = self.value_store.get(PointEvaluationResultProvider::key(result_id))?;
-        wincode::config::deserialize::<PointEvaluationOutcome, _>(&resp, wincode::config::Configuration::default().disable_preallocation_size_limit())
-            .map_err(|e| AssetErr::AssetContentError(
-                format!("Error deserializing response for result_id {result_id}: {e}")
+        let resp = self
+            .value_store
+            .get(PointEvaluationResultProvider::key(result_id))?;
+        wincode::config::deserialize::<PointEvaluationOutcome, _>(
+            &resp,
+            wincode::config::Configuration::default().disable_preallocation_size_limit(),
+        )
+        .map_err(|e| {
+            AssetErr::AssetContentError(format!(
+                "Error deserializing response for result_id {result_id}: {e}"
             ))
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-    use std::sync::{Arc, Mutex};
-    use ndarray::{Array1, Array2};
-    use uuid::Uuid;
     use super::*;
     use crate::analysis::fresnel_zone::FresnelZonePoint;
     use crate::analysis::point_evaluation::{
-        IntersectionResult, PointEvaluationInput,
-        PointEvaluationOutcome, PointEvaluationOutput, ResultStatus, ZoneEvaluation,
+        IntersectionResult, PointEvaluationInput, PointEvaluationOutcome, PointEvaluationOutput,
+        ResultStatus, ZoneEvaluation,
     };
     use crate::providers::backends::value_store::InMemoryValueStore;
     use crate::types::coords::{NYSCoords2, NYSCoords3};
     use crate::types::obstructions::ObstructionTypesFilter;
     use crate::types::stairstep::StairStepGrid;
+    use ndarray::{Array1, Array2};
+    use std::collections::HashSet;
+    use std::sync::{Arc, Mutex};
+    use uuid::Uuid;
 
     fn empty_zone() -> ZoneEvaluation {
         let base = NYSCoords2::new(0.0, 0.0);
@@ -133,7 +146,10 @@ mod tests {
     impl KeyCapturingStore {
         fn new() -> (Self, Arc<Mutex<Option<String>>>) {
             let captured = Arc::new(Mutex::new(None));
-            let store = Self { inner: InMemoryValueStore::new(), last_put_key: Arc::clone(&captured) };
+            let store = Self {
+                inner: InMemoryValueStore::new(),
+                last_put_key: Arc::clone(&captured),
+            };
             (store, captured)
         }
     }
@@ -165,7 +181,9 @@ mod tests {
     struct CorruptedValueStore;
 
     impl ValueStore for CorruptedValueStore {
-        fn put(&self, _: String, _: Vec<u8>) -> Result<(), AssetErr> { Ok(()) }
+        fn put(&self, _: String, _: Vec<u8>) -> Result<(), AssetErr> {
+            Ok(())
+        }
         fn get(&self, _: String) -> Result<Vec<u8>, AssetErr> {
             Ok(vec![0xFF, 0xFF, 0xFF])
         }

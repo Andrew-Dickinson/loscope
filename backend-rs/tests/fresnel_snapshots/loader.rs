@@ -15,8 +15,8 @@ pub fn load_snapshot(name: &str) -> Snapshot {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/snapshots")
         .join(format!("{name}.bin"));
-    let bytes = std::fs::read(&path)
-        .unwrap_or_else(|e| panic!("failed to read snapshot {path:?}: {e}"));
+    let bytes =
+        std::fs::read(&path).unwrap_or_else(|e| panic!("failed to read snapshot {path:?}: {e}"));
     let mut pos = 0;
 
     macro_rules! read_u32 {
@@ -63,20 +63,45 @@ pub fn load_snapshot(name: &str) -> Snapshot {
     let top = read_u16_vec(&bytes, &mut pos, height * max_width);
     let bottom = read_u16_vec(&bytes, &mut pos, height * max_width);
 
-    Snapshot { height, max_width, x_base_offset, y_base_offset, widths, offsets, top, bottom }
+    Snapshot {
+        height,
+        max_width,
+        x_base_offset,
+        y_base_offset,
+        widths,
+        offsets,
+        top,
+        bottom,
+    }
 }
 
 pub fn assert_matches_snapshot(zone: &FresnelZone, snap: &Snapshot) {
     let base = zone.base_offset();
-    assert_eq!(*base.easting() as i64, snap.x_base_offset, "x_base_offset mismatch");
-    assert_eq!(*base.northing() as i64, snap.y_base_offset, "y_base_offset mismatch");
+    assert_eq!(
+        *base.easting() as i64,
+        snap.x_base_offset,
+        "x_base_offset mismatch"
+    );
+    assert_eq!(
+        *base.northing() as i64,
+        snap.y_base_offset,
+        "y_base_offset mismatch"
+    );
 
     let h = zone.widths().len();
     assert_eq!(h, snap.height, "height mismatch");
 
     for i in 0..h {
-        assert_eq!(zone.widths()[i] as u32, snap.widths[i], "widths[{i}] mismatch");
-        assert_eq!(zone.offsets()[i] as u32, snap.offsets[i], "offsets[{i}] mismatch");
+        assert_eq!(
+            zone.widths()[i] as u32,
+            snap.widths[i],
+            "widths[{i}] mismatch"
+        );
+        assert_eq!(
+            zone.offsets()[i] as u32,
+            snap.offsets[i],
+            "offsets[{i}] mismatch"
+        );
 
         let w = zone.widths()[i];
         for j in 0..w {

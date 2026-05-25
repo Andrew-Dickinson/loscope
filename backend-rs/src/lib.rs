@@ -1,10 +1,11 @@
-#[macro_use] extern crate rocket;
+#[macro_use]
+extern crate rocket;
 
-pub mod types;
-pub mod providers;
-pub mod util;
-pub mod endpoints;
-pub mod building;
-pub mod sample_points;
 pub mod analysis;
+pub mod building;
+pub mod endpoints;
 mod meshdb;
+pub mod providers;
+pub mod sample_points;
+pub mod types;
+pub mod util;
