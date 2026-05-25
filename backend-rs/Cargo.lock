@@ -1797,57 +1797,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fresnel-2"
-version = "0.1.0"
-dependencies = [
- "approx",
- "approx-derive",
- "arrayvec",
- "async-fn-stream",
- "async-trait",
- "aws-config",
- "aws-sdk-s3",
- "aws-smithy-mocks",
- "chrono",
- "derive-getters",
- "derive-new",
- "derive_more",
- "eproj",
- "futures-util",
- "geo",
- "image",
- "kml",
- "maplit",
- "nalgebra",
- "ndarray",
- "openjpeg-sys",
- "pretty_assertions",
- "prettyplease",
- "progenitor",
- "progenitor-client",
- "rand 0.8.6",
- "regress 0.10.5",
- "reqwest",
- "rocket",
- "scopeguard",
- "serde",
- "serde_json",
- "strum",
- "strum_macros",
- "syn 2.0.117",
- "test-temp-dir",
- "tiff",
- "tokio",
- "tokio-rusqlite",
- "typed-path",
- "typed_floats",
- "uuid",
- "wincode",
- "wiremock",
- "wkt",
-]
-
-[[package]]
 name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3011,6 +2960,57 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fae87c125b03c1d2c0150c90365d7d6bcc53fb73a9acaef207d2d065860f062"
 dependencies = [
  "imgref",
+]
+
+[[package]]
+name = "loscope"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "approx-derive",
+ "arrayvec",
+ "async-fn-stream",
+ "async-trait",
+ "aws-config",
+ "aws-sdk-s3",
+ "aws-smithy-mocks",
+ "chrono",
+ "derive-getters",
+ "derive-new",
+ "derive_more",
+ "eproj",
+ "futures-util",
+ "geo",
+ "image",
+ "kml",
+ "maplit",
+ "nalgebra",
+ "ndarray",
+ "openjpeg-sys",
+ "pretty_assertions",
+ "prettyplease",
+ "progenitor",
+ "progenitor-client",
+ "rand 0.8.6",
+ "regress 0.10.5",
+ "reqwest",
+ "rocket",
+ "scopeguard",
+ "serde",
+ "serde_json",
+ "strum",
+ "strum_macros",
+ "syn 2.0.117",
+ "test-temp-dir",
+ "tiff",
+ "tokio",
+ "tokio-rusqlite",
+ "typed-path",
+ "typed_floats",
+ "uuid",
+ "wincode",
+ "wiremock",
+ "wkt",
 ]
 
 [[package]]

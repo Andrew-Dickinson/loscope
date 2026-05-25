@@ -2,10 +2,10 @@
 mod loader;
 
 use loader::{assert_matches_snapshot, load_snapshot};
-use fresnel_2::analysis::fresnel_zone::compute_fresnel_zone;
-use fresnel_2::analysis::point_evaluation::{PointEvaluationInput};
-use fresnel_2::types::coords::NYSCoords3;
-use fresnel_2::types::obstructions::ObstructionTypesFilter;
+use loscope::analysis::fresnel_zone::compute_fresnel_zone;
+use loscope::analysis::point_evaluation::{PointEvaluationInput};
+use loscope::types::coords::NYSCoords3;
+use loscope::types::obstructions::ObstructionTypesFilter;
 
 macro_rules! snapshot_test {
     ($fn_name:ident, $bin:expr, $pa:expr, $pb:expr, $freq:expr, $alpha:expr) => {

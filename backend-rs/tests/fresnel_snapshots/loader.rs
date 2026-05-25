@@ -1,4 +1,4 @@
-use fresnel_2::analysis::fresnel_zone::FresnelZone;
+use loscope::analysis::fresnel_zone::FresnelZone;
 
 pub struct Snapshot {
     pub height: usize,

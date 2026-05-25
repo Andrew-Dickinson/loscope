@@ -1,10 +1,10 @@
-use fresnel_2::endpoints::analysis::{fresnel_kml, get_fresnel_slice_obj, intersection_visualization, map_overview, point_analysis};
-use fresnel_2::endpoints::coords::gps_to_nys;
-use fresnel_2::endpoints::meshdb::resolve_number;
-use fresnel_2::endpoints::rooftop::{render_rooftop, sample_points as sample_points_endpoint};
-use fresnel_2::endpoints::tileview::{get_terrain_obstruction_meta, get_terrain_obstruction_obj, get_terrain_ortho, get_terrain_raster, get_terrain_tile_overview};
-use fresnel_2::providers::Providers;
-use fresnel_2::util::coord_conversion::{init_coord_converter_factory, CoordinateConverter};
+use loscope::endpoints::analysis::{fresnel_kml, get_fresnel_slice_obj, intersection_visualization, map_overview, point_analysis};
+use loscope::endpoints::coords::gps_to_nys;
+use loscope::endpoints::meshdb::resolve_number;
+use loscope::endpoints::rooftop::{render_rooftop, sample_points as sample_points_endpoint};
+use loscope::endpoints::tileview::{get_terrain_obstruction_meta, get_terrain_obstruction_obj, get_terrain_ortho, get_terrain_raster, get_terrain_tile_overview};
+use loscope::providers::Providers;
+use loscope::util::coord_conversion::{init_coord_converter_factory, CoordinateConverter};
 
 #[rocket::get("/healthcheck")]
 fn health_check() -> &'static str {
