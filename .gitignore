@@ -1,0 +1,4 @@
+/frontend-ts/node_modules/
+data/
+*.iml
+.idea/
