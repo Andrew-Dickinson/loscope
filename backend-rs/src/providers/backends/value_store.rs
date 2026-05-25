@@ -1,13 +1,47 @@
 use crate::types::errors::AssetErr;
+use redis::{Commands, RedisError};
 use std::collections::HashMap;
-use std::sync::{Mutex};
+use std::sync::Mutex;
 
 pub trait ValueStore {
     fn put(&self, key: String, value: Vec<u8>) -> Result<(), AssetErr>;
     fn get(&self, key: String) -> Result<Vec<u8>, AssetErr>;
 }
 
-// TODO: Implement redis-based shared cache for cross-container state
+pub struct RedisValueStore {
+    conn: Mutex<redis::Connection>,
+}
+
+impl RedisValueStore {
+    pub fn new(url: &str) -> Result<Self, RedisError> {
+        let client = redis::Client::open(url)?;
+        let conn = client
+            .get_connection()?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+}
+
+impl ValueStore for RedisValueStore {
+    fn put(&self, key: String, value: Vec<u8>) -> Result<(), AssetErr> {
+        self.conn
+            .lock()
+            .map_err(|e| AssetErr::AssetDownloadError(format!("Redis lock error: {e}")))?
+            .set(key, value)
+            .map_err(|e| AssetErr::AssetDownloadError(format!("Redis SET error: {e}")))
+    }
+
+    fn get(&self, key: String) -> Result<Vec<u8>, AssetErr> {
+        let result: Option<Vec<u8>> = self
+            .conn
+            .lock()
+            .map_err(|e| AssetErr::AssetDownloadError(format!("Redis lock error: {e}")))?
+            .get(&key)
+            .map_err(|e| AssetErr::AssetDownloadError(format!("Redis GET error: {e}")))?;
+        result.ok_or_else(|| AssetErr::AssetNotFound(format!("Key {} not found", key)))
+    }
+}
 
 pub struct InMemoryValueStore {
     map: Mutex<HashMap<String, Vec<u8>>>,

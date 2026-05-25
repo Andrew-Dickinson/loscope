@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 derive-getters = "0.5.0"
+redis = "0.27"
 image = "0.25.10"
 rocket = { version = "0.5.1", features = ["json"] }
 serde = "1.0.228"

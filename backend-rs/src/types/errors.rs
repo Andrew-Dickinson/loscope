@@ -1,6 +1,7 @@
 use rocket::http::Status;
 use std::fmt::Debug;
 use std::num::ParseIntError;
+use redis::RedisError;
 use strum_macros::Display;
 
 #[derive(Debug)]
@@ -41,6 +42,7 @@ pub enum AssetErr {
 #[derive(Debug)]
 pub enum ProviderInitErr {
     RusqliteError(tokio_rusqlite::Error),
+    RedisError(RedisError),
     AssetPrefetchError(AssetErr),
 }
 

@@ -12,12 +12,16 @@ services:
       NYC_DOB_SQLITE_DB_FILE: /data/nyc_dob.sqlite
       MESHDB_API_TOKEN: ${MESHDB_API_TOKEN}
       AWS_PROFILE: ${AWS_PROFILE}
+      REDIS_URL: redis://redis:6379
     volumes:
       - ~/.aws:/root/.aws
       - asset-cache:/cache
       - ${NYC_DOB_SQLITE_DB_FILE}:/data/nyc_dob.sqlite:ro
     ports:
       - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/healthcheck"]
       interval: 10s
@@ -32,6 +36,16 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
   asset-cache:

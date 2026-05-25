@@ -7,9 +7,13 @@ pub const NYC_DOB_SQLITE_DB_FILE: &str = "NYC_DOB_SQLITE_DB_FILE";
 
 pub const MESHDB_API_TOKEN: &str = "MESHDB_API_TOKEN";
 
+pub const REDIS_URL: &str = "REDIS_URL";
+
 pub fn expect_env(env_var_name: &str) -> String {
+    get_env(env_var_name).unwrap_or_else(|| panic!("Please set env var {}", env_var_name))
+}
+pub fn get_env(env_var_name: &str) -> Option<String> {
     std::env::var(env_var_name)
         .ok()
         .and_then(|value| if value.is_empty() { None } else { Some(value) })
-        .unwrap_or_else(|| panic!("Please set env var {}", env_var_name))
 }

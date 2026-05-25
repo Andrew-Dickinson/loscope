@@ -1,5 +1,5 @@
 use crate::providers::backends::string_provider::NYCDOBSqliteStringProvider;
-use crate::providers::backends::value_store::InMemoryValueStore;
+use crate::providers::backends::value_store::{InMemoryValueStore, RedisValueStore, ValueStore};
 use crate::providers::elevation_tile_provider::{
     CachingElevationTileProvider, ElevationTileProvider,
 };
@@ -9,10 +9,7 @@ use crate::providers::meshdb_provider::ProgenitorMeshDBProvider;
 use crate::providers::obstruction_provider::{CachingObstructionProvider, ObstructionProvider};
 use crate::providers::ortho_provider::{CachingOrthoProvider, OrthoProvider};
 use crate::types::errors::ProviderInitErr;
-use crate::util::env::{
-    LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, LOS_OBSTRUCTION_S3_PREFIX, LOS_ORTHOS_S3_PREFIX,
-    LOS_TERRAIN_TILE_S3_PREFIX, MESHDB_API_TOKEN, NYC_DOB_SQLITE_DB_FILE, expect_env,
-};
+use crate::util::env::{LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, LOS_OBSTRUCTION_S3_PREFIX, LOS_ORTHOS_S3_PREFIX, LOS_TERRAIN_TILE_S3_PREFIX, MESHDB_API_TOKEN, NYC_DOB_SQLITE_DB_FILE, expect_env, get_env, REDIS_URL};
 use backends::asset_fetcher::{AssetType, S3AssetFetcher};
 use backends::fs_cache::{AssetProvider, CachingAssetProvider};
 use derive_getters::Getters;
@@ -79,6 +76,16 @@ impl Providers {
         let asset_provider: Arc<dyn AssetProvider + Send + Sync> =
             Arc::new(CachingAssetProvider::new(asset_fetcher, cache_root));
 
+        let value_store: Box<dyn ValueStore + Send + Sync> =
+            if let Some(redis_url) = get_env(REDIS_URL) {
+                println!("Found {} of {}, using for analysis state backend", REDIS_URL, redis_url);
+                Box::new(RedisValueStore::new(redis_url.as_str())
+                    .map_err(ProviderInitErr::RedisError)?)
+            } else {
+                println!("{} not set, using process memory for analysis state backend", REDIS_URL);
+                Box::new(InMemoryValueStore::new())
+            };
+
         Ok(Self {
             ortho_provider: Box::new(CachingOrthoProvider::new(Arc::clone(&asset_provider))),
             elevation_tile_provider: Box::new(CachingElevationTileProvider::new(Arc::clone(
@@ -96,9 +103,7 @@ impl Providers {
                     .await
                     .map_err(ProviderInitErr::AssetPrefetchError)?,
             ),
-            point_eval_result_provider: PointEvaluationResultProvider::new(Box::new(
-                InMemoryValueStore::new(),
-            )),
+            point_eval_result_provider: PointEvaluationResultProvider::new(value_store),
             meshdb_provider: ProgenitorMeshDBProvider::new(expect_env(MESHDB_API_TOKEN)),
         })
     }
