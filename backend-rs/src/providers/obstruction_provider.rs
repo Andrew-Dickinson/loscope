@@ -5,9 +5,8 @@ use crate::types::obstructions::{
     ObstructionId, ObstructionMeta, ObstructionRaster, ObstructionType,
 };
 use crate::types::tiles::TileId;
-use derive_new::new;
 use std::collections::HashMap;
-use std::io::{BufReader, Read};
+use std::io::{BufReader};
 use std::sync::Arc;
 
 #[async_trait]

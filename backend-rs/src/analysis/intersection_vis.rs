@@ -1,5 +1,5 @@
 use crate::analysis::png_encoder;
-use image::{DynamicImage, ImageBuffer, Rgba};
+use image::{DynamicImage, ImageBuffer};
 use ndarray::Array2;
 use typed_floats::tf64::PositiveFinite;
 

@@ -3,7 +3,7 @@ use crate::providers::backends::asset_fetcher::AssetType;
 use crate::providers::backends::string_provider::StringProvider;
 use crate::types::errors::AssetErr;
 use derive_new::new;
-use geo::{Polygon, polygon};
+use geo::{Polygon};
 use wkt::TryFromWkt;
 
 #[async_trait]

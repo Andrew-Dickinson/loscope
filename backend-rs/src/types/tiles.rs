@@ -3,8 +3,8 @@ use crate::types::errors::TileParseErr;
 use crate::types::errors::TileParseErr::{InvalidLASTileId, InvalidSubgrid};
 use derive_getters::Getters;
 use geo::{Coord, Rect, coord};
-use rocket::serde::de::{Error, SeqAccess, Visitor};
-use rocket::serde::{Deserializer, Serializer, de};
+use rocket::serde::de::{Error, Visitor};
+use rocket::serde::{Deserializer, Serializer};
 use serde::de::Unexpected;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -775,7 +775,7 @@ mod tests {
     #[test]
     fn from_contained_point_example() {
         // SW corner of a tile belongs to that tile
-        let tile = TileId::parse("982182_00").unwrap();
+        let _tile = TileId::parse("982182_00").unwrap();
         let result = TileId::from_contained_point(&NYSCoords2::new(982634.0, 182501.0));
         assert_eq!(result.to_string(), "982182_00");
     }

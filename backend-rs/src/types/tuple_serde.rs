@@ -1,8 +1,6 @@
-use crate::types::coords::{NYSCoords2, NYSCoords3};
 use rocket::serde::de::{SeqAccess, Visitor};
-use rocket::serde::json::serde_json;
 use rocket::serde::ser::SerializeTuple;
-use rocket::serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use rocket::serde::{Serializer, de};
 use std::fmt;
 
 pub struct CoordsVisitor3;
@@ -73,6 +71,7 @@ pub fn serialize_tuple3<S: Serializer>(
 mod tests {
     use super::*;
     use rocket::serde::json::serde_json;
+    use serde::{Deserializer, Serialize};
 
     // Thin wrappers so we can call serde_json::{to_string, from_str} on the functions under test.
     #[derive(Serialize)]

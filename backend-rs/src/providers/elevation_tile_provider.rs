@@ -1,7 +1,7 @@
 use crate::providers::backends::asset_fetcher::AssetType;
 use crate::providers::backends::fs_cache::AssetProvider;
 use crate::types::errors::AssetErr;
-use crate::types::tiles::{SUBGRID_TILE_SIDE_LENGTH_USFT, SubgridId, TileId};
+use crate::types::tiles::{SUBGRID_TILE_SIDE_LENGTH_USFT, TileId};
 use derive_getters::Getters;
 use derive_new::new;
 use ndarray::Array2;
@@ -347,7 +347,7 @@ mod tests {
 
         async fn list_assets_of_type(
             &self,
-            asset_type: AssetType,
+            _asset_type: AssetType,
         ) -> Result<Vec<String>, AssetErr> {
             panic!("MockAssetProvider::list_assets_of_type");
         }

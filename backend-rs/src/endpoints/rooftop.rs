@@ -1,20 +1,15 @@
 use crate::building::bin_id::BINId;
-use crate::building::heightmap::{RooftopHeightMapFactory, get_intersecting_tiles};
+use crate::building::heightmap::{RooftopHeightMapFactory};
 use crate::providers::Providers;
 use crate::sample_points::point::SamplePoints;
 use crate::sample_points::sample_grid::sample_points_for_rooftop;
-use crate::types::coords::{GPSCoords3, NYSCoords3};
-use crate::types::errors::AssetErr;
-use futures_util::{Stream, StreamExt};
-use rocket::http::{ContentType, MediaType, Status};
-use rocket::response::Debug;
+use futures_util::{StreamExt};
+use rocket::http::{ContentType, Status};
 use rocket::response::stream::TextStream;
 use rocket::serde::json::Json;
-use rocket::{Response, State};
+use rocket::{State};
 use serde::Deserialize;
-use std::pin::Pin;
 use std::str::FromStr;
-use wkt::ToWkt;
 
 #[get("/render/<bin_id>")]
 pub async fn render_rooftop(

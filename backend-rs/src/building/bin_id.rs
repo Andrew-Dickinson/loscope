@@ -1,5 +1,4 @@
 use crate::types::errors::BINParseError;
-use crate::types::tiles::TileId;
 use arrayvec::ArrayString;
 use rocket::serde::de::{Error, Unexpected, Visitor};
 use rocket::serde::{Deserialize, Deserializer, Serialize, Serializer};

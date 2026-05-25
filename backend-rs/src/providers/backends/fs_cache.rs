@@ -3,8 +3,8 @@ use crate::types::errors::AssetErr;
 use derive_new::new;
 use rand::Rng;
 use std::fs;
-use std::fs::{File, FileType};
-use std::path::{Path, PathBuf};
+use std::fs::{File};
+use std::path::{PathBuf};
 use typed_path::Utf8UnixPath;
 
 #[async_trait]
@@ -136,7 +136,7 @@ mod tests {
             }
         }
 
-        async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
+        async fn list_assets(&self, _asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
             panic!("MockAssetFetcher::list_assets")
         }
     }
@@ -188,7 +188,7 @@ mod tests {
             Ok(())
         }
 
-        async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
+        async fn list_assets(&self, _asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
             panic!("DelayedMockFetcher::list_assets");
         }
     }

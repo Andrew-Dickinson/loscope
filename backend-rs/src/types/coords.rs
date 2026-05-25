@@ -7,9 +7,7 @@ use derive_getters::Getters;
 use derive_new::new;
 use geo::Point;
 use rocket::serde::{Deserializer, Serializer};
-use serde::de::{SeqAccess, Visitor};
-use serde::ser::SerializeTuple;
-use serde::{Deserialize, Serialize, de};
+use serde::{Deserialize, Serialize};
 use wincode::{SchemaRead, SchemaWrite};
 
 pub const MIN_NYS_COORD_VALUE: f64 = 0.0;

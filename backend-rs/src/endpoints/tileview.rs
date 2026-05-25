@@ -1,10 +1,7 @@
-use crate::analysis::fresnel_zone_obj::stream_fresnel_tile_slice_as_obj;
 use crate::providers::Providers;
 use crate::providers::ortho_provider::OrthoProvider;
-use crate::types::coords::NYSCoords3;
-use crate::types::errors::AssetErr;
 use crate::types::obstructions::{ObstructionId, ObstructionMeta, ObstructionType};
-use crate::types::tiles::{LAS_TILE_SIDE_LENGTH_USFT, SUBGRID_TILE_SIDE_LENGTH_USFT, TileId};
+use crate::types::tiles::{SUBGRID_TILE_SIDE_LENGTH_USFT, TileId};
 use futures_util::StreamExt;
 use image::ImageFormat;
 use rocket::State;
@@ -14,7 +11,6 @@ use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Cursor;
-use uuid::Uuid;
 
 #[derive(Responder)]
 #[response(status = 200, content_type = "image/jpeg")]

@@ -121,7 +121,7 @@ mod tests {
 
     #[tokio::test]
     async fn header_lines_are_present() {
-        let hmap = make_hmap(vec![], vec![], (0, 0));
+        let _hmap = make_hmap(vec![], vec![], (0, 0));
         // 0-size array would panic the assert in the function, use 1x1 all-false instead
         let hmap = make_hmap(vec![0u16], vec![false], (1, 1));
         let obj = collect(&hmap).await;

@@ -8,15 +8,11 @@ use crate::types::obstructions::{
 };
 use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::{SUBGRID_TILE_SIDE_LENGTH_USFT, TileId};
-use derive_getters::Getters;
 use derive_new::new;
 use futures_util::{StreamExt, TryStreamExt, stream};
-use geo::Convert;
-use ndarray::{Array1, Array2, ArrayView2, s};
-use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
+use ndarray::{Array2, ArrayView2, s};
+use std::collections::{HashSet};
 use std::isize;
-use std::ops::Sub;
 
 const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_TILES: usize = 10;
 const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_OBSTRUCTIONS: usize = 30;
@@ -229,7 +225,7 @@ mod test {
     use async_trait::async_trait;
     use maplit::{btreeset, hashset};
     use ndarray::{Array1, Array2, array};
-    use pretty_assertions::{assert_eq, assert_ne};
+    use pretty_assertions::{assert_eq};
     use std::collections::{BTreeSet, HashMap, HashSet};
     use std::io::Cursor;
     use std::iter::repeat;

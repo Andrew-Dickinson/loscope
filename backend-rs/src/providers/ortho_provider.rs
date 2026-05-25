@@ -5,7 +5,6 @@ use crate::types::tiles::{LAS_TILE_SIDE_LENGTH_USFT, TileId};
 use crate::util::openjpg2k::decode_jp2_region;
 use derive_new::new;
 use image::DynamicImage;
-use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;
 
@@ -116,7 +115,7 @@ mod tests {
 
     #[async_trait]
     impl AssetProvider for MockAssetProvider {
-        fn get_local_asset_path(&self, asset_type: AssetType, asset_id: &str) -> PathBuf {
+        fn get_local_asset_path(&self, _asset_type: AssetType, _asset_id: &str) -> PathBuf {
             panic!("Not implemented")
         }
 
@@ -132,7 +131,7 @@ mod tests {
 
         async fn list_assets_of_type(
             &self,
-            asset_type: AssetType,
+            _asset_type: AssetType,
         ) -> Result<Vec<String>, AssetErr> {
             panic!("DelayedMockFetcher::list_assets_of_type");
         }

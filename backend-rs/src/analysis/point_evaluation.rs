@@ -1,7 +1,7 @@
 use crate::analysis::fresnel_zone::{FresnelZone, FresnelZonePoint, compute_fresnel_zone};
-use crate::analysis::tiles::{TerrainFactory, TerrainGrid, get_intersecting_tiles};
+use crate::analysis::tiles::{TerrainFactory, get_intersecting_tiles};
 use crate::providers::elevation_tile_provider::{
-    CachingElevationTileProvider, ElevationTileProvider,
+    ElevationTileProvider,
 };
 use crate::providers::obstruction_provider::ObstructionProvider;
 use crate::types::coords::{NYSCoords2, NYSCoords3};
@@ -14,10 +14,9 @@ use derive_new::new;
 use futures_util::StreamExt;
 use geo::algorithm::line_measures::Distance;
 use geo::{Euclidean, Point, point};
-use rocket::serde::{Deserialize, Serializer};
+use rocket::serde::{Deserialize};
 use serde::Serialize;
 use std::collections::HashSet;
-use std::fmt::format;
 use typed_floats::tf64::PositiveFinite;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};

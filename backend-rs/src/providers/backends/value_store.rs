@@ -1,7 +1,6 @@
 use crate::types::errors::AssetErr;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use uuid::Uuid;
+use std::sync::{Mutex};
 
 pub trait ValueStore {
     fn put(&self, key: String, value: Vec<u8>) -> Result<(), AssetErr>;

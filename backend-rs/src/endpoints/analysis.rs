@@ -10,13 +10,11 @@ use crate::types::tiles::TileId;
 use crate::util::coord_conversion::with_coord_converter;
 use futures_util::StreamExt;
 use kml::Kml;
-use nalgebra::convert;
 use rocket::http::{ContentType, Header, Status};
 use rocket::response::Responder;
 use rocket::response::stream::TextStream;
 use rocket::serde::json::Json;
-use rocket::{Response, State};
-use typed_floats::tf64::PositiveFinite;
+use rocket::{State};
 use uuid::Uuid;
 
 #[derive(Responder)]

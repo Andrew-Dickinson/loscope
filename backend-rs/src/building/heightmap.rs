@@ -2,16 +2,13 @@ use crate::building::bin_id::BINId;
 use crate::providers::elevation_tile_provider::ElevationTileProvider;
 use crate::providers::footprint_provider::FootprintProvider;
 use crate::types::coords::{NYSCoords2, valid_nys_coordinate};
-use crate::types::errors::{AssetErr, BINParseError};
+use crate::types::errors::{AssetErr};
 use crate::types::tiles::{SUBGRID_TILE_SIDE_LENGTH_USFT, TileId};
-use arrayvec::ArrayString;
 use derive_getters::Getters;
 use derive_new::new;
 use geo::{BoundingRect, Buffer, Contains, Convert, Intersects, Polygon, Rect, point};
 use ndarray::{Array2, Zip, s};
 use rocket::http::Status;
-use rocket::serde::{Deserializer, Serializer};
-use serde::{Deserialize, Serialize};
 use std::cmp::{max, min};
 use std::convert::TryInto;
 

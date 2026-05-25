@@ -5,7 +5,6 @@ use crate::util::coord_conversion::with_coord_converter;
 use derive_getters::Getters;
 use derive_new::new;
 use rocket::serde::{Deserialize, Serialize};
-use std::cmp::PartialEq;
 
 #[derive(new, Serialize, Deserialize)]
 pub struct TileResult {

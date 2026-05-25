@@ -1,4 +1,3 @@
-use derive_getters::Getters;
 
 #[inline]
 fn sin_of_atan(x: f64) -> f64 {

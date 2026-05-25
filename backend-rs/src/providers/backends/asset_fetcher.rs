@@ -5,7 +5,7 @@ use derive_new::new;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 use strum_macros::{AsRefStr, Display};
 use tokio::fs;
 use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
@@ -141,6 +141,7 @@ impl AssetFetcher for S3AssetFetcher {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use super::*;
     use crate::types::errors::AssetErr;
     use aws_sdk_s3::operation::get_object::{GetObjectError, GetObjectOutput};
