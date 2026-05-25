@@ -20,8 +20,9 @@ use tiff::decoder::{Decoder, DecodingResult};
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
 
-#[derive(SchemaWrite, SchemaRead)]
+#[derive(SchemaWrite, SchemaRead,Default)]
 pub enum ObstructionTypesFilter {
+    #[default]
     All,
     Specific(Vec<ObstructionType>),
 }
@@ -30,14 +31,8 @@ impl ObstructionTypesFilter {
     pub fn includes(&self, type_: &ObstructionType) -> bool {
         match self {
             ObstructionTypesFilter::All => true,
-            ObstructionTypesFilter::Specific(allowed_types) => allowed_types.contains(&type_),
+            ObstructionTypesFilter::Specific(allowed_types) => allowed_types.contains(type_),
         }
-    }
-}
-
-impl Default for ObstructionTypesFilter {
-    fn default() -> ObstructionTypesFilter {
-        ObstructionTypesFilter::All
     }
 }
 
@@ -148,7 +143,7 @@ struct ObstructionMetaDeHelper {
     #[serde(rename = "obstruction_id")]
     id: ObstructionId,
     #[serde(rename = "obstruction_type")]
-    type_: String,
+    _type: String,
     attributes: HashMap<String, AttributeValue>,
     #[serde(rename = "offset_nys")]
     sw_offset: Option<NYSCoords2>,
@@ -171,7 +166,7 @@ impl ObstructionMeta {
         };
         Ok(ObstructionMeta {
             id: h.id,
-            type_: type_,
+            type_,
             attributes: h.attributes,
             sw_offset,
             tile_ids: h.tile_ids,
@@ -213,7 +208,7 @@ impl ObstructionMeta {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,new)]
 pub struct ObstructionRaster {
     // Values are in inches above the NY SP Long Island datum,
     // axes are [easting_local, northing_local] (add sw_offset to get global position)
@@ -222,9 +217,6 @@ pub struct ObstructionRaster {
 }
 
 impl ObstructionRaster {
-    pub(crate) fn new(heightmap: Array2<u16>) -> Self {
-        ObstructionRaster { heightmap }
-    }
 
     pub fn heightmap(&self) -> &Array2<u16> {
         &self.heightmap
@@ -253,8 +245,7 @@ impl ObstructionRaster {
             }
 
             if let DecodingResult::U16(image_data) = image_data {
-                Ok(Array2::from_shape_vec((height, width), image_data)
-                    .or_else(|arr_err| Err(Box::new(arr_err)))?)
+                Ok(Array2::from_shape_vec((height, width), image_data).map_err(Box::new)?)
             } else {
                 Err(Box::new(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -263,11 +254,9 @@ impl ObstructionRaster {
             }
         };
 
-        let image_data = inner().or_else(|err| {
-            Err(AssetErr::AssetContentError(format!(
+        let image_data = inner().map_err(|err| AssetErr::AssetContentError(format!(
                 "Error parsing obstruction tiff for id {obstruction_id}: {err}"
-            )))
-        })?;
+            )))?;
 
         Ok(ObstructionRaster {
             heightmap: image_data,
@@ -333,7 +322,6 @@ impl ObstructionRaster {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket::yansi::Paint;
     use std::io::Cursor;
 
     const LEGACY_PAYLOAD: &str = r#"{

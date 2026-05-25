@@ -12,7 +12,6 @@ use derive_new::new;
 use futures_util::{StreamExt, TryStreamExt, stream};
 use ndarray::{Array2, ArrayView2, s};
 use std::collections::{HashSet};
-use std::isize;
 
 const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_TILES: usize = 10;
 const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_OBSTRUCTIONS: usize = 30;
@@ -228,7 +227,6 @@ mod test {
     use pretty_assertions::{assert_eq};
     use std::collections::{BTreeSet, HashMap, HashSet};
     use std::io::Cursor;
-    use std::iter::repeat;
 
     // --- bilt_tile helpers ---
 
@@ -559,7 +557,7 @@ mod test {
     fn test_get_intersecting_tiles_stairstepping_excludes_corners() {
         let zone = FresnelZone::new(
             Array2::<(u16, u16)>::default((5, 2500)).mapv_into_any(FresnelZonePoint::from),
-            Array1::from_iter(repeat(5).take(2500)),
+            Array1::from_iter(std::iter::repeat_n(5, 2500)),
             Array1::from_iter((0..).step_by(1).take(2500)),
             // 1002500,245000
             NYSCoords2::new(1002500., 245000.),
@@ -711,7 +709,7 @@ mod test {
 
         for i in 0..500usize {
             let row = hv.row(i);
-            if i < 100 || i >= 300 {
+            if !(100..300).contains(&i) {
                 assert!(
                     row.iter().all(|&v| v == 0),
                     "row {i}: outside northing footprint, should be zero"
@@ -965,7 +963,7 @@ mod test {
 
         for i in 0..500usize {
             let row = result.values().row(i);
-            if i < 100 || i >= 300 {
+            if !(100..300).contains(&i) {
                 assert!(
                     row.iter().all(|&v| v == 10),
                     "row {i}: outside obstruction northing, should be terrain"

@@ -67,7 +67,7 @@ impl<'a> RooftopHeightMapFactory<'a> {
         let footprint = self.footprint_provider.get_footprint(bin_id).await?;
         let (intersecting_tiles, poly_bounds) = get_intersecting_tiles(&footprint)?;
 
-        if intersecting_tiles.len() == 0 {
+        if intersecting_tiles.is_empty() {
             return Err(HeightMapCreateErr::NoTiles(format!(
                 "No preprocessed tiles intersect the specified bin: {bin_id:?}"
             )));
@@ -272,12 +272,12 @@ pub fn get_intersecting_tiles(
             if cursor_e > e {
                 break;
             }
-            cursor_e = cursor_e + subgrid_tile_side_length_usft_f64;
+            cursor_e += subgrid_tile_side_length_usft_f64;
         }
         if cursor_n > n {
             break;
         }
-        cursor_n = cursor_n + subgrid_tile_side_length_usft_f64;
+        cursor_n += subgrid_tile_side_length_usft_f64;
     }
 
     Ok((intersecting_tiles, bounding_rect))

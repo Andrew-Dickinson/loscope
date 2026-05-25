@@ -260,16 +260,16 @@ mod tests {
 
         // Top face at z=20.000 should have all four corners of [0,1]×[0,1]
         assert!(
-            vertices.iter().any(|&v| v == "v 0 0 20.000"),
+            vertices.contains(&"v 0 0 20.000"),
             "top corner missing; got {:?}",
             &vertices[..4]
         );
-        assert!(vertices.iter().any(|&v| v == "v 1 0 20.000"));
-        assert!(vertices.iter().any(|&v| v == "v 1 1 20.000"));
-        assert!(vertices.iter().any(|&v| v == "v 0 1 20.000"));
+        assert!(vertices.contains(&"v 1 0 20.000"));
+        assert!(vertices.contains(&"v 1 1 20.000"));
+        assert!(vertices.contains(&"v 0 1 20.000"));
 
         // Bottom face at z=0.000
-        assert!(vertices.iter().any(|&v| v == "v 0 0 0.000"));
+        assert!(vertices.contains(&"v 0 0 0.000"));
     }
 
     #[tokio::test]

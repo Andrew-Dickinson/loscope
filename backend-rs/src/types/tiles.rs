@@ -77,7 +77,7 @@ impl LASTileId {
             return Err(InvalidLASTileId);
         }
 
-        if input_str.len() < 1 || input_str.len() > 6 {
+        if input_str.is_empty() || input_str.len() > 6 {
             return Err(InvalidLASTileId);
         }
 
@@ -148,7 +148,7 @@ impl LASTileId {
     // below `usft`. Tiles repeat every 2500 usft in a 4-step cycle (→ mod 0, 2, 5, 7).
     fn usft_to_component(usft: f64) -> u16 {
         assert!(
-            usft >= 0.0 && usft <= MAX_NYS_COORD_VALUE,
+            (0.0..=MAX_NYS_COORD_VALUE).contains(&usft),
             "Invalid value for coord conversion {}",
             usft
         );

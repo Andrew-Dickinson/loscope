@@ -69,8 +69,7 @@ pub async fn point_analysis(
         .map_err(|err| {
             eprintln!("{:?}", err);
             err
-        })
-        .or_else(|_| Err(Status::InternalServerError))?;
+        }).map_err(|_| Status::InternalServerError)?;
 
     Ok(Json(result.into_output()))
 }
@@ -92,7 +91,7 @@ pub async fn intersection_visualization(
     providers: &State<Providers>,
 ) -> Result<PngImage, Status> {
     let analysis_id = Uuid::parse_str(analysis_id).map_err(|_| Status::BadRequest)?;
-    let Ok(tile_id) = TileId::parse(&tile_id) else {
+    let Ok(tile_id) = TileId::parse(tile_id) else {
         return Err(Status::BadRequest);
     };
     let analysis_outcome = providers.point_eval_result_provider().get(&analysis_id)?;
@@ -116,7 +115,7 @@ pub async fn get_fresnel_slice_obj(
     providers: &State<Providers>,
 ) -> Result<(ContentType, TextStream![String]), Status> {
     let analysis_id = Uuid::parse_str(analysis_id).map_err(|_| Status::BadRequest)?;
-    let Ok(tile_id) = TileId::parse(&tile_id) else {
+    let Ok(tile_id) = TileId::parse(tile_id) else {
         return Err(Status::BadRequest);
     };
 

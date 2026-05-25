@@ -194,7 +194,7 @@ pub fn tile_intersection_to_img(
 pub fn tile_intersection_to_png(intersection: Array2<Option<&PositiveFinite>>) -> Option<Vec<u8>> {
     if intersection
         .iter()
-        .all(|cell| cell.map_or(true, |v| *v == 0.0))
+        .all(|cell| cell.is_none_or(|v| *v == 0.0))
     {
         return None;
     }

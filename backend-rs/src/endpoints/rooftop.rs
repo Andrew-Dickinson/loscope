@@ -9,7 +9,6 @@ use rocket::response::stream::TextStream;
 use rocket::serde::json::Json;
 use rocket::{State};
 use serde::Deserialize;
-use std::str::FromStr;
 
 #[get("/render/<bin_id>")]
 pub async fn render_rooftop(
@@ -77,7 +76,7 @@ pub async fn sample_points(
             .map(|spacing| {
                 sample_points_for_rooftop(&heightmap, sample_config.mast_offset_ft, spacing)
             })
-            .unwrap_or(Vec::new()),
+            .unwrap_or_default(),
         heightmap.sw_offset().clone(),
     )))
 }

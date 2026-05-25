@@ -1,5 +1,4 @@
 use crate::providers::Providers;
-use crate::providers::ortho_provider::OrthoProvider;
 use crate::types::obstructions::{ObstructionId, ObstructionMeta, ObstructionType};
 use crate::types::tiles::{SUBGRID_TILE_SIDE_LENGTH_USFT, TileId};
 use futures_util::StreamExt;
@@ -33,7 +32,7 @@ pub async fn get_terrain_tile_overview(
     tile_id: &str,
     providers: &State<Providers>,
 ) -> Result<Json<TerrainTileOverview>, Status> {
-    let Ok(tile_id) = TileId::parse(&tile_id) else {
+    let Ok(tile_id) = TileId::parse(tile_id) else {
         return Err(Status::BadRequest);
     };
 
@@ -50,7 +49,7 @@ pub async fn get_terrain_raster(
     tile_id: &str,
     providers: &State<Providers>,
 ) -> Result<TiffImage, Status> {
-    let Ok(tile_id) = TileId::parse(&tile_id) else {
+    let Ok(tile_id) = TileId::parse(tile_id) else {
         return Err(Status::BadRequest);
     };
     // TODO: Would it be better to use a CDN style direct browser file access for this?
@@ -81,7 +80,7 @@ pub async fn get_terrain_obstruction_meta(
         .obstruction_provider()
         .get_obstruction_meta(&obstruction_type, obstruction_id)
         .await
-        .map(|o| Json(o.into()))?)
+        .map(Json)?)
 }
 
 #[get("/terrain/obstructionObj/<obstruction_type>/<obstruction_id>/<tile_id>")]
@@ -136,7 +135,7 @@ pub async fn get_terrain_ortho(
     // TODO: Would it be better to use a CDN style direct browser file access for this?
     //   Especially since the requests will be balanced across many workers, which may or may
     //   not have shared cache storage
-    let Ok(tile_id) = TileId::parse(&tile_id) else {
+    let Ok(tile_id) = TileId::parse(tile_id) else {
         return Err(Status::BadRequest);
     };
 

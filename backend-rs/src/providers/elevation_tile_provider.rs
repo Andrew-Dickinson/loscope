@@ -12,7 +12,6 @@ use std::sync::Arc;
 use tiff::TiffError;
 use tiff::decoder::{Decoder, DecodingResult};
 use tiff::encoder::{TiffEncoder, colortype};
-use tokio_rusqlite::fallible_iterator::FallibleIterator;
 
 #[derive(new, Debug, Getters)]
 pub struct ElevationTile {
@@ -65,8 +64,7 @@ impl ElevationTile {
             }
 
             if let DecodingResult::U16(image_data) = image_data {
-                Ok(Array2::from_shape_vec((height, width), image_data)
-                    .or_else(|arr_err| Err(Box::new(arr_err)))?)
+                Ok(Array2::from_shape_vec((height, width), image_data).map_err(Box::new)?)
             } else {
                 Err(Box::new(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -75,11 +73,9 @@ impl ElevationTile {
             }
         };
 
-        let image_data = inner().or_else(|err| {
-            Err(AssetErr::AssetContentError(format!(
+        let image_data = inner().map_err(|err| AssetErr::AssetContentError(format!(
                 "Error parsing tile tiff for id {id}: {err}"
-            )))
-        })?;
+            )))?;
 
         Ok(ElevationTile {
             id,
@@ -94,7 +90,7 @@ impl ElevationTile {
             SUBGRID_TILE_SIDE_LENGTH_USFT.into(),
             // Safety: as_slice() is only None when elevation_inches is non-contiguous (impossible)
             // or in non-standard order (also maybe impossible?, but definitely against convention)
-            &self.elevation_inches.as_slice().unwrap(),
+            self.elevation_inches.as_slice().unwrap(),
         )?;
         Ok(())
     }
@@ -132,12 +128,9 @@ impl ElevationTileProvider for CachingElevationTileProvider {
                     let tile = ElevationTile::new_empty(tile_id);
                     File::create(path.as_path())
                         .map_err(|err| err.to_string())
-                        .and_then(|f| tile.write_to_tiff(f).map_err(|err| err.to_string()))
-                        .or_else(|err| {
-                            Err(AssetErr::LocalFileSystemError(format!(
+                        .and_then(|f| tile.write_to_tiff(f).map_err(|err| err.to_string())).map_err(|err| AssetErr::LocalFileSystemError(format!(
                                 "Error writing empty tile to {path:?}: {err}"
-                            )))
-                        })?;
+                            )))?;
                     Ok(tile)
                 } else {
                     Err(err)
@@ -227,7 +220,7 @@ mod tests {
     fn read_from_tiff_wrong_dimensions_fails() {
         let temp = test_temp_dir!();
         let path = temp.as_path_untracked().join("small.tiff");
-        write_gray16_tiff(&mut File::create(&path).unwrap(), 10, 10, &vec![0u16; 100]);
+        write_gray16_tiff(&mut File::create(&path).unwrap(), 10, 10, &[0u16; 100]);
 
         let result = ElevationTile::read_from_tiff(sample_tile_id(), File::open(&path).unwrap());
         assert!(matches!(result, Err(AssetErr::AssetContentError(_))));

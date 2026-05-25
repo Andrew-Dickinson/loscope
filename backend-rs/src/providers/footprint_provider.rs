@@ -25,11 +25,9 @@ impl FootprintProvider for StringBackedFootprintProvider {
             .get_string(AssetType::BuildingFootprintWKT, bin_id.as_str())
             .await?;
 
-        Polygon::try_from_wkt_str(&wkt_string).or_else(|err| {
-            Err(AssetErr::AssetContentError(format!(
+        Polygon::try_from_wkt_str(&wkt_string).map_err(|err| AssetErr::AssetContentError(format!(
                 "Invalid WKT string found in database for {bin_id:?}: {err}"
             )))
-        })
     }
 }
 

@@ -45,7 +45,7 @@ impl<'de> Deserialize<'de> for BINId {
 
 impl BINId {
     pub fn from_int(bin_id: i64) -> Result<BINId, BINParseError> {
-        BINId::parse(&*bin_id.to_string())
+        BINId::parse(&bin_id.to_string())
     }
 
     pub fn parse(bin_id: &str) -> Result<BINId, BINParseError> {
@@ -70,7 +70,7 @@ impl BINId {
         };
 
         for c in chars {
-            if !c.is_digit(10) {
+            if !c.is_ascii_digit() {
                 return Err(BINParseError(format!(
                     "Invalid BIN ID: {bin_id}. All characters must be digits"
                 )));
@@ -183,7 +183,7 @@ mod tests {
     fn bin_id_from_int_zero_first_digit() {
         // 7-digit number starting with 0 cannot be represented as i64 with leading zero,
         // so from_int(0123456) == from_int(123456) which is too short — confirm it errors
-        assert!(BINId::from_int(0_123_456).is_err());
+        assert!(BINId::from_int(123_456).is_err());
     }
 
     // --- Serde ---

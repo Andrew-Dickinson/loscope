@@ -11,7 +11,6 @@ use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::TileId;
 use derive_getters::Getters;
 use derive_new::new;
-use futures_util::StreamExt;
 use geo::algorithm::line_measures::Distance;
 use geo::{Euclidean, Point, point};
 use rocket::serde::{Deserialize};
@@ -77,7 +76,7 @@ pub struct PointEvaluationOutcome {
 }
 
 pub fn valid_analysis_frequency(frequency_hz: f64) -> bool {
-    frequency_hz >= MIN_ANALYSIS_FREQUENCY && frequency_hz <= MAX_ANALYSIS_FREQUENCY
+    (MIN_ANALYSIS_FREQUENCY..=MAX_ANALYSIS_FREQUENCY).contains(&frequency_hz)
 }
 
 pub async fn evaluate_points(

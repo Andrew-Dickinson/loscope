@@ -3,7 +3,6 @@ use crate::types::tiles::{SUBGRID_TILE_SIDE_LENGTH_USFT, TileId};
 use arrayvec::ArrayVec;
 use derive_getters::Getters;
 use derive_new::new;
-use futures_util::StreamExt;
 use ndarray::{Array1, Array2, s};
 use rocket::serde::{Deserialize, Serialize};
 use std::iter::repeat_n;
@@ -336,7 +335,7 @@ mod tests {
         let values = Array2::from_shape_vec((1, 3), vec![99u8, 99, 99]).unwrap();
         let grid = make_grid_at(values, array![3], array![0], (500_000.0, 200_000.0));
         let out = grid.rasterize_in_tile(tile());
-        assert!(out.iter().all(|&v| v == None));
+        assert!(out.iter().all(|&v| v.is_none()));
     }
 
     #[test]
@@ -345,7 +344,7 @@ mod tests {
         let values = Array2::from_shape_vec((1, 3), vec![99u8, 99, 99]).unwrap();
         let grid = make_grid_at(values, array![3], array![0], (500_000.0, 301_000.0));
         let out = grid.rasterize_in_tile(tile());
-        assert!(out.iter().all(|&v| v == None));
+        assert!(out.iter().all(|&v| v.is_none()));
     }
 
     #[test]
@@ -354,7 +353,7 @@ mod tests {
         let values = Array2::from_shape_vec((1, 1), vec![99u8]).unwrap();
         let grid = make_grid_at(values, array![1], array![0], (501_000.0, 300_000.0));
         let out = grid.rasterize_in_tile(tile());
-        assert!(out.iter().all(|&v| v == None));
+        assert!(out.iter().all(|&v| v.is_none()));
     }
 
     #[test]

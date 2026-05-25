@@ -57,36 +57,36 @@ impl StringProvider for NYCDOBSqliteStringProvider {
             move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT the_geom FROM building_footprints WHERE bin = ?"
-                ).or_else(|err| Err(AssetErr::AssetDownloadError(
+                ).map_err(|err| AssetErr::AssetDownloadError(
                     format!("Error preparing footprint query for {bin_id:?}: {err}")
-                )))?;
+                ))?;
 
                 stmt.query_one(
                     rusqlite::params![bin_id.as_str()],
                     |row| -> Result<String, rusqlite::Error> { row.get(0) }
-                ).or_else(|err| match err {
+                ).map_err(|err| match err {
                     rusqlite::Error::InvalidColumnType(_, _, _)
                     | rusqlite::Error::InvalidColumnIndex(_)
-                    | rusqlite::Error::InvalidColumnName(_) => Err(AssetErr::AssetContentError(
+                    | rusqlite::Error::InvalidColumnName(_) => AssetErr::AssetContentError(
                         format!("Invalid footprint database content for {bin_id:?}: {err}")
-                    )),
-                    rusqlite::Error::QueryReturnedNoRows => Err(AssetErr::AssetNotFound(
+                    ),
+                    rusqlite::Error::QueryReturnedNoRows => AssetErr::AssetNotFound(
                         format!("{bin_id:?} not found in database")
-                    )),
+                    ),
                     rusqlite::Error::QueryReturnedMoreThanOneRow =>
-                        Err(AssetErr::AssetContentError(
+                        AssetErr::AssetContentError(
                             format!("Found more than one entry for {bin_id:?}: {err}")
-                        )),
-                    _ => Err(AssetErr::AssetDownloadError(
-                        format!("Error querying footprint for {bin_id:?}: {err}"))
+                        ),
+                    _ => AssetErr::AssetDownloadError(
+                        format!("Error querying footprint for {bin_id:?}: {err}")
                     )
                 })
             }
-        ).await.or_else(|err| match err {
-            tokio_rusqlite::Error::Error(e) => Err(e),
-            _ => Err(AssetErr::AssetDownloadError(
+        ).await.map_err(|err| match err {
+            tokio_rusqlite::Error::Error(e) => e,
+            _ => AssetErr::AssetDownloadError(
                 format!("Error utilizing db_connection while getting footprint for {identifier:?}: {err}")
-            ))
+            )
         })
     }
 }

@@ -94,7 +94,7 @@ impl Providers {
             obstruction_provider: Box::new(
                 CachingObstructionProvider::new(Arc::clone(&asset_provider))
                     .await
-                    .map_err(|e| ProviderInitErr::AssetPrefetchError(e))?,
+                    .map_err(ProviderInitErr::AssetPrefetchError)?,
             ),
             point_eval_result_provider: PointEvaluationResultProvider::new(Box::new(
                 InMemoryValueStore::new(),

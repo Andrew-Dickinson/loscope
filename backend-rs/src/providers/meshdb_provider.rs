@@ -48,7 +48,7 @@ impl ProgenitorMeshDBProvider {
     ) -> Result<Option<BINId>, progenitor_client::Error> {
         let building_response = self
             .meshdb_client
-            .api_v1_buildings_retrieve(&building_id)
+            .api_v1_buildings_retrieve(building_id)
             .await?
             .into_inner();
         if let Some(bin_int) = building_response.bin {
@@ -103,10 +103,9 @@ impl ProgenitorMeshDBProvider {
                 .api_v1_installs_retrieve(&install_id)
                 .await?
                 .into_inner();
-            if let Some(building_id) = install_response.building.id {
-                if let Some(bin) = self.get_bin_from_building_id(&building_id).await? {
+            if let Some(building_id) = install_response.building.id &&
+               let Some(bin) = self.get_bin_from_building_id(&building_id).await? {
                     return Ok(NumberLookupResponse::new(bin, MeshdbBINSource::Install));
-                }
             }
 
             Err(MeshDBError::DataError(format!(

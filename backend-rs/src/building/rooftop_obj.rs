@@ -166,20 +166,20 @@ mod tests {
         let vertices: Vec<&str> = obj.lines().filter(|l| l.starts_with("v ")).collect();
         // write_horizontal_face emits (x0,y0,z),(x1,y0,z),(x1,y1,z),(x0,y1,z) = corners of [0,1]×[0,1]
         assert!(
-            vertices.iter().any(|&v| v == "v 0 0 2.000"),
+            vertices.contains(&"v 0 0 2.000"),
             "missing v 0 0 2.000 in {:?}",
             vertices
         );
         assert!(
-            vertices.iter().any(|&v| v == "v 1 0 2.000"),
+            vertices.contains(&"v 1 0 2.000"),
             "missing v 1 0 2.000"
         );
         assert!(
-            vertices.iter().any(|&v| v == "v 1 1 2.000"),
+            vertices.contains(&"v 1 1 2.000"),
             "missing v 1 1 2.000"
         );
         assert!(
-            vertices.iter().any(|&v| v == "v 0 1 2.000"),
+            vertices.contains(&"v 0 1 2.000"),
             "missing v 0 1 2.000"
         );
     }

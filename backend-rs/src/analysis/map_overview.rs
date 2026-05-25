@@ -68,6 +68,44 @@ impl From<&PointEvaluationOutcome> for PointEvaluationOverview {
     }
 }
 
+pub fn generate_ellipse_poly(
+    nys_a: &NYSCoords3,
+    nys_b: &NYSCoords3,
+    frequency_hz: f64,
+) -> impl Iterator<Item = NYSCoords2> {
+    const C_USFT_PER_S: f64 = 299_792_458.0 / 0.3048006096;
+    const N_PTS: usize = 90;
+
+    let cx = (nys_a.easting() + nys_b.easting()) / 2.0;
+    let cy = (nys_a.northing() + nys_b.northing()) / 2.0;
+    let dx = nys_b.easting() - nys_a.easting();
+    let dy = nys_b.northing() - nys_a.northing();
+    let l = (dx * dx + dy * dy).sqrt();
+
+    let mut pts: Vec<NYSCoords2> = Vec::new();
+    if l == 0.0 {
+        return pts.into_iter();
+    }
+
+    let theta = dy.atan2(dx);
+    let semi_major = l / 2.0;
+    let wavelength_usft = C_USFT_PER_S / frequency_hz;
+    let semi_minor = (wavelength_usft * l / 4.0).sqrt();
+
+    pts.reserve(N_PTS + 1);
+    for i in 0..=N_PTS {
+        let t = 2.0 * std::f64::consts::PI * i as f64 / N_PTS as f64;
+        let xl = semi_major * t.cos();
+        let yl = semi_minor * t.sin();
+        pts.push(NYSCoords2::new(
+            cx + xl * theta.cos() - yl * theta.sin(),
+            cy + xl * theta.sin() + yl * theta.cos(),
+        ));
+    }
+    pts.into_iter()
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,7 +128,7 @@ mod tests {
 
     fn setup() {
         SETUP.get_or_init(|| {
-            init_coord_converter_factory(|| CoordinateConverter::new());
+            init_coord_converter_factory(CoordinateConverter::new);
         });
     }
 
@@ -193,41 +231,4 @@ mod tests {
         let overview = PointEvaluationOverview::from(&outcome);
         assert!(overview.overhead_ellipse_poly().is_empty());
     }
-}
-
-pub fn generate_ellipse_poly(
-    nys_a: &NYSCoords3,
-    nys_b: &NYSCoords3,
-    frequency_hz: f64,
-) -> impl Iterator<Item = NYSCoords2> {
-    const C_USFT_PER_S: f64 = 299_792_458.0 / 0.3048006096;
-    const N_PTS: usize = 90;
-
-    let cx = (nys_a.easting() + nys_b.easting()) / 2.0;
-    let cy = (nys_a.northing() + nys_b.northing()) / 2.0;
-    let dx = nys_b.easting() - nys_a.easting();
-    let dy = nys_b.northing() - nys_a.northing();
-    let l = (dx * dx + dy * dy).sqrt();
-
-    let mut pts: Vec<NYSCoords2> = Vec::new();
-    if l == 0.0 {
-        return pts.into_iter();
-    }
-
-    let theta = dy.atan2(dx);
-    let semi_major = l / 2.0;
-    let wavelength_usft = C_USFT_PER_S / frequency_hz;
-    let semi_minor = (wavelength_usft * l / 4.0).sqrt();
-
-    pts.reserve(N_PTS + 1);
-    for i in 0..=N_PTS {
-        let t = 2.0 * std::f64::consts::PI * i as f64 / N_PTS as f64;
-        let xl = semi_major * t.cos();
-        let yl = semi_minor * t.sin();
-        pts.push(NYSCoords2::new(
-            cx + xl * theta.cos() - yl * theta.sin(),
-            cy + xl * theta.sin() + yl * theta.cos(),
-        ));
-    }
-    pts.into_iter()
 }

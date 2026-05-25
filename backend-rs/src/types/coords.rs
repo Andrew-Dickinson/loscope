@@ -16,10 +16,6 @@ pub const MAX_NYS_COORD_VALUE: f64 = 2_000_000.0;
 pub const MIN_ALT_COORD_VALUE: f64 = -5000.0;
 pub const MAX_ALT_COORD_VALUE: f64 = 5000.0;
 
-enum CoordError {
-    ExceedsBound,
-}
-
 #[derive(Debug, Getters, new, PartialEq, AbsDiffEq)]
 pub struct GPSCoords3 {
     lat: f64,
@@ -252,11 +248,11 @@ impl From<&RelativeCoords3> for (f64, f64, f64) {
 }
 
 pub fn valid_nys_coordinate(coord: f64) -> bool {
-    coord >= MIN_NYS_COORD_VALUE && coord <= MAX_NYS_COORD_VALUE
+    (MIN_NYS_COORD_VALUE..=MAX_NYS_COORD_VALUE).contains(&coord)
 }
 
 pub fn valid_alt_coordinate(coord: f64) -> bool {
-    coord >= MIN_ALT_COORD_VALUE && coord <= MAX_ALT_COORD_VALUE
+    (MIN_ALT_COORD_VALUE..=MAX_ALT_COORD_VALUE).contains(&coord)
 }
 
 #[cfg(test)]

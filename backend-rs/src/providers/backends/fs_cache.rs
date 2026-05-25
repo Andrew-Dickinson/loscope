@@ -22,7 +22,7 @@ pub struct CachingAssetProvider {
 
 #[async_trait]
 impl AssetProvider for CachingAssetProvider {
-    fn get_local_asset_path<'a>(&self, asset_type: AssetType, asset_id: &'a str) -> PathBuf {
+    fn get_local_asset_path(&self, asset_type: AssetType, asset_id: &str) -> PathBuf {
         self.cache_root.join(asset_type.as_ref()).join(asset_id)
     }
 
@@ -36,7 +36,6 @@ impl AssetProvider for CachingAssetProvider {
                         e
                     ))
                 })?
-                .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().map(|e| e.is_file()).unwrap_or(false))
                 .filter_map(|f| f.file_name().into_string().ok())
@@ -96,11 +95,9 @@ impl AssetProvider for CachingAssetProvider {
             ))
         })?;
 
-        Ok(File::open(item_path).or_else(|err| {
-            Err(AssetErr::LocalFileSystemError(format!(
+        Ok(File::open(item_path).map_err(|err| AssetErr::LocalFileSystemError(format!(
                 "Unable to open fetched file at {item_path:?}: {err}"
-            )))
-        })?)
+            )))?)
     }
 }
 

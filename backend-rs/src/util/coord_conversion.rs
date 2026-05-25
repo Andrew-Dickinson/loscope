@@ -37,6 +37,12 @@ pub struct CoordinateConverter {
     gps_to_nys: Projector,
 }
 
+impl Default for CoordinateConverter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CoordinateConverter {
     pub fn new() -> Self {
         // Safety: the unwrap() calls below will panic if the EPSG specifiers are invalid, or
@@ -106,13 +112,13 @@ impl CoordinateConverter {
 }
 
 pub struct ThreadLocalCoordConverter {
-    init: Arc<dyn Fn() -> CoordinateConverter + Send + Sync>,
+    _init: Arc<dyn Fn() -> CoordinateConverter + Send + Sync>,
 }
 
 impl ThreadLocalCoordConverter {
     pub fn new(init: impl Fn() -> CoordinateConverter + Send + Sync + 'static) -> Self {
         Self {
-            init: Arc::new(init),
+            _init: Arc::new(init),
         }
     }
 }
@@ -229,7 +235,7 @@ mod tests {
 
     #[test]
     fn exactly_one_converter_per_thread() {
-        init_coord_converter_factory(|| CoordinateConverter::new());
+        init_coord_converter_factory(CoordinateConverter::new);
 
         let handle = thread::spawn(|| {
             let addr1 = with_coord_converter(|converter| std::ptr::addr_of!(converter) as usize);

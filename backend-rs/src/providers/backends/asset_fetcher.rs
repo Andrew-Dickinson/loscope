@@ -191,7 +191,7 @@ mod tests {
         let result = fetcher
             .fetch_asset(
                 AssetType::OrthoImage,
-                &Utf8UnixPath::new("photo.jpg"),
+                Utf8UnixPath::new("photo.jpg"),
                 &temp_ortho_image_path,
             )
             .await;
@@ -215,7 +215,7 @@ mod tests {
         let result = fetcher
             .fetch_asset(
                 AssetType::OrthoImage,
-                &Utf8UnixPath::new("photo.jpg"),
+                Utf8UnixPath::new("photo.jpg"),
                 &temp_ortho_image_path,
             )
             .await;
@@ -236,7 +236,7 @@ mod tests {
         let result = fetcher
             .fetch_asset(
                 AssetType::OrthoImage,
-                &Utf8UnixPath::new("photo.jpg"),
+                Utf8UnixPath::new("photo.jpg"),
                 &temp_ortho_image_path,
             )
             .await;
@@ -255,7 +255,7 @@ mod tests {
         let result = fetcher
             .fetch_asset(
                 AssetType::OrthoImage,
-                &Utf8UnixPath::new("photo.jpg"),
+                Utf8UnixPath::new("photo.jpg"),
                 &PathBuf::from("/nonexistent-not-a-real-directory-dont-create-me/photo.jpg"),
             )
             .await;

@@ -13,6 +13,12 @@ pub struct InMemoryValueStore {
     map: Mutex<HashMap<String, Vec<u8>>>,
 }
 
+impl Default for InMemoryValueStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryValueStore {
     pub fn new() -> Self {
         Self {
@@ -20,6 +26,36 @@ impl InMemoryValueStore {
         }
     }
 }
+
+impl ValueStore for InMemoryValueStore {
+    fn put(&self, key: String, value: Vec<u8>) -> Result<(), AssetErr> {
+        self.map
+            .lock()
+            .map_err(|e| {
+                AssetErr::AssetDownloadError(format!(
+                    "Failed to aquire lock putting {key}: {:?}",
+                    e
+                ))
+            })?
+            .insert(key, value);
+        Ok(())
+    }
+
+    fn get(&self, key: String) -> Result<Vec<u8>, AssetErr> {
+        self.map
+            .lock()
+            .map_err(|e| {
+                AssetErr::AssetDownloadError(format!(
+                    "Failed to aquire lock putting {key}: {:?}",
+                    e
+                ))
+            })?
+            .get(&key)
+            .ok_or(AssetErr::AssetNotFound(format!("Key {} not found", key)))
+            .cloned()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -65,34 +101,5 @@ mod tests {
         let v1 = store.get("k".into()).unwrap();
         let v2 = store.get("k".into()).unwrap();
         assert_eq!(v1, v2);
-    }
-}
-
-impl ValueStore for InMemoryValueStore {
-    fn put(&self, key: String, value: Vec<u8>) -> Result<(), AssetErr> {
-        self.map
-            .lock()
-            .or_else(|e| {
-                Err(AssetErr::AssetDownloadError(format!(
-                    "Failed to aquire lock putting {key}: {:?}",
-                    e
-                )))
-            })?
-            .insert(key, value);
-        Ok(())
-    }
-
-    fn get(&self, key: String) -> Result<Vec<u8>, AssetErr> {
-        self.map
-            .lock()
-            .or_else(|e| {
-                Err(AssetErr::AssetDownloadError(format!(
-                    "Failed to aquire lock putting {key}: {:?}",
-                    e
-                )))
-            })?
-            .get(&key)
-            .ok_or(AssetErr::AssetNotFound(format!("Key {} not found", key)))
-            .cloned()
     }
 }

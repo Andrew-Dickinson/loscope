@@ -7,7 +7,6 @@ use nalgebra::{Matrix3, Matrix4, SMatrix, Vector4};
 use ndarray::{Array1, Array2};
 use rocket::serde::{Deserialize, Serialize};
 use std::ops::RangeInclusive;
-use std::usize;
 use wincode::{SchemaRead, SchemaWrite};
 
 const OFFSET_BUFFER: f64 = 500.0;

@@ -31,12 +31,9 @@ impl OrthoProvider for CachingOrthoProvider {
             .await?;
 
         let asset_size = asset_handle
-            .metadata()
-            .or_else(|read_err| {
-                Err(AssetErr::AssetContentError(format!(
+            .metadata().map_err(|read_err| AssetErr::AssetContentError(format!(
                     "Unable to read metadata from asset {fname}: {read_err}"
-                )))
-            })?
+                )))?
             .len();
 
         // Safety: This unwrap() would only throw if asset_size > max usize, which could only happen
@@ -44,12 +41,9 @@ impl OrthoProvider for CachingOrthoProvider {
         // in which case a panic is justified (since the Vec wouldn't be able to alloc anyway)
         let mut asset_buf: Vec<u8> = Vec::with_capacity(asset_size.try_into().unwrap());
         asset_handle
-            .read_to_end(&mut asset_buf)
-            .or_else(|read_err| {
-                Err(AssetErr::AssetContentError(format!(
+            .read_to_end(&mut asset_buf).map_err(|read_err| AssetErr::AssetContentError(format!(
                     "Unable to read content from asset {fname}: {read_err}"
-                )))
-            })?;
+                )))?;
 
         let bounds = to_ortho_bounds(tile_id.subgrid_id().relative_bounds());
         let rgba_img = decode_jp2_region(
@@ -58,12 +52,9 @@ impl OrthoProvider for CachingOrthoProvider {
             bounds.1.into(),
             bounds.2.into(),
             bounds.3.into(),
-        )
-        .or_else(|read_err| {
-            Err(AssetErr::AssetContentError(format!(
+        ).map_err(|read_err| AssetErr::AssetContentError(format!(
                 "Unable to read content from asset {fname}: {read_err}"
-            )))
-        })?;
+            )))?;
 
         Ok(DynamicImage::ImageRgba8(rgba_img))
     }
