@@ -28,6 +28,9 @@ from los_analyzer.lib.providers.obstruction_provider import (
 from los_analyzer.lib.providers.read_through_cache import AwsS3AssetProvider
 from los_analyzer.lib.providers.tile_provider import CachingTileProvider, ASSET_TYPE_TERRAIN_TIFF
 
+# PT_A = (1039747.7083194072, 176149.39110709145, 329.3490199977532)
+# PT_B = (1039622.934253814, 230798.89482046565, 329.34441791288555)
+
 PT_A = (1009748.3478422969, 253099.53772897943, 251.25)
 PT_B = (1000565.7271487191, 241854.0, 257.6095239708276)
 FREQUENCY_HZ = 24e9

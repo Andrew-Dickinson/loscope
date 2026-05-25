@@ -6,6 +6,7 @@ from pathlib import Path
 
 from flask import Flask
 from flask_cors import CORS
+from werkzeug.middleware.profiler import ProfilerMiddleware
 
 from los_analyzer.backend.cache.private_cache import DictProvider, JobLibSerializingCache
 from los_analyzer.lib.providers.dob_db_dao import DOBDBDAO
@@ -17,6 +18,11 @@ from los_analyzer.lib.providers.tile_provider import CachingTileProvider, ASSET_
 
 app_cache = JobLibSerializingCache(DictProvider())
 app = Flask(__name__, root_path=os.getcwd())
+app.wsgi_app = ProfilerMiddleware(
+    app.wsgi_app,
+    profile_dir="profiler_dump",
+    filename_format="{time:.0f}-{method}-{path}-{elapsed:.0f}ms.prof",
+)
 CORS(app)
 
 LOS_S3_BUCKET = os.environ["LOS_ASSET_S3_BUCKET"]
@@ -56,4 +62,4 @@ from los_analyzer.backend.endpoints.coords import * # noqa # pylint: disable=unu
 from los_analyzer.backend.endpoints.meshdb import * # noqa # pylint: disable=unused-import
 
 if __name__ == "__main__":
-    app.run()
+    app.run(threaded=False)

@@ -10,8 +10,11 @@ from los_analyzer.lib.evaluation.rooftop import (
     ObstructionStatus,
     SamplePointEvaluation,
     _valid_max,
+    evaluate_point,
     evaluate_sample_points,
 )
+from los_analyzer.lib.providers.obstruction_provider import ObstructionProvider
+from los_analyzer.lib.providers.tile_provider import TileProvider
 from los_analyzer.lib.fresnel.fresnel_zone2 import FresnelZone
 from los_analyzer.lib.tiles.intersect import IntersectionGrid
 from los_analyzer.lib.tiles.load import TerrainGrid
@@ -124,7 +127,7 @@ def _mock_pipeline(obs_full_vals, obs_partial_vals):
     call_count = [0]
     results = [_make_obs(obs_full_vals), _make_obs(obs_partial_vals)]
 
-    def _ci(zone, terrain):
+    def _ci(*_args):
         idx = call_count[0] % 2
         call_count[0] += 1
         return results[idx]
@@ -200,7 +203,7 @@ def test_evaluate_multiple_points(tmp_path):
     def _fz_side(p, c, freq, alpha):
         return _make_zone([1200], [600])
 
-    def _ci_side(zone, terrain):
+    def _ci_side(zone, terrain, *_args):
         point_idx = call_count[0] // 2
         call_idx = call_count[0] % 2
         call_count[0] += 1
@@ -271,3 +274,43 @@ def test_sample_point_evaluation_dataclass():
     assert ev.status == ObstructionStatus.UNOBSTRUCTED
     assert ev.point_a_nys == pt_a
     assert ev.point_b_nys == pt_b
+
+
+# ---------------------------------------------------------------------------
+# evaluate_point — mocked pipeline, specific coordinates
+# ---------------------------------------------------------------------------
+
+def test_evaluate_point_passes_coords_and_frequency_to_pipeline():
+    """evaluate_point should forward pt_a, pt_b, and frequency_hz to compute_fresnel_zone."""
+    pt_a = (1009748.3478422969, 253099.53772897943, 251.25)
+    pt_b = (1000565.7271487191, 241854.0, 257.6095239708276)
+    freq_hz = 24e9
+
+    tile_provider = MagicMock(spec=TileProvider)
+    obstruction_provider = MagicMock(spec=ObstructionProvider)
+
+    zone = _make_zone([1200], [600])
+    terrain = _make_terrain([900])
+    obs = _make_obs([0.0])
+
+    def _ci(*_args):
+        return obs
+
+    mock_fz = MagicMock(return_value=zone)
+
+    with patch(_PATCH_FZ, mock_fz), \
+         patch(_PATCH_IT, return_value=[]), \
+         patch(_PATCH_LT, return_value=terrain), \
+         patch(_PATCH_CI, side_effect=_ci):
+        result = evaluate_point(pt_a, pt_b, freq_hz, tile_provider, obstruction_provider)
+
+    # Fresnel zone computed twice — once per alpha
+    assert mock_fz.call_count == 2
+    mock_fz.assert_any_call(pt_a, pt_b, freq_hz, alpha=1.0)
+    mock_fz.assert_any_call(pt_a, pt_b, freq_hz, alpha=0.6)
+
+    # Result carries through the original coordinates and frequency
+    assert result.point_a_nys == pt_a
+    assert result.point_b_nys == pt_b
+    assert result.frequency_hz == pytest.approx(freq_hz)
+    assert result.status == ObstructionStatus.UNOBSTRUCTED

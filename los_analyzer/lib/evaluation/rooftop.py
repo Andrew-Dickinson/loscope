@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List
 
 import numpy as np
+# from sp_fresnel_lib import compute_fresnel_zone
 from tqdm import tqdm
 
 from los_analyzer.lib.fresnel.fresnel_zone2 import compute_fresnel_zone, FresnelZone

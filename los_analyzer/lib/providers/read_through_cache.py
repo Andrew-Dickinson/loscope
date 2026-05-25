@@ -68,6 +68,7 @@ class ReadThroughCache:
         if cache_path.exists():
             return cache_path
 
+        print(f"Calling upstream for {asset_type}, {asset_id}")
         asset_found = self._upstream.get_asset(asset_type, asset_id, cache_path)
         if asset_found:
             return cache_path
