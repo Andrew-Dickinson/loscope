@@ -11,6 +11,7 @@ pub const MAX_OBJ_SIZE_USFT: usize = 200_000;
 /// - `adj_side_z(adj_idx, adj_raw, z_in)` → given the neighbor's array index (`None` if
 ///   out-of-bounds), its raw u16 height (0 when OOB), and this pixel's raw u16 height:
 ///   return `Some(z_ft)` to draw a side face down to that elevation, or `None` to skip.
+#[allow(clippy::too_many_arguments)]
 pub fn append_obj_row(
     xi: usize,
     x_offset: isize,

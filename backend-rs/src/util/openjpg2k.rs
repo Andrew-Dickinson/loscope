@@ -1,3 +1,6 @@
+#![allow(clippy::all)]
+#![allow(warnings)]
+
 use image::RgbaImage;
 use openjpeg_sys::*;
 use std::io::{Cursor, Read, Seek, SeekFrom};
