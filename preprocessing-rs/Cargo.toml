@@ -1,0 +1,11 @@
+[package]
+name = "loscope-preprocessing"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+loscope = { path = "../backend-rs" }
+geo = "0.33.1"
+
+[profile.dev]
+debug = true

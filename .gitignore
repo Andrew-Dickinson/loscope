@@ -3,3 +3,4 @@ data/
 *.iml
 .idea/
 .env
+**/target/
