@@ -10,6 +10,7 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import type { ThreeEvent } from '@react-three/fiber'
+import BackgroundTiles from '../RooftopViewer/BackgroundTiles'
 
 interface FarEndPickerProps {
   binId: string
@@ -169,10 +170,11 @@ function CameraFit({ objUrl }: { objUrl: string }) {
 
 // ── Scene ─────────────────────────────────────────────────────────────────────
 
-function Scene({ binId, pendingWorldPos, onTerrainClick }: {
+function Scene({ binId, pendingWorldPos, onTerrainClick, buildingOffset }: {
   binId: string
   pendingWorldPos: THREE.Vector3 | null
   onTerrainClick: (point: THREE.Vector3) => void
+  buildingOffset: { x_sw: number; y_sw: number } | null
 }) {
   const objUrl = `/api/rooftop/render/${binId}`
   const { invalidate, camera, gl, controls } = useThree()
@@ -240,6 +242,7 @@ function Scene({ binId, pendingWorldPos, onTerrainClick }: {
       <directionalLight position={[1, 3, 2]} intensity={1.8} color={0xffeedd} />
       <directionalLight position={[-2, 2, -3]} intensity={0.5} color={0xddeeff} />
       <Suspense fallback={null}>
+        <BackgroundTiles binId={binId} buildingOffset={buildingOffset} />
         <TerrainMesh objUrl={objUrl} onPlacementClick={onTerrainClick} onLoaded={handleLoaded} />
         {pendingWorldPos && (
           <PlacementMarker worldPos={pendingWorldPos} onDragStart={handleDragStart} />
@@ -313,7 +316,7 @@ export default function FarEndPicker({ binId, label, onConfirm, onCancel }: FarE
             style={{ position: 'absolute', inset: 0, background: '#111827' }}
           >
             <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
-            <Scene binId={binId} pendingWorldPos={pendingWorldPos} onTerrainClick={handleTerrainClick} />
+            <Scene binId={binId} pendingWorldPos={pendingWorldPos} onTerrainClick={handleTerrainClick} buildingOffset={buildingOffset} />
           </Canvas>
         )}
       </div>

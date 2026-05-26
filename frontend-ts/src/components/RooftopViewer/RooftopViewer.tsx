@@ -12,6 +12,7 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { buildVoronoiMaterial } from './VoronoiMaterial'
+import BackgroundTiles from './BackgroundTiles'
 import type { ThreeEvent } from '@react-three/fiber'
 
 export interface EncodedPoint {
@@ -499,6 +500,7 @@ interface SceneProps {
   pendingWorldPos: THREE.Vector3 | null
   mastOffsetFt: number
   onPlacementClick: (point: THREE.Vector3) => void
+  buildingOffset: { x_sw: number; y_sw: number } | null
 }
 
 // ── Sphere overlay: billboard ring + SDF symbols, single draw call ────────────
@@ -727,7 +729,7 @@ function SphereOverlay({ samplePoints, analyses, hoveredSphereRef }: {
   return <instancedMesh ref={meshRef} args={[geo, mat, n]} renderOrder={1} />
 }
 
-function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, nysB, placementMode, pendingWorldPos, mastOffsetFt, onPlacementClick }: SceneProps) {
+function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, nysB, placementMode, pendingWorldPos, mastOffsetFt, onPlacementClick, buildingOffset }: SceneProps) {
   const objUrl           = `/api/rooftop/render/${binId}`
   const hoveredSphereRef = useRef<number>(-1)
   const { invalidate, camera, gl, controls } = useThree()
@@ -817,6 +819,7 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, ny
       <directionalLight position={[1, 3, 2]} intensity={1.0} color={0xffeedd} />
       <CameraSync binId={binId} stateRef={cameraStateRef} />
       <Suspense fallback={null}>
+        <BackgroundTiles binId={binId} buildingOffset={buildingOffset} />
         <TerrainMesh
           objUrl={objUrl}
           samplePoints={samplePoints}
@@ -896,6 +899,7 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
           pendingWorldPos={pendingWorldPos}
           mastOffsetFt={mastOffsetFt}
           onPlacementClick={handleTerrainClick}
+          buildingOffset={buildingOffset}
         />
       </Canvas>
 
