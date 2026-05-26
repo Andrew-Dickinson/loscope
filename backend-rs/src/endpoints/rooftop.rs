@@ -1,14 +1,19 @@
+use crate::building::background_tiles::zero_footprint_pixels;
 use crate::building::bin_id::BINId;
-use crate::building::heightmap::{RooftopHeightMapFactory};
+use crate::building::heightmap::{RooftopHeightMapFactory, get_intersecting_tiles};
 use crate::providers::Providers;
 use crate::sample_points::point::SamplePoints;
 use crate::sample_points::sample_grid::sample_points_for_rooftop;
+use crate::types::coords::NYSCoords2;
+use crate::types::tiles::TileId;
 use futures_util::{StreamExt};
 use rocket::http::{ContentType, Status};
 use rocket::response::stream::TextStream;
 use rocket::serde::json::Json;
 use rocket::{State};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::io::Cursor;
+use image::imageops::tile;
 
 #[get("/render/<bin_id>")]
 pub async fn render_rooftop(
@@ -79,4 +84,102 @@ pub async fn sample_points(
             .unwrap_or_default(),
         heightmap.sw_offset().clone(),
     )))
+}
+
+#[derive(Serialize)]
+pub struct BackgroundTileInfo {
+    id: TileId,
+    sw_nys: NYSCoords2,
+}
+
+#[derive(Serialize)]
+pub struct BackgroundTileIds {
+    tiles: Vec<BackgroundTileInfo>,
+}
+
+#[get("/backgroundTileIds/<bin_id>")]
+pub async fn background_tile_ids(
+    bin_id: &str,
+    providers: &State<Providers>,
+) -> Result<Json<BackgroundTileIds>, Status> {
+    let Ok(bin_id) = BINId::parse(bin_id) else {
+        return Err(Status::BadRequest);
+    };
+
+    let footprint = providers
+        .footprint_provider()
+        .get_footprint(bin_id)
+        .await
+        .map_err(|e| {
+            eprintln!("{:?}", e);
+            Status::from(e)
+        })?;
+
+    let (tile_ids, _) = get_intersecting_tiles(&footprint).map_err(|e| {
+        eprintln!("{:?}", e);
+        Status::from(e)
+    })?;
+
+    let tiles = tile_ids
+        .into_iter()
+        .map(|tile_id| BackgroundTileInfo {
+            sw_nys: tile_id.get_sw_corner(),
+            id: tile_id,
+        })
+        .collect();
+
+    Ok(Json(BackgroundTileIds { tiles }))
+}
+
+#[derive(Responder)]
+#[response(status = 200, content_type = "image/tiff")]
+pub struct TiffImage(Vec<u8>);
+
+#[get("/backgroundTileRaster/<bin_id>/<tile_id>")]
+pub async fn background_tile_raster(
+    bin_id: &str,
+    tile_id: &str,
+    providers: &State<Providers>,
+) -> Result<TiffImage, Status> {
+    let Ok(bin_id) = BINId::parse(bin_id) else {
+        return Err(Status::BadRequest);
+    };
+    let Ok(tile_id) = TileId::parse(tile_id) else {
+        return Err(Status::BadRequest);
+    };
+
+    let (footprint, mut tile) = tokio::try_join!(
+        async {
+            providers
+                .footprint_provider()
+                .get_footprint(bin_id)
+                .await
+                .map_err(|e| {
+                    eprintln!("{:?}", e);
+                    Status::from(e)
+                })
+        },
+        async {
+            providers
+                .elevation_tile_provider()
+                .get_elevation_tile(tile_id)
+                .await
+                .map_err(|e| {
+                    eprintln!("{:?}", e);
+                    Status::from(e)
+                })
+        },
+    )?;
+
+    tile.mutate_elevation_values(
+        move |elevation_inches| {
+            zero_footprint_pixels(&footprint, tile_id, elevation_inches);
+        }
+    );
+
+    let mut tiff_bytes = Vec::<u8>::new();
+    tile.write_to_tiff(Cursor::new(&mut tiff_bytes))
+        .map_err(|_| Status::InternalServerError)?;
+
+    Ok(TiffImage(tiff_bytes))
 }
