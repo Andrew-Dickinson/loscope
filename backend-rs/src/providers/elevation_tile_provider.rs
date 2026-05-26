@@ -94,6 +94,12 @@ impl ElevationTile {
         )?;
         Ok(())
     }
+
+    pub fn mutate_elevation_values<F>(&mut self, mut mutator: F)
+        where F: FnMut(&mut Array2<u16>)
+    {
+        mutator(&mut self.elevation_inches);
+    }
 }
 
 #[async_trait]
