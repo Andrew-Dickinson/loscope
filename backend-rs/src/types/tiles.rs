@@ -1,3 +1,5 @@
+include!(concat!(env!("OUT_DIR"), "/nyc_tile_set.rs"));
+
 use crate::types::coords::{MAX_NYS_COORD_VALUE, NYSCoords2, valid_nys_coordinate};
 use crate::types::errors::TileParseErr;
 use crate::types::errors::TileParseErr::{InvalidLASTileId, InvalidSubgrid};
@@ -345,6 +347,17 @@ impl TileId {
                 .unwrap(),
             ),
         }
+    }
+
+    pub fn as_packed_u64(&self) -> u64 {
+        (self.las_tile_id.0 as u64)
+            | ((self.las_tile_id.1 as u64) << 16)
+            | ((self.subgrid_id.0 as u64) << 32)
+            | ((self.subgrid_id.1 as u64) << 40)
+    }
+
+    pub fn is_in_nyc(&self) -> bool {
+        NYC_TILE_SET.binary_search(&self.as_packed_u64()).is_ok()
     }
 }
 
@@ -926,5 +939,78 @@ mod tests {
         assert!(serde_json::from_str::<TileId>("\"invalid\"").is_err());
         assert!(serde_json::from_str::<TileId>("\"500300\"").is_err());
         assert!(serde_json::from_str::<TileId>("\"500301_23\"").is_err());
+    }
+
+    // --- TileId::as_packed_u64 ---
+
+    #[test]
+    fn packed_u64_components_round_trip() {
+        // Verify each field lands in the correct bit range.
+        let id = TileId::parse("500300_23").unwrap();
+        let packed = id.as_packed_u64();
+        assert_eq!((packed & 0xFFFF) as u16, id.las_tile_id.0);           // bits 0-15: las easting
+        assert_eq!(((packed >> 16) & 0xFFFF) as u16, id.las_tile_id.1);   // bits 16-31: las northing
+        assert_eq!(((packed >> 32) & 0xFF) as u8, id.subgrid_id.0);       // bits 32-39: subgrid x
+        assert_eq!(((packed >> 40) & 0xFF) as u8, id.subgrid_id.1);       // bits 40-47: subgrid y
+    }
+
+    #[test]
+    fn packed_u64_distinct_tiles_produce_distinct_values() {
+        let ids = ["500300_00", "500300_23", "500300_44", "987177_42", "235_00"];
+        let packed: Vec<u64> = ids.iter()
+            .map(|s| TileId::parse(s).unwrap().as_packed_u64())
+            .collect();
+        // All values must be unique.
+        let mut sorted = packed.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), packed.len());
+    }
+
+    #[test]
+    fn packed_u64_is_stable_across_parse_roundtrip() {
+        // Parsing the same string twice must produce the same packed value.
+        let a = TileId::parse("987177_42").unwrap().as_packed_u64();
+        let b = TileId::parse("987177_42").unwrap().as_packed_u64();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn pre_baked_nyc_tile_list_is_accurate() {
+        // Mesh room (2023)
+        assert!(TileId::parse("987200_10").unwrap().is_in_nyc());
+
+        // Mesh room (2025)
+        assert!(TileId::parse("987200_12").unwrap().is_in_nyc());
+
+        // Mesh room (2026)
+        assert!(TileId::parse("987195_20").unwrap().is_in_nyc());
+
+        // Jersey City
+        assert!(!TileId::parse("972200_33").unwrap().is_in_nyc());
+
+        // Hudson river, one tile in
+        assert!(TileId::parse("980215_10").unwrap().is_in_nyc());
+
+        // Hudson river, one tile out
+        assert!(!TileId::parse("972200_00").unwrap().is_in_nyc());
+
+        // Brooklyn bridge, between LAS tiles
+        assert!(TileId::parse("985195_03").unwrap().is_in_nyc());
+
+        // Out in the bay
+        assert!(TileId::parse("975137_23").unwrap().is_in_nyc());
+
+        // Out in the bay (jersey side)
+        assert!(!TileId::parse("990117_12").unwrap().is_in_nyc());
+
+        // Great neck
+        assert!(!TileId::parse("602227_12").unwrap().is_in_nyc());
+
+        // Yonkers border (in)
+        assert!(TileId::parse("10270_03").unwrap().is_in_nyc());
+
+        // Yonkers border (out)
+        assert!(!TileId::parse("10270_04").unwrap().is_in_nyc());
     }
 }
