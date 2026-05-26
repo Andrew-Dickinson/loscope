@@ -1,5 +1,5 @@
 fn main() {
-    let src = "meshdb_openapi.json";
+    let src = "static_resources/meshdb_openapi.json";
     println!("cargo:rerun-if-changed={}", src);
 
     let file = std::fs::File::open(src).unwrap();
