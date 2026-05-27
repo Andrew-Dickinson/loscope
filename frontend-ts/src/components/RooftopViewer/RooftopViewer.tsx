@@ -290,54 +290,40 @@ interface SamplePointsProps {
 }
 
 function SamplePoints({ samplePoints, analyses, onPointClick, onHover, onHoverEnd, hoveredSphereRef, placementMode }: SamplePointsProps) {
-  const dummy = useMemo(() => new THREE.Object3D(), [])
+  const dummy   = useMemo(() => new THREE.Object3D(), [])
+  const allIdxs = useMemo(() => samplePoints.map((_, i) => i), [samplePoints])
 
-  const groups = useMemo(() => {
-    const g: Record<string, number[]> = {}
-    samplePoints.forEach((_, i) => {
-      const a = analyses[i]
-      const status = a === undefined ? '__not_requested__'
-                   : a === null      ? '__loading__'
-                   : a.result
-      if (!g[status]) g[status] = []
-      g[status].push(i)
-    })
-    return g
-  }, [samplePoints, analyses])
-
+  // Single stable group — never remounts mid-stream, preventing the one-frame
+  // origin flicker and dropped clicks that occurred when status-keyed groups
+  // mounted/unmounted as results arrived.
   return (
-    <>
-      {Object.entries(groups).map(([status, idxs]) => (
-        <SphereGroup
-          key={status}
-          idxs={idxs}
-          samplePoints={samplePoints}
-          dummy={dummy}
-          hoverable={!placementMode && status !== '__loading__'}
-          clickable={!placementMode && status !== '__loading__'}
-          onPointClick={onPointClick}
-          onHover={onHover}
-          onHoverEnd={onHoverEnd}
-          hoveredSphereRef={hoveredSphereRef}
-        />
-      ))}
-    </>
+    <SphereGroup
+      idxs={allIdxs}
+      samplePoints={samplePoints}
+      analyses={analyses}
+      dummy={dummy}
+      placementMode={placementMode}
+      onPointClick={onPointClick}
+      onHover={onHover}
+      onHoverEnd={onHoverEnd}
+      hoveredSphereRef={hoveredSphereRef}
+    />
   )
 }
 
 interface SphereGroupProps {
   idxs: number[]
   samplePoints: BackendSamplePoint[]
+  analyses: (PointAnalysis | null | undefined)[]
   dummy: THREE.Object3D
-  hoverable: boolean
-  clickable: boolean
+  placementMode: boolean
   onPointClick: (idx: number) => void
   onHover: (globalIdx: number) => void
   onHoverEnd: () => void
   hoveredSphereRef: React.MutableRefObject<number>
 }
 
-function SphereGroup({ idxs, samplePoints, dummy, hoverable, clickable, onPointClick, onHover, onHoverEnd, hoveredSphereRef }: SphereGroupProps) {
+function SphereGroup({ idxs, samplePoints, analyses, dummy, placementMode, onPointClick, onHover, onHoverEnd, hoveredSphereRef }: SphereGroupProps) {
   const meshRef  = useRef<THREE.InstancedMesh>(null)
   const depthRef = useRef<THREE.InstancedMesh>(null)
   const { invalidate } = useThree()
@@ -364,12 +350,7 @@ function SphereGroup({ idxs, samplePoints, dummy, hoverable, clickable, onPointC
     })
     mesh.instanceMatrix.needsUpdate = true
     if (depth) depth.instanceMatrix.needsUpdate = true
-    // If the hovered point left this group (e.g. transitioned to loading), reset cursor
-    if (hoveredSphereRef.current !== -1 && !idxs.includes(hoveredSphereRef.current)) {
-      onHoverEnd()
-      document.body.style.cursor = 'default'
-    }
-  }, [idxs, samplePoints, dummy, hoveredSphereRef, onHoverEnd])
+  }, [idxs, samplePoints, dummy])
 
   useFrame(() => {
     const mesh  = meshRef.current
@@ -405,28 +386,34 @@ function SphereGroup({ idxs, samplePoints, dummy, hoverable, clickable, onPointC
         ref={meshRef}
         args={[geo, mat, idxs.length]}
         onPointerDown={(e: ThreeEvent<PointerEvent>) => { pointerDownPos.current = { x: e.clientX, y: e.clientY } }}
-        onClick={clickable ? (e: ThreeEvent<MouseEvent>) => {
+        onClick={(e: ThreeEvent<MouseEvent>) => {
+          if (placementMode) return
+          const globalIdx = e.instanceId !== undefined ? idxs[e.instanceId] : undefined
+          if (globalIdx === undefined || analyses[globalIdx] === null) return
           const down = pointerDownPos.current
           if (!down) return
           const dx = e.clientX - down.x
           const dy = e.clientY - down.y
           if (dx * dx + dy * dy > 25) return  // >5px drag, ignore
           e.stopPropagation()
-          if (e.instanceId !== undefined) onPointClick(idxs[e.instanceId])
-        } : undefined}
-        onPointerOver={hoverable ? (e: ThreeEvent<PointerEvent>) => {
+          onPointClick(globalIdx)
+        }}
+        onPointerOver={(e: ThreeEvent<PointerEvent>) => {
+          if (placementMode) return
+          if (e.instanceId === undefined) return
+          const globalIdx = idxs[e.instanceId]
+          if (analyses[globalIdx] === null) return  // still loading — no hover
           e.stopPropagation()
-          if (e.instanceId !== undefined) {
-            onHover(idxs[e.instanceId])
-            document.body.style.cursor = 'pointer'
-            invalidate()
-          }
-        } : undefined}
-        onPointerOut={hoverable ? () => {
+          onHover(globalIdx)
+          document.body.style.cursor = 'pointer'
+          invalidate()
+        }}
+        onPointerOut={() => {
+          if (placementMode) return
           onHoverEnd()
           document.body.style.cursor = 'default'
           invalidate()
-        } : undefined}
+        }}
       />
     </>
   )
