@@ -185,20 +185,20 @@ export default function InputForm({ onSubmit }: InputFormProps) {
                 </div>
                 <input
                   type="range" min={6} max={24} step={3}
-                  value={values.sample_spacing}
-                  onChange={set('sample_spacing')}
+                  value={30 - parseInt(values.sample_spacing)}
+                  onChange={e => setValues(val => ({ ...val, sample_spacing: String(30 - parseInt(e.target.value)) }))}
                   disabled={submitting}
                   style={{ width: '100%', cursor: 'pointer', accentColor: '#388bfd' }}
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
                   {[
+                    { v: 24, label: 'Low precision', sub: 'Fast' },
+                    { v: 15, label: 'Medium',        sub: ''     },
                     { v: 6,  label: 'High precision', sub: 'Slow' },
-                    { v: 15, label: 'Medium',         sub: ''     },
-                    { v: 24, label: 'Low precision',  sub: 'Fast' },
                   ].map(({ v, label, sub }) => (
                     <div key={v} onClick={() => setValues(val => ({ ...val, sample_spacing: String(v) }))}
                       style={{
-                        textAlign: v === 6 ? 'left' : v === 24 ? 'right' : 'center',
+                        textAlign: v === 24 ? 'left' : v === 6 ? 'right' : 'center',
                         fontSize: 11, fontFamily: 'monospace',
                         color: parseInt(values.sample_spacing) === v ? '#388bfd' : '#5a6472',
                         transition: 'color 0.15s',
