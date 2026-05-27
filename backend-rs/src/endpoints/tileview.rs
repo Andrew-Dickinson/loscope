@@ -2,6 +2,7 @@ use crate::providers::Providers;
 use crate::types::obstructions::{ObstructionId, ObstructionMeta, ObstructionType};
 use crate::types::tiles::{SUBGRID_TILE_SIDE_LENGTH_USFT, TileId};
 use futures_util::StreamExt;
+use crate::util::image_adjustments::apply_photo_adjustments;
 use image::ImageFormat;
 use rocket::State;
 use rocket::http::{ContentType, Status};
@@ -140,6 +141,7 @@ pub async fn get_terrain_ortho(
     };
 
     let ortho_img = providers.ortho_provider().get_ortho(tile_id).await?;
+    let ortho_img = apply_photo_adjustments(ortho_img);
 
     let mut jpeg_bytes: Vec<u8> = Vec::new();
     ortho_img
