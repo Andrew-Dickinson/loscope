@@ -26,7 +26,6 @@ pub struct TerrainTileOverview {
 }
 
 // TODO: Port reprocessing?
-// TODO: Copy frontend over?
 
 #[get("/terrain/tileOverview/<tile_id>")]
 pub async fn get_terrain_tile_overview(
