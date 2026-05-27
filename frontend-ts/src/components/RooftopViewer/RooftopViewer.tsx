@@ -441,7 +441,13 @@ export interface RooftopCameraState {
 
 // Writes camera + orbit target to a ref on every controls change (no re-renders).
 // Also calls invalidate() so demand-mode canvas re-renders on camera movement.
-function CameraSync({ binId, stateRef }: { binId: string; stateRef: React.MutableRefObject<RooftopCameraState | null> }) {
+// Reports whether the camera is at the default position via onCameraChange.
+function CameraSync({ binId, stateRef, defaultCamRef, onCameraChange }: {
+  binId: string
+  stateRef: React.MutableRefObject<RooftopCameraState | null>
+  defaultCamRef: React.MutableRefObject<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>
+  onCameraChange: (atDefault: boolean) => void
+}) {
   const { camera, controls, invalidate } = useThree()
   useEffect(() => {
     if (!controls) return
@@ -453,25 +459,40 @@ function CameraSync({ binId, stateRef }: { binId: string; stateRef: React.Mutabl
         target:   oc.target.toArray()       as [number, number, number],
       }
       invalidate()
+      const d = defaultCamRef.current
+      if (d) {
+        // Only consider the orbit target (pan position) — orbiting and zooming
+        // move the camera but leave the target unchanged, so the button stays hidden.
+        onCameraChange(oc.target.distanceTo(d.target) < 0.01)
+      }
     }
     oc.addEventListener('change', save)
     return () => oc.removeEventListener('change', save)
-  }, [binId, camera, controls, stateRef, invalidate])
+  }, [binId, camera, controls, stateRef, defaultCamRef, onCameraChange, invalidate])
   return null
 }
 
 // Auto-fits on first load; restores saved state if available.
-function CameraFit({ binId, objUrl, stateRef }: { binId: string; objUrl: string; stateRef: React.MutableRefObject<RooftopCameraState | null> }) {
-  const { camera, controls } = useThree()
+// Saves the applied position/target as the "default" and registers a reset function.
+function CameraFit({ binId, objUrl, stateRef, defaultCamRef, resetCamFnRef }: {
+  binId: string
+  objUrl: string
+  stateRef: React.MutableRefObject<RooftopCameraState | null>
+  defaultCamRef: React.MutableRefObject<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>
+  resetCamFnRef: React.MutableRefObject<(() => void) | null>
+}) {
+  const { camera, controls, invalidate } = useThree()
   const obj = useLoader(OBJLoader, objUrl)
 
   useEffect(() => {
     const oc = controls as unknown as { target: THREE.Vector3; update: () => void } | null
+    let posVec: THREE.Vector3
+    let targetVec: THREE.Vector3
+
     if (stateRef.current?.binId === binId) {
       const { position, target } = stateRef.current
-      camera.position.set(...position)
-      if (oc) { oc.target.set(...target); oc.update() }
-      camera.lookAt(new THREE.Vector3(...target))
+      posVec    = new THREE.Vector3(...position)
+      targetVec = new THREE.Vector3(...target)
     } else {
       const box = new THREE.Box3().setFromObject(obj)
       const center = new THREE.Vector3()
@@ -502,11 +523,28 @@ function CameraFit({ binId, objUrl, stateRef }: { binId: string; objUrl: string;
       if (vertCount > 0) center.y = sumY / vertCount
 
       const span = Math.max(size.x, size.z)
-      camera.position.set(center.x - span * 0.6, center.y + span * 0.9, center.z + span * 1.3)
-      camera.lookAt(center)
-      if (oc) { oc.target.copy(center); oc.update() }
+      posVec    = new THREE.Vector3(center.x - span * 0.6, center.y + span * 0.9, center.z + span * 1.3)
+      targetVec = center.clone()
     }
-  }, [binId, obj, camera, controls, stateRef])
+
+    // Save default before applying so CameraSync sees atDefault=true on the
+    // programmatic oc.update() that follows.
+    defaultCamRef.current = { pos: posVec.clone(), target: targetVec.clone() }
+
+    // Register the reset function (captures the computed defaults via defaultCamRef).
+    resetCamFnRef.current = () => {
+      const d = defaultCamRef.current
+      if (!d) return
+      camera.position.copy(d.pos)
+      camera.lookAt(d.target)
+      if (oc) { oc.target.copy(d.target); oc.update() }
+      invalidate()
+    }
+
+    camera.position.copy(posVec)
+    camera.lookAt(targetVec)
+    if (oc) { oc.target.copy(targetVec); oc.update() }
+  }, [binId, obj, camera, controls, stateRef, defaultCamRef, resetCamFnRef, invalidate])
 
   return null
 }
@@ -517,6 +555,9 @@ interface SceneProps {
   samplePoints: BackendSamplePoint[]
   analyses: (PointAnalysis | null | undefined)[]
   cameraStateRef: React.MutableRefObject<RooftopCameraState | null>
+  defaultCamRef: React.MutableRefObject<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>
+  resetCamFnRef: React.MutableRefObject<(() => void) | null>
+  onCameraChange: (atDefault: boolean) => void
   onPointClick: (idx: number) => void
   nysB?: [number, number, number] | null
   placementMode: boolean
@@ -752,7 +793,7 @@ function SphereOverlay({ samplePoints, analyses, hoveredSphereRef }: {
   return <instancedMesh ref={meshRef} args={[geo, mat, n]} renderOrder={1} />
 }
 
-function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, nysB, placementMode, pendingWorldPos, mastOffsetFt, onPlacementClick, buildingOffset }: SceneProps) {
+function Scene({ binId, samplePoints, analyses, cameraStateRef, defaultCamRef, resetCamFnRef, onCameraChange, onPointClick, nysB, placementMode, pendingWorldPos, mastOffsetFt, onPlacementClick, buildingOffset }: SceneProps) {
   const objUrl           = `/api/rooftop/render/${binId}`
   const hoveredSphereRef = useRef<number>(-1)
   const { invalidate, camera, gl, controls } = useThree()
@@ -840,7 +881,7 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, ny
     <>
       <ambientLight intensity={0.6} />
       <directionalLight position={[1, 3, 2]} intensity={1.0} color={0xffeedd} />
-      <CameraSync binId={binId} stateRef={cameraStateRef} />
+      <CameraSync binId={binId} stateRef={cameraStateRef} defaultCamRef={defaultCamRef} onCameraChange={onCameraChange} />
       <Suspense fallback={null}>
         <BackgroundTiles binId={binId} buildingOffset={buildingOffset} />
         <TerrainMesh
@@ -867,7 +908,7 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, onPointClick, ny
         />
         {nysB && <DirectionArrows samplePoints={samplePoints} analyses={analyses} nysB={nysB} hoveredSphereRef={hoveredSphereRef} />}
         {pendingWorldPos && <PlacementMarker worldPos={pendingWorldPos} mastOffsetFt={mastOffsetFt} onDragStart={handleDragStart} />}
-        <CameraFit binId={binId} objUrl={objUrl} stateRef={cameraStateRef} />
+        <CameraFit binId={binId} objUrl={objUrl} stateRef={cameraStateRef} defaultCamRef={defaultCamRef} resetCamFnRef={resetCamFnRef} />
       </Suspense>
     </>
   )
@@ -882,6 +923,10 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
 
   const [placementMode,   setPlacementMode]   = useState(false)
   const [pendingWorldPos, setPendingWorldPos]  = useState<THREE.Vector3 | null>(null)
+  const [showReset,       setShowReset]        = useState(false)
+  const defaultCamRef = useRef<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>(null)
+  const resetCamFnRef = useRef<(() => void) | null>(null)
+  const handleCameraChange = useCallback((atDefault: boolean) => { setShowReset(!atDefault) }, [])
 
   // Store pendingWorldPos as the measurement point (mast tip), not the surface.
   // This way the draggable sphere sits exactly where the cursor is.
@@ -916,6 +961,9 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
           samplePoints={samplePoints}
           analyses={analyses}
           cameraStateRef={cameraStateRef}
+          defaultCamRef={defaultCamRef}
+          resetCamFnRef={resetCamFnRef}
+          onCameraChange={handleCameraChange}
           onPointClick={onPointClick}
           nysB={nysB}
           placementMode={placementMode}
@@ -925,6 +973,16 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
           buildingOffset={buildingOffset}
         />
       </Canvas>
+
+      {showReset && (
+        <button
+          style={styles.resetCamBtn}
+          onClick={() => resetCamFnRef.current?.()}
+          title="Reset to default view"
+        >
+          ↺ Reset view
+        </button>
+      )}
 
       <div style={styles.legend}>
         <div style={styles.legendTitle}>LOS Status</div>
@@ -973,6 +1031,19 @@ function LegendRow({ color, label }: { color: string; label: string }) {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  resetCamBtn: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    fontSize: 12,
+    fontFamily: 'monospace',
+    color: '#8b949e',
+    background: 'rgba(0,0,0,0.65)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: 6,
+    padding: '6px 10px',
+    cursor: 'pointer',
+  },
   legend: {
     position: 'absolute',
     top: 14,

@@ -275,8 +275,10 @@ function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, onBoundsReady, vi
 }
 
 // ── Camera setup ──────────────────────────────────────────────────────────────
-function CameraSetup({ heightRange, midFt, resetSeq, controlsRef }: {
+function CameraSetup({ heightRange, midFt, resetSeq, controlsRef, defaultTargetRef, resetCamFnRef }: {
   heightRange: number; midFt: number; resetSeq: number; controlsRef: React.RefObject<any>
+  defaultTargetRef: React.MutableRefObject<THREE.Vector3>
+  resetCamFnRef: React.MutableRefObject<(() => void) | null>
 }) {
   const { camera } = useThree()
 
@@ -284,6 +286,22 @@ function CameraSetup({ heightRange, midFt, resetSeq, controlsRef }: {
     const camDist = Math.max(heightRange * 3, 300)
     const oc = controlsRef.current
     const newTarget = new THREE.Vector3(0, midFt, 0)
+
+    // Save default BEFORE oc.update() so the CameraChangeTracker 'change' event
+    // triggered below correctly sees atDefault=true.
+    defaultTargetRef.current = newTarget.clone()
+
+    // Register reset: preserves current viewing angle, re-centres on terrain midpoint.
+    resetCamFnRef.current = () => {
+      const ctrl = controlsRef.current
+      if (!ctrl) return
+      const t = defaultTargetRef.current
+      const dist = Math.max(heightRange * 3, 300)
+      const dir = camera.position.clone().sub(ctrl.target).normalize()
+      ctrl.target.copy(t)
+      camera.position.copy(t.clone().addScaledVector(dir, dist))
+      ctrl.update()
+    }
 
     if (resetSeq > 0 && oc) {
       // Deselect: preserve current viewing angle, just re-center and reset distance
@@ -297,8 +315,28 @@ function CameraSetup({ heightRange, midFt, resetSeq, controlsRef }: {
       camera.position.set(camDist * 0.6, midFt + camDist * 0.8, camDist * 0.9)
       camera.lookAt(newTarget)
     }
-  }, [heightRange, midFt, camera, controlsRef, resetSeq])
+  }, [heightRange, midFt, camera, controlsRef, resetSeq, defaultTargetRef, resetCamFnRef])
 
+  return null
+}
+
+// ── Camera change tracker ─────────────────────────────────────────────────────
+// Listens to OrbitControls 'change' events and reports whether the orbit target
+// has been panned away from the default set by CameraSetup.
+function CameraChangeTracker({ controlsRef, defaultTargetRef, onCameraChange }: {
+  controlsRef: React.RefObject<any>
+  defaultTargetRef: React.MutableRefObject<THREE.Vector3>
+  onCameraChange: (atDefault: boolean) => void
+}) {
+  useEffect(() => {
+    const oc = controlsRef.current
+    if (!oc) return
+    const onChange = () => {
+      onCameraChange(oc.target.distanceTo(defaultTargetRef.current) < 0.01)
+    }
+    oc.addEventListener('change', onChange)
+    return () => oc.removeEventListener('change', onChange)
+  }, [controlsRef, defaultTargetRef, onCameraChange])
   return null
 }
 
@@ -337,9 +375,12 @@ interface SceneProps {
   activeKey: string | null
   onObsClick: (key: string) => void
   onItemLoaded: (key: string) => void
+  defaultTargetRef: React.MutableRefObject<THREE.Vector3>
+  resetCamFnRef: React.MutableRefObject<(() => void) | null>
+  onCameraChange: (atDefault: boolean) => void
 }
 
-function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibility, frameKey, activeKey, onObsClick, onItemLoaded }: SceneProps) {
+function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibility, frameKey, activeKey, onObsClick, onItemLoaded, defaultTargetRef, resetCamFnRef, onCameraChange }: SceneProps) {
   const [terrainInfo, setTerrainInfo] = useState<TerrainInfo | null>(null)
   const heightRange = terrainInfo?.heightRange ?? 1
   const midFt = terrainInfo ? (terrainInfo.minFt + terrainInfo.maxFt) / 2 : 0
@@ -427,7 +468,8 @@ function Scene({ tileId, analysisId, tileData, orthoUrl, obstructions, visibilit
         maxDistance={5000}
         maxPolarAngle={Math.PI * 0.9}
       />
-      {terrainInfo && <CameraSetup heightRange={heightRange} midFt={midFt} resetSeq={cameraResetSeq} controlsRef={controlsRef} />}
+      {terrainInfo && <CameraSetup heightRange={heightRange} midFt={midFt} resetSeq={cameraResetSeq} controlsRef={controlsRef} defaultTargetRef={defaultTargetRef} resetCamFnRef={resetCamFnRef} />}
+      {terrainInfo && <CameraChangeTracker controlsRef={controlsRef} defaultTargetRef={defaultTargetRef} onCameraChange={onCameraChange} />}
       {frameBox && <FrameTarget box={frameBox} controlsRef={controlsRef} />}
     </>
   )
@@ -643,12 +685,16 @@ interface Tile3DViewerProps {
 
 export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) {
   const tileData = useTileData(tileId, analysisId)
-  const [activeObs, setActiveObs] = useState<string | null>(null)
+  const [activeObs,  setActiveObs]  = useState<string | null>(null)
   const [visibility, setVisibility] = useState<Record<string, boolean>>({})
   const [loadedKeys, setLoadedKeys] = useState<Record<string, true>>({})
+  const [showReset,  setShowReset]  = useState(false)
+  const defaultTargetRef = useRef<THREE.Vector3>(new THREE.Vector3())
+  const resetCamFnRef    = useRef<(() => void) | null>(null)
+  const handleCameraChange = useCallback((atDefault: boolean) => { setShowReset(!atDefault) }, [])
 
-  // Reset visibility, loaded state, and selection when tile changes
-  useEffect(() => { setVisibility({}); setLoadedKeys({}); setActiveObs(null) }, [tileId, analysisId])
+  // Reset visibility, loaded state, selection, and camera-moved flag when tile changes
+  useEffect(() => { setVisibility({}); setLoadedKeys({}); setActiveObs(null); setShowReset(false) }, [tileId, analysisId])
 
   const handleItemLoaded = useCallback((key: string) =>
     setLoadedKeys(prev => prev[key] ? prev : { ...prev, [key]: true })
@@ -689,7 +735,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: 1, position: 'relative' }}>
         <Canvas
           camera={{ fov: 50, near: 0.5, far: 200000 }}
           gl={{ antialias: true }}
@@ -707,8 +753,20 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
             activeKey={activeObs}
             onObsClick={setActiveObs}
             onItemLoaded={handleItemLoaded}
+            defaultTargetRef={defaultTargetRef}
+            resetCamFnRef={resetCamFnRef}
+            onCameraChange={handleCameraChange}
           />
         </Canvas>
+        {showReset && (
+          <button
+            style={styles.resetCamBtn}
+            onClick={() => resetCamFnRef.current?.()}
+            title="Reset to default view"
+          >
+            ↺ Reset view
+          </button>
+        )}
       </div>
 
       {activeObs && (
@@ -734,6 +792,20 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  resetCamBtn: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    fontSize: 11,
+    fontFamily: 'monospace',
+    color: '#8b949e',
+    background: 'rgba(13, 17, 23, 0.85)',
+    border: '1px solid #1c2128',
+    borderRadius: 4,
+    padding: '4px 8px',
+    cursor: 'pointer',
+    zIndex: 1,
+  },
   placeholder: {
     height: '100%',
     display: 'flex',

@@ -150,8 +150,12 @@ function PlacementMarker({ worldPos, onDragStart }: {
 
 // ── Camera fit ───────────────────────────────────────────────────────────────
 
-function CameraFit({ objUrl }: { objUrl: string }) {
-  const { camera, controls } = useThree()
+function CameraFit({ objUrl, defaultCamRef, resetCamFnRef }: {
+  objUrl: string
+  defaultCamRef: React.MutableRefObject<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>
+  resetCamFnRef: React.MutableRefObject<(() => void) | null>
+}) {
+  const { camera, controls, invalidate } = useThree()
   const obj = useLoader(OBJLoader, objUrl)
 
   useEffect(() => {
@@ -160,21 +164,64 @@ function CameraFit({ objUrl }: { objUrl: string }) {
     const center = new THREE.Vector3(), size = new THREE.Vector3()
     box.getCenter(center); box.getSize(size)
     const span = Math.max(size.x, size.z)
-    camera.position.set(center.x - span * 0.6, center.y + span * 0.9, center.z + span * 1.3)
+    const pos = new THREE.Vector3(center.x - span * 0.6, center.y + span * 0.9, center.z + span * 1.3)
+
+    // Save default before applying so the CameraChangeTracker 'change' event
+    // triggered by oc.update() below correctly sees atDefault=true.
+    defaultCamRef.current = { pos: pos.clone(), target: center.clone() }
+
+    resetCamFnRef.current = () => {
+      const d = defaultCamRef.current
+      if (!d) return
+      camera.position.copy(d.pos)
+      camera.lookAt(d.target)
+      if (oc) { oc.target.copy(d.target); oc.update() }
+      invalidate()
+    }
+
+    camera.position.copy(pos)
     camera.lookAt(center)
     if (oc) { oc.target.copy(center); oc.update() }
-  }, [obj, camera, controls])
+  }, [obj, camera, controls, defaultCamRef, resetCamFnRef, invalidate])
 
+  return null
+}
+
+// Listens to OrbitControls 'change' events and reports whether the camera is
+// at the default position (set by CameraFit) via onCameraChange.
+function CameraChangeTracker({ defaultCamRef, onCameraChange }: {
+  defaultCamRef: React.MutableRefObject<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>
+  onCameraChange: (atDefault: boolean) => void
+}) {
+  const { camera, controls, invalidate } = useThree()
+  useEffect(() => {
+    if (!controls) return
+    const oc = controls as unknown as { target: THREE.Vector3; addEventListener: Function; removeEventListener: Function }
+    const onChange = () => {
+      invalidate()
+      const d = defaultCamRef.current
+      if (d) {
+        // Only consider the orbit target (pan position) — orbiting and zooming
+        // move the camera but leave the target unchanged, so the button stays hidden.
+        onCameraChange(oc.target.distanceTo(d.target) < 0.01)
+      }
+    }
+    oc.addEventListener('change', onChange)
+    return () => oc.removeEventListener('change', onChange)
+  }, [camera, controls, defaultCamRef, onCameraChange, invalidate])
   return null
 }
 
 // ── Scene ─────────────────────────────────────────────────────────────────────
 
-function Scene({ binId, pendingWorldPos, onTerrainClick, buildingOffset }: {
+function Scene({ binId, pendingWorldPos, onTerrainClick, buildingOffset, defaultCamRef, resetCamFnRef, onCameraChange }: {
   binId: string
   pendingWorldPos: THREE.Vector3 | null
   onTerrainClick: (point: THREE.Vector3) => void
   buildingOffset: { x_sw: number; y_sw: number } | null
+  defaultCamRef: React.MutableRefObject<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>
+  resetCamFnRef: React.MutableRefObject<(() => void) | null>
+  onCameraChange: (atDefault: boolean) => void
 }) {
   const objUrl = `/api/rooftop/render/${binId}`
   const { invalidate, camera, gl, controls } = useThree()
@@ -241,13 +288,14 @@ function Scene({ binId, pendingWorldPos, onTerrainClick, buildingOffset }: {
       <ambientLight intensity={0.6} />
       <directionalLight position={[1, 3, 2]} intensity={1.8} color={0xffeedd} />
       <directionalLight position={[-2, 2, -3]} intensity={0.5} color={0xddeeff} />
+      <CameraChangeTracker defaultCamRef={defaultCamRef} onCameraChange={onCameraChange} />
       <Suspense fallback={null}>
         <BackgroundTiles binId={binId} buildingOffset={buildingOffset} />
         <TerrainMesh objUrl={objUrl} onPlacementClick={onTerrainClick} onLoaded={handleLoaded} />
         {pendingWorldPos && (
           <PlacementMarker worldPos={pendingWorldPos} onDragStart={handleDragStart} />
         )}
-        <CameraFit objUrl={objUrl} />
+        <CameraFit objUrl={objUrl} defaultCamRef={defaultCamRef} resetCamFnRef={resetCamFnRef} />
       </Suspense>
     </>
   )
@@ -259,6 +307,10 @@ export default function FarEndPicker({ binId, label, onConfirm, onCancel }: FarE
   const [pendingWorldPos, setPendingWorldPos] = useState<THREE.Vector3 | null>(null)
   const [buildingOffset,  setBuildingOffset]  = useState<{ x_sw: number; y_sw: number } | null>(null)
   const [loadError,       setLoadError]       = useState<string | null>(null)
+  const [showReset,       setShowReset]       = useState(false)
+  const defaultCamRef  = useRef<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>(null)
+  const resetCamFnRef  = useRef<(() => void) | null>(null)
+  const handleCameraChange = useCallback((atDefault: boolean) => { setShowReset(!atDefault) }, [])
 
   useEffect(() => {
     fetch(`/api/rooftop/samplePoints/${binId}`, {
@@ -296,6 +348,11 @@ export default function FarEndPicker({ binId, label, onConfirm, onCancel }: FarE
           </span>
         </div>
         <div style={st.topRight}>
+          {showReset && (
+            <button style={st.resetCamBtn} onClick={() => resetCamFnRef.current?.()} title="Reset to default view">
+              ↺ Reset view
+            </button>
+          )}
           {pendingWorldPos && (
             <button style={st.confirmBtn} onClick={handleConfirm} disabled={!buildingOffset}>
               Confirm →
@@ -316,7 +373,15 @@ export default function FarEndPicker({ binId, label, onConfirm, onCancel }: FarE
             style={{ position: 'absolute', inset: 0, background: '#111827' }}
           >
             <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
-            <Scene binId={binId} pendingWorldPos={pendingWorldPos} onTerrainClick={handleTerrainClick} buildingOffset={buildingOffset} />
+            <Scene
+              binId={binId}
+              pendingWorldPos={pendingWorldPos}
+              onTerrainClick={handleTerrainClick}
+              buildingOffset={buildingOffset}
+              defaultCamRef={defaultCamRef}
+              resetCamFnRef={resetCamFnRef}
+              onCameraChange={handleCameraChange}
+            />
           </Canvas>
         )}
       </div>
@@ -345,6 +410,11 @@ const st: Record<string, React.CSSProperties> = {
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220,
   },
   hint:    { fontSize: 12, fontFamily: 'monospace', color: '#3d444d' },
+  resetCamBtn: {
+    fontSize: 12, fontFamily: 'monospace', color: '#8b949e',
+    background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: 4, padding: '3px 10px', cursor: 'pointer',
+  },
   confirmBtn: {
     fontSize: 12, fontFamily: 'monospace', color: '#4d9fff',
     background: 'rgba(77,159,255,0.08)', border: '1px solid rgba(77,159,255,0.4)',
