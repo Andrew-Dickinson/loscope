@@ -478,6 +478,29 @@ function CameraFit({ binId, objUrl, stateRef }: { binId: string; objUrl: string;
       const size   = new THREE.Vector3()
       box.getCenter(center)
       box.getSize(size)
+
+      // Replace the bounding-box Y midpoint with the vertex-average Y so the
+      // camera targets the bulk of the geometry (rooftop surface) rather than
+      // the midpoint between the model base and its highest point.
+      // Force the world matrix update first so applyMatrix4 sees the rotation
+      // that TerrainMesh sets on obj.
+      obj.updateWorldMatrix(true, true)
+      let sumY = 0
+      let vertCount = 0
+      const tempVec = new THREE.Vector3()
+      obj.traverse(child => {
+        const mesh = child as THREE.Mesh
+        if (!mesh.isMesh) return
+        const pos = mesh.geometry.attributes['position'] as THREE.BufferAttribute | undefined
+        if (!pos) return
+        for (let i = 0; i < pos.count; i++) {
+          tempVec.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld)
+          sumY += tempVec.y
+          vertCount++
+        }
+      })
+      if (vertCount > 0) center.y = sumY / vertCount
+
       const span = Math.max(size.x, size.z)
       camera.position.set(center.x - span * 0.6, center.y + span * 0.9, center.z + span * 1.3)
       camera.lookAt(center)
