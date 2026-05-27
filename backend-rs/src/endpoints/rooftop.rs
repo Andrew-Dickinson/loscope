@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use crate::building::background_tiles::zero_footprint_pixels;
 use crate::building::bin_id::BINId;
 use crate::building::heightmap::{RooftopHeightMapFactory, get_intersecting_tiles};
@@ -13,7 +14,9 @@ use rocket::serde::json::Json;
 use rocket::{State};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
-use image::imageops::tile;
+use geo::Buffer;
+
+const BACKGROUND_TILE_BUFFER_ZONE_USFT: f64 = 250.0;
 
 #[get("/render/<bin_id>")]
 pub async fn render_rooftop(
@@ -106,19 +109,25 @@ pub async fn background_tile_ids(
         return Err(Status::BadRequest);
     };
 
-    let footprint = providers
+    let tile_ids: HashSet<TileId> = providers
         .footprint_provider()
         .get_footprint(bin_id)
         .await
         .map_err(|e| {
             eprintln!("{:?}", e);
             Status::from(e)
-        })?;
-
-    let (tile_ids, _) = get_intersecting_tiles(&footprint).map_err(|e| {
-        eprintln!("{:?}", e);
-        Status::from(e)
-    })?;
+        })?
+        .buffer(BACKGROUND_TILE_BUFFER_ZONE_USFT)
+        .iter()
+        .map(|poly| get_intersecting_tiles(poly).map(|(tiles, _)| tiles))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            eprintln!("{:?}", e);
+            Status::from(e)
+        })?
+        .into_iter()
+        .flatten()
+        .collect();
 
     let tiles = tile_ids
         .into_iter()
