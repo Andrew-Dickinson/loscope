@@ -2891,6 +2891,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "las"
+version = "0.9.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c2594be0d2ec4f04c944f5cb5160625cd1a69451db14de73b990065f97fb84"
+dependencies = [
+ "byteorder",
+ "chrono",
+ "log",
+ "num-traits",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3059,6 +3073,7 @@ dependencies = [
  "clap",
  "geo",
  "indicatif",
+ "las",
  "loscope",
  "rayon",
  "serde",
