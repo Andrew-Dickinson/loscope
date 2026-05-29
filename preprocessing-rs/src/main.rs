@@ -10,6 +10,7 @@ use loscope::types::coords::NYSCoords2;
 use loscope::types::obstructions::{AttributeValue, ObstructionRaster, ObstructionType};
 use loscope::types::tiles::LASTileId;
 use loscope_preprocessing::nyc_tile_bounds::update_nyc_tiles_json;
+use loscope_preprocessing::dem::preprocess::split_dem;
 use loscope_preprocessing::download::{arcgis, city_data, socrata};
 use loscope_preprocessing::obstructions::{
     dem::max_ground_elevation_from_dem,
@@ -117,6 +118,16 @@ enum Command {
         #[arg(long, default_value_t = 1000)]
         chunk: usize,
     },
+
+    /// Split a citywide DEM GeoTIFF into canonical 500-usft elevation tiles
+    PreprocessDem {
+        /// Path to the input DEM GeoTIFF (EPSG:6539+6360, 1 usft/pixel, heights in usft)
+        dem_tif: PathBuf,
+
+        /// Output directory for tile .tif and .json files
+        #[arg(long, default_value = "data/dem_tiles")]
+        output: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -143,6 +154,9 @@ fn main() -> Result<()> {
         }
         Command::DownloadCityData { output, chunk } => {
             city_data::download_all(&output, chunk)?
+        }
+        Command::PreprocessDem { dem_tif, output } => {
+            split_dem(&dem_tif, &output)?;
         }
     }
 
