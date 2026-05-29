@@ -10,6 +10,7 @@ use loscope::types::coords::NYSCoords2;
 use loscope::types::obstructions::{AttributeValue, ObstructionRaster, ObstructionType};
 use loscope::types::tiles::LASTileId;
 use loscope_preprocessing::nyc_tile_bounds::update_nyc_tiles_json;
+use loscope_preprocessing::download::{arcgis, city_data, socrata};
 use loscope_preprocessing::obstructions::{
     dem::max_ground_elevation_from_dem,
     index::build_obstruction_index,
@@ -76,6 +77,46 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
     },
+
+    /// Download a single public ArcGIS FeatureServer layer to CSV
+    DownloadArcgis {
+        /// ArcGIS FeatureServer layer URL
+        url: String,
+
+        /// Output CSV path
+        #[arg(long)]
+        output: PathBuf,
+
+        /// Server-side WHERE clause (default: 1=1)
+        #[arg(long, default_value = "1=1")]
+        r#where: String,
+
+        /// Features per page
+        #[arg(long, default_value_t = 1000)]
+        chunk: usize,
+    },
+
+    /// Download NYC Open Data (Socrata) DOB tabular CSVs
+    DownloadOpendata {
+        /// Output directory
+        #[arg(long)]
+        output: PathBuf,
+
+        /// Rows per page
+        #[arg(long, default_value_t = 50000)]
+        chunk: usize,
+    },
+
+    /// Download all input datasets (ArcGIS + NYC Open Data)
+    DownloadCityData {
+        /// Output directory
+        #[arg(long)]
+        output: PathBuf,
+
+        /// Features/rows per page
+        #[arg(long, default_value_t = 1000)]
+        chunk: usize,
+    },
 }
 
 fn main() -> Result<()> {
@@ -89,6 +130,19 @@ fn main() -> Result<()> {
         }
         Command::BuildObstructionIndex { obstructions, output } => {
             build_obstruction_index(&obstructions, &output)?
+        }
+        Command::DownloadArcgis { url, output, r#where, chunk } => {
+            arcgis::download(&url, &output, &r#where, chunk)?
+        }
+        Command::DownloadOpendata { output, chunk } => {
+            std::fs::create_dir_all(&output)?;
+            for ds in socrata::NYC_OPEN_DATA_DATASETS {
+                println!("Downloading {} …", ds.description);
+                socrata::download(ds.id, &output.join(ds.filename), chunk)?;
+            }
+        }
+        Command::DownloadCityData { output, chunk } => {
+            city_data::download_all(&output, chunk)?
         }
     }
 
