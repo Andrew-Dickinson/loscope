@@ -9,8 +9,6 @@ const BUILDING_FOOTPRINTS_URL: &str =
 const TAX_LOTS_URL: &str =
     "https://services6.arcgis.com/yG5s3afENB5iO9fj/ArcGIS/rest/services/DTM_ETL_DAILY_view/FeatureServer/0";
 
-const DEFAULT_CHUNK: usize = 1000;
-
 /// Download all input datasets required by `build-database`.
 ///
 /// Geographic datasets (building footprints, tax lots) are fetched from ArcGIS;

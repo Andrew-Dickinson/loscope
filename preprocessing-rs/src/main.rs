@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -10,7 +10,9 @@ use loscope::types::coords::NYSCoords2;
 use loscope::types::obstructions::{AttributeValue, ObstructionRaster, ObstructionType};
 use loscope::types::tiles::LASTileId;
 use loscope_preprocessing::nyc_tile_bounds::update_nyc_tiles_json;
+use loscope_preprocessing::database::{ingest, schema};
 use loscope_preprocessing::dem::preprocess::split_dem;
+use loscope_preprocessing::footprint_wkt::export::export_footprint_wkt;
 use loscope_preprocessing::download::{arcgis, city_data, socrata};
 use loscope_preprocessing::obstructions::{
     dem::max_ground_elevation_from_dem,
@@ -119,6 +121,33 @@ enum Command {
         chunk: usize,
     },
 
+    /// Build the nyc_dob.db SQLite database from downloaded CSV files
+    BuildDatabase {
+        /// Output database path
+        #[arg(long)]
+        output: PathBuf,
+
+        #[arg(long)] footprints: Option<PathBuf>,
+        #[arg(long)] tax_lots: Option<PathBuf>,
+        #[arg(long)] dob_jobs: Option<PathBuf>,
+        #[arg(long)] dob_now_jobs: Option<PathBuf>,
+        #[arg(long)] cos: Option<PathBuf>,
+        #[arg(long)] permits: Option<PathBuf>,
+        #[arg(long)] now_permits: Option<PathBuf>,
+        #[arg(long)] condos: Option<PathBuf>,
+    },
+
+    /// Export per-BIN footprint WKT files from the SQLite database
+    BuildFootprintWkt {
+        /// Path to nyc_dob.db
+        #[arg(long)]
+        db: PathBuf,
+
+        /// Output directory for {bin}.wkt files
+        #[arg(long)]
+        output: PathBuf,
+    },
+
     /// Split a citywide DEM GeoTIFF into canonical 500-usft elevation tiles
     PreprocessDem {
         /// Path to the input DEM GeoTIFF (EPSG:6539+6360, 1 usft/pixel, heights in usft)
@@ -154,6 +183,15 @@ fn main() -> Result<()> {
         }
         Command::DownloadCityData { output, chunk } => {
             city_data::download_all(&output, chunk)?
+        }
+        Command::BuildDatabase {
+            output, footprints, tax_lots, dob_jobs, dob_now_jobs, cos, permits, now_permits, condos,
+        } => run_build_database(
+            &output, footprints, tax_lots, dob_jobs, dob_now_jobs, cos, permits, now_permits, condos,
+        )?,
+        Command::BuildFootprintWkt { db, output } => {
+            let count = export_footprint_wkt(&db, &output)?;
+            println!("Wrote {count} .wkt files to {}", output.display());
         }
         Command::PreprocessDem { dem_tif, output } => {
             split_dem(&dem_tif, &output)?;
@@ -234,11 +272,55 @@ fn run_preprocess_tiles(input: &PathBuf, output: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_build_database(
+    db_path: &Path,
+    footprints: Option<PathBuf>,
+    tax_lots: Option<PathBuf>,
+    dob_jobs: Option<PathBuf>,
+    dob_now_jobs: Option<PathBuf>,
+    cos: Option<PathBuf>,
+    permits: Option<PathBuf>,
+    now_permits: Option<PathBuf>,
+    condos: Option<PathBuf>,
+) -> Result<()> {
+    use rusqlite::Connection;
+
+    let conn = Connection::open(db_path)
+        .map_err(|e| anyhow::anyhow!("Cannot open/create {}: {e}", db_path.display()))?;
+    conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+    conn.execute_batch(schema::CREATE_TABLES)?;
+
+    macro_rules! ingest_if {
+        ($opt:expr, $fn:ident, $label:literal) => {
+            if let Some(path) = $opt {
+                println!("Ingesting {} from {} …", $label, path.display());
+                let n = ingest::$fn(&conn, &path)?;
+                println!("  → {n} rows");
+            }
+        };
+    }
+
+    ingest_if!(footprints, ingest_building_footprints, "building_footprints");
+    ingest_if!(tax_lots, ingest_tax_lots, "tax_lots");
+    ingest_if!(dob_jobs, ingest_dob_job_applications, "dob_job_applications");
+    ingest_if!(dob_now_jobs, ingest_dob_now_job_applications, "dob_now_job_applications");
+    ingest_if!(cos, ingest_certificates_of_occupancy, "certificates_of_occupancy");
+    ingest_if!(permits, ingest_dob_permit_issuance, "dob_permit_issuance");
+    ingest_if!(now_permits, ingest_dob_now_approved_permits, "dob_now_approved_permits");
+    ingest_if!(condos, ingest_condo_units, "condo_units");
+
+    println!("Creating indexes …");
+    conn.execute_batch(schema::CREATE_INDEXES)?;
+    println!("Done. Database written to {}", db_path.display());
+    Ok(())
+}
+
 fn run_build_obstructions(
-    query_path: &PathBuf,
-    db_path: &PathBuf,
-    out_dir: &PathBuf,
-    dem_cache: &PathBuf,
+    query_path: &Path,
+    db_path: &Path,
+    out_dir: &Path,
+    dem_cache: &Path,
 ) -> Result<()> {
     use rusqlite::{Connection, OpenFlags};
     use wkt::TryFromWkt;
