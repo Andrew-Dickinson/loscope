@@ -3075,6 +3075,7 @@ dependencies = [
  "indicatif",
  "las",
  "loscope",
+ "ndarray",
  "rayon",
  "serde",
  "serde_json",

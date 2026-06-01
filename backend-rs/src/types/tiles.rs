@@ -244,6 +244,10 @@ impl Display for SubgridId {
 }
 
 impl TileId {
+    pub fn new(las_tile_id: LASTileId, subgrid_id: SubgridId) -> Self {
+        TileId { las_tile_id, subgrid_id }
+    }
+
     pub fn parse(input_str: &str) -> Result<TileId, TileParseErr> {
         let (las_tile_id_str, subgrid_id_str) = match input_str.find(TILE_ID_SEPARATOR) {
             Some(i) if i > 0 => (&input_str[..i], &input_str[(i + 1)..]),
