@@ -3081,6 +3081,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tiff 0.11.3",
+ "uuid",
  "wkt",
 ]
 

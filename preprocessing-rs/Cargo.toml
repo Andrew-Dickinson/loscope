@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 loscope = { path = "../backend-rs" }
 ndarray = "0.17.2"
+uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive"] }
 las = "0.9"
 tiff = "0.11.3"

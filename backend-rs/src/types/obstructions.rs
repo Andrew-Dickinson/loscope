@@ -14,9 +14,12 @@ use std::fmt::Display;
 use std::fs::File;
 use std::str::FromStr;
 use std::{fmt, io};
+use std::io::{Seek, Write};
 use strum::ParseError;
 use strum_macros::{AsRefStr, EnumString};
+use tiff::TiffError;
 use tiff::decoder::{Decoder, DecodingResult};
+use tiff::encoder::{TiffEncoder, colortype};
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -116,7 +119,7 @@ pub type ObstructionId = Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
-enum AttributeValue {
+pub enum AttributeValue {
     String(String),
     Number(serde_json::Number),
     Bool(bool),
@@ -261,6 +264,17 @@ impl ObstructionRaster {
         Ok(ObstructionRaster {
             heightmap: image_data,
         })
+    }
+
+    pub fn write_to_tiff<W: Write + Seek>(&self, mut writer: W) -> Result<(), TiffError> {
+        let (height, width) = self.heightmap.dim();
+        let mut tiff = TiffEncoder::new(&mut writer)?;
+        tiff.write_image::<colortype::Gray16>(
+            width as u32,
+            height as u32,
+            self.heightmap.as_slice().unwrap(),
+        )?;
+        Ok(())
     }
 
     pub fn to_obj_stream(

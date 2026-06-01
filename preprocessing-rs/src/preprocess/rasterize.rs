@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use las::Read;
 use loscope::types::tiles::{LAS_TILE_SIDE_LENGTH_USFT, LASTileId};
 
 const MAX_Z_USFT: f64 = 2000.0;
