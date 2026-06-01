@@ -3079,6 +3079,8 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "tempfile",
+ "tiff 0.11.3",
  "wkt",
 ]
 

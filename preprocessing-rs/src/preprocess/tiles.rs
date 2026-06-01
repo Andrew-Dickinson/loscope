@@ -4,7 +4,7 @@ use ndarray::Array2;
 
 use super::rasterize::GRID_SIDE;
 
-const TILE_SIDE: usize = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
+pub const TILE_SIDE: usize = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
 const GRID_N: usize = 5; // tiles per side of a LAS file (5×5 = 25)
 
 /// Split a 2500×2500 filled uint16 grid into 25 ElevationTiles.
