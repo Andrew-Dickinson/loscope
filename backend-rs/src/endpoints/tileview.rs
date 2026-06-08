@@ -25,8 +25,6 @@ pub struct TerrainTileOverview {
     obstruction_ids: HashMap<ObstructionType, Vec<ObstructionId>>,
 }
 
-// TODO: Port reprocessing?
-
 #[get("/terrain/tileOverview/<tile_id>")]
 pub async fn get_terrain_tile_overview(
     tile_id: &str,
