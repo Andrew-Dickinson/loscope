@@ -13,7 +13,7 @@ use loscope_preprocessing::nyc_tile_bounds::update_nyc_tiles_json;
 use loscope_preprocessing::database::{ingest, schema};
 use loscope_preprocessing::dem::preprocess::split_dem;
 use loscope_preprocessing::footprint_wkt::export::export_footprint_wkt;
-use loscope_preprocessing::download::{arcgis, city_data, socrata};
+use loscope_preprocessing::download::{arcgis, city_data, planimetrics, socrata};
 use loscope_preprocessing::obstructions::{
     dem::max_ground_elevation_from_dem,
     index::build_obstruction_index,
@@ -148,6 +148,21 @@ enum Command {
         output: PathBuf,
     },
 
+    /// Download 2022 NYC Planimetrics layers from ArcGIS (all layers, or one by slug)
+    DownloadPlanimetrics {
+        /// Output directory for CSV files
+        #[arg(long)]
+        output: PathBuf,
+
+        /// Download only this layer (slug, e.g. "hydrography"); omit to download all 26 layers
+        #[arg(long)]
+        layer: Option<String>,
+
+        /// Features per page
+        #[arg(long, default_value_t = 1000)]
+        chunk: usize,
+    },
+
     /// Split a citywide DEM GeoTIFF into canonical 500-usft elevation tiles
     PreprocessDem {
         /// Path to the input DEM GeoTIFF (EPSG:6539+6360, 1 usft/pixel, heights in usft)
@@ -192,6 +207,12 @@ fn main() -> Result<()> {
         Command::BuildFootprintWkt { db, output } => {
             let count = export_footprint_wkt(&db, &output)?;
             println!("Wrote {count} .wkt files to {}", output.display());
+        }
+        Command::DownloadPlanimetrics { output, layer, chunk } => {
+            match layer {
+                Some(slug) => planimetrics::download_one(&slug, &output, chunk)?,
+                None => planimetrics::download_all(&output, chunk)?,
+            }
         }
         Command::PreprocessDem { dem_tif, output } => {
             split_dem(&dem_tif, &output)?;

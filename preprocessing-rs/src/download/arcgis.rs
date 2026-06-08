@@ -1,7 +1,7 @@
 use std::io::BufWriter;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::blocking::Client;
 use serde_json::Value;
@@ -82,6 +82,9 @@ pub fn download(
         .context("Failed to fetch feature count")?
         .json()
         .context("Failed to parse feature count response")?;
+    if let Some(error_json) = count_resp.get("error") {
+        return Err(anyhow!("{}", error_json.to_string())).context(format!(" while accessing {}", count_url));
+    }
     let total = count_resp["count"].as_u64().unwrap_or(0) as usize;
 
     let pb = ProgressBar::new(total as u64);
@@ -108,6 +111,10 @@ pub fn download(
             .with_context(|| format!("Failed to fetch features at offset {offset}"))?
             .json()
             .context("Failed to parse feature page")?;
+
+        if let Some(error_json) = resp.get("error") {
+            return Err(anyhow!("{}", error_json.to_string())).context(format!(" while accessing {}", count_url));
+        }
 
         let features = match resp["features"].as_array() {
             Some(f) if !f.is_empty() => f,
