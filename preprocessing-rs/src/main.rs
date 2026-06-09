@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use geo::Polygon;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -23,7 +23,15 @@ use loscope_preprocessing::obstructions::{
 };
 use ndarray::Array2;
 use loscope_preprocessing::preprocess::{
-    gap_fill::fill_gaps, io::write_tile, rasterize::build_height_grid, tiles::split_tiles,
+    classify::{
+        build_class_grid, filter_polys_for_tile, load_building_footprints,
+        load_osm_hydro_structures, load_osm_land_polys, load_planimetrics_csv, tile_bbox,
+        PixelClass,
+    },
+    gap_fill::fill_gaps,
+    io::{write_class_tile, write_tile},
+    rasterize::build_height_grid,
+    tiles::split_tiles_with_class,
 };
 use rayon::prelude::*;
 use uuid::Uuid;
@@ -40,15 +48,39 @@ enum Command {
     /// Generate nyc_tiles.json from the NYC boundary WKT file
     NycTiles,
 
-    /// Rasterize LAS point clouds into 500×500 elevation tiles
+    /// Rasterize LAS point clouds into 500×500 elevation tiles and classification tiles
     PreprocessTiles {
         /// Directory containing .las input files
         #[arg(long)]
         input: PathBuf,
 
-        /// Directory to write .tif output tiles
+        /// Directory to write .tif output tiles (classification tiles go in output/classification/)
         #[arg(long)]
         output: PathBuf,
+
+        /// Path to the nyc_dob.db SQLite database (output of build-database)
+        #[arg(long)]
+        features_db: PathBuf,
+
+        /// Path to the OSM land-polygons shapefile (WGS84 / EPSG 4326)
+        #[arg(long)]
+        osm_land_polys: PathBuf,
+
+        /// Path to the OSM hydro-structures GeoJSON (WGS84 / EPSG 4326)
+        #[arg(long)]
+        osm_hydro_structures: PathBuf,
+
+        /// Path to the planimetrics misc-structure-poly CSV (the_geom in EPSG 6539)
+        #[arg(long)]
+        planimetrics_misc_structures: PathBuf,
+
+        /// Path to the planimetrics hydro-structure CSV (the_geom in EPSG 6539)
+        #[arg(long)]
+        planimetrics_hydro_structures: PathBuf,
+
+        /// Set elevation to 0 for pixels classified as water
+        #[arg(long, default_value_t = false)]
+        zero_water_elevation: bool,
     },
 
     /// Generate obstruction tif+json pairs by running a SQL query against nyc_dob.db
@@ -179,7 +211,17 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::NycTiles => update_nyc_tiles_json(),
-        Command::PreprocessTiles { input, output } => run_preprocess_tiles(&input, &output)?,
+        Command::PreprocessTiles {
+            input, output, features_db,
+            osm_land_polys, osm_hydro_structures,
+            planimetrics_misc_structures, planimetrics_hydro_structures,
+            zero_water_elevation,
+        } => run_preprocess_tiles(
+            &input, &output, &features_db,
+            &osm_land_polys, &osm_hydro_structures,
+            &planimetrics_misc_structures, &planimetrics_hydro_structures,
+            zero_water_elevation,
+        )?,
         Command::BuildObstructions { query, db, output, dem_cache } => {
             run_build_obstructions(&query, &db, &output, &dem_cache)?
         }
@@ -222,8 +264,46 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_preprocess_tiles(input: &PathBuf, output: &PathBuf) -> Result<()> {
+fn run_preprocess_tiles(
+    input: &PathBuf,
+    output: &PathBuf,
+    features_db: &PathBuf,
+    osm_land_polys: &PathBuf,
+    osm_hydro_structures: &PathBuf,
+    planimetrics_misc_structures: &PathBuf,
+    planimetrics_hydro_structures: &PathBuf,
+    zero_water_elevation: bool,
+) -> Result<()> {
     std::fs::create_dir_all(output)?;
+
+    println!("Loading building footprints …");
+    let building_footprints = load_building_footprints(features_db)
+        .with_context(|| format!("Failed to load building footprints from {}", features_db.display()))?;
+    println!("  → {} footprints", building_footprints.len());
+
+    println!("Loading planimetrics misc structures …");
+    let misc_structures = load_planimetrics_csv(planimetrics_misc_structures)
+        .with_context(|| format!("Failed to load misc structures from {}", planimetrics_misc_structures.display()))?;
+    println!("  → {} misc structures", misc_structures.len());
+
+    println!("Loading planimetrics hydro structures …");
+    let planimetrics_hydro = load_planimetrics_csv(planimetrics_hydro_structures)
+        .with_context(|| format!("Failed to load hydro structures from {}", planimetrics_hydro_structures.display()))?;
+    println!("  → {} planimetrics hydro structures", planimetrics_hydro.len());
+
+    println!("Loading OSM land polygons …");
+    let land_polys = load_osm_land_polys(osm_land_polys)
+        .with_context(|| format!("Failed to load OSM land polygons from {}", osm_land_polys.display()))?;
+    println!("  → {} land polygons", land_polys.len());
+
+    println!("Loading OSM hydro structures …");
+    let osm_hydro = load_osm_hydro_structures(osm_hydro_structures)
+        .with_context(|| format!("Failed to load OSM hydro structures from {}", osm_hydro_structures.display()))?;
+    println!("  → {} OSM hydro structures", osm_hydro.len());
+
+    // Combine both hydro sources into one list for tile filtering
+    let mut all_hydro = osm_hydro;
+    all_hydro.extend(planimetrics_hydro);
 
     let las_files: Vec<PathBuf> = std::fs::read_dir(input)?
         .filter_map(|e| e.ok())
@@ -249,6 +329,12 @@ fn run_preprocess_tiles(input: &PathBuf, output: &PathBuf) -> Result<()> {
             .unwrap(),
     );
 
+    // Arc-wrap shared read-only data for rayon parallelism
+    let building_footprints = std::sync::Arc::new(building_footprints);
+    let misc_structures = std::sync::Arc::new(misc_structures);
+    let all_hydro = std::sync::Arc::new(all_hydro);
+    let land_polys = std::sync::Arc::new(land_polys);
+
     let results: Vec<anyhow::Result<usize>> = las_files
         .par_iter()
         .map(|las_path| {
@@ -259,13 +345,37 @@ fn run_preprocess_tiles(input: &PathBuf, output: &PathBuf) -> Result<()> {
             let las_id = LASTileId::parse(stem)
                 .map_err(|e| anyhow::anyhow!("Invalid LAS filename {:?}: {:?}", stem, e))?;
 
-            let (height_grid, count_grid) =
+            let (height_grid, count_grid, veg_grid) =
                 build_height_grid(las_path.to_str().unwrap(), las_id)?;
-            let filled = fill_gaps(&height_grid, &count_grid);
-            let tiles = split_tiles(&filled, las_id);
-            let n_tiles = tiles.len();
-            for tile in &tiles {
+
+            let tbbox = tile_bbox(las_id);
+            let tile_buildings = filter_polys_for_tile(&building_footprints, tbbox);
+            let tile_misc = filter_polys_for_tile(&misc_structures, tbbox);
+            let tile_hydro = filter_polys_for_tile(&all_hydro, tbbox);
+            let tile_land = filter_polys_for_tile(&land_polys, tbbox);
+
+            let class_grid = build_class_grid(
+                &height_grid, &veg_grid,
+                &tile_buildings, &tile_misc,
+                &tile_hydro, &tile_land,
+                las_id,
+            );
+
+            let mut filled = fill_gaps(&height_grid, &count_grid);
+
+            if zero_water_elevation {
+                for (idx, &cls) in class_grid.iter().enumerate() {
+                    if cls == PixelClass::Water as u8 {
+                        filled[idx] = 0;
+                    }
+                }
+            }
+
+            let tile_pairs = split_tiles_with_class(&filled, &class_grid, las_id);
+            let n_tiles = tile_pairs.len();
+            for (tile, class_sub) in &tile_pairs {
                 write_tile(tile, output)?;
+                write_class_tile(tile.id(), class_sub, output)?;
             }
             pb.inc(1);
             Ok(n_tiles)
