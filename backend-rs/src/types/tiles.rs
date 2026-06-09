@@ -361,6 +361,8 @@ impl TileId {
     }
 
     pub fn is_in_nyc(&self) -> bool {
+        // TODO: Add an analysis outcome based on an && of this function on
+        //  all LAS tile IDs in the analysis
         NYC_TILE_SET.binary_search(&self.as_packed_u64()).is_ok()
     }
 }

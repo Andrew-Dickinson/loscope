@@ -34,6 +34,10 @@ pub async fn get_terrain_tile_overview(
         return Err(Status::BadRequest);
     };
 
+    // TODO: Fetch street geometry and use it to label street names in the 3d view?
+
+    // TODO: Add obstructions for bridge tiles/outlines
+
     Ok(Json(TerrainTileOverview {
         obstruction_ids: providers
             .obstruction_provider()
@@ -139,6 +143,8 @@ pub async fn get_terrain_ortho(
 
     let ortho_img = providers.ortho_provider().get_ortho(tile_id).await?;
     let ortho_img = apply_photo_adjustments(ortho_img);
+
+    // TODO: Also expose pixel classification here? Or colorize image based on it?
 
     let mut jpeg_bytes: Vec<u8> = Vec::new();
     ortho_img
