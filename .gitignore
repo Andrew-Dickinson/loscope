@@ -4,3 +4,4 @@ data/
 .idea/
 .env
 **/target/
+/mise.toml
