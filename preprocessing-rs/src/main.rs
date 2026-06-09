@@ -34,6 +34,7 @@ use loscope_preprocessing::preprocess::{
     tiles::split_tiles_with_class,
 };
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use uuid::Uuid;
 
 #[derive(Parser)]
@@ -464,83 +465,128 @@ fn run_build_obstructions(
     let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     conn.execute_batch("PRAGMA cache_size=-65536; PRAGMA temp_store=MEMORY;")?;
 
+    struct RawRow {
+        geom_str: Option<String>,
+        ground_elevation: Option<f64>,
+        height_roof: Option<f64>,
+        type_str: Option<String>,
+        props_str: Option<String>,
+    }
+
     let mut stmt = conn.prepare(&sql)?;
-    let mut rows = stmt.query([])?;
+    let raw_rows: Vec<RawRow> = stmt
+        .query_map([], |row| {
+            Ok(RawRow {
+                geom_str: row.get(0)?,
+                ground_elevation: row.get(1)?,
+                height_roof: row.get(2)?,
+                type_str: row.get(3)?,
+                props_str: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    let mut written = 0usize;
-    let mut skipped = 0usize;
+    let pb = ProgressBar::new(raw_rows.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{bar:40} {pos}/{len} rows | {per_sec} | eta: {eta}")
+            .unwrap(),
+    );
 
-    while let Some(row) = rows.next()? {
-        let geom_str: Option<String> = row.get(0)?; // output_geometry
-        let ground_elevation: Option<f64> = row.get(1)?; // may be NULL
-        let height_roof: Option<f64> = row.get(2)?;
-        let type_str: Option<String> = row.get(3)?;
-        let props_str: Option<String> = row.get(4)?;
+    let written = AtomicUsize::new(0);
+    let skipped = AtomicUsize::new(0);
 
-        let (geom_str, height_roof, type_str, props_str) =
-            match (geom_str, height_roof, type_str, props_str) {
+    raw_rows.par_iter().for_each(|raw| {
+        pb.inc(1);
+
+        let result: anyhow::Result<bool> = (|| {
+            let (geom_str, height_roof, type_str, props_str) = match (
+                raw.geom_str.clone(),
+                raw.height_roof,
+                raw.type_str.clone(),
+                raw.props_str.clone(),
+            ) {
                 (Some(g), Some(h), Some(t), Some(p)) => (g, h, t, p),
-                _ => { skipped += 1; continue; }
+                _ => return Ok(false),
             };
 
-        if geom_str.is_empty() { skipped += 1; continue; }
-
-        let obs_type = match ObstructionType::parse(&type_str) {
-            Ok(t) => t,
-            Err(_) => {
-                eprintln!("Unknown obstruction type: {type_str}");
-                skipped += 1;
-                continue;
+            if geom_str.is_empty() {
+                return Ok(false);
             }
-        };
 
-        let poly: Polygon<f64> = match Polygon::try_from_wkt_str(&geom_str) {
-            Ok(p) => p,
-            Err(_) => { skipped += 1; continue; }
-        };
+            let obs_type = match ObstructionType::parse(&type_str) {
+                Ok(t) => t,
+                Err(_) => {
+                    eprintln!("Unknown obstruction type: {type_str}");
+                    return Ok(false);
+                }
+            };
 
-        let ground_elev = match ground_elevation {
-            Some(e) => e,
-            None => match max_ground_elevation_from_dem(&poly, dem_cache) {
+            let poly: Polygon<f64> = match Polygon::try_from_wkt_str(&geom_str) {
+                Ok(p) => p,
+                Err(_) => return Ok(false),
+            };
+
+            let ground_elev = match raw.ground_elevation {
                 Some(e) => e,
-                None => { skipped += 1; continue; }
-            },
-        };
+                None => match max_ground_elevation_from_dem(&poly, dem_cache) {
+                    Some(e) => e,
+                    None => return Ok(false),
+                },
+            };
 
-        let total_height_inches = ((ground_elev + height_roof) * 12.0).round() as u16;
-        let tile_ids = match get_intersecting_tiles(&poly) {
-            Ok((tiles, _)) => tiles,
-            Err(_) => { skipped += 1; continue; }
-        };
-        let (x_sw, y_sw, w, h, flat_raster) = rasterize_polygon(&poly, total_height_inches);
+            let total_height_inches = ((ground_elev + height_roof) * 12.0).round() as u16;
+            let tile_ids = match get_intersecting_tiles(&poly) {
+                Ok((tiles, _)) => tiles,
+                Err(_) => return Ok(false),
+            };
+            let (x_sw, y_sw, w, h, flat_raster) = rasterize_polygon(&poly, total_height_inches);
 
-        if flat_raster.iter().all(|&v| v == 0) { skipped += 1; continue; }
+            if flat_raster.iter().all(|&v| v == 0) {
+                return Ok(false);
+            }
 
-        let uuid = Uuid::new_v4();
-        let mut attributes: HashMap<String, AttributeValue> =
-            serde_json::from_str(&props_str).unwrap_or_default();
-        attributes.insert(
-            "ground_elevation".to_string(),
-            AttributeValue::Number(serde_json::Number::from_f64(ground_elev).unwrap_or(0.into())),
-        );
+            let uuid = Uuid::new_v4();
+            let mut attributes: HashMap<String, AttributeValue> =
+                serde_json::from_str(&props_str).unwrap_or_default();
+            attributes.insert(
+                "ground_elevation".to_string(),
+                AttributeValue::Number(
+                    serde_json::Number::from_f64(ground_elev).unwrap_or(0.into()),
+                ),
+            );
 
-        let raster = ObstructionRaster::new(
-            Array2::from_shape_vec((w as usize, h as usize), flat_raster).unwrap(),
-        );
-        let meta = ObstructionMetaOutput {
-            obstruction_id: uuid,
-            obstruction_type: obs_type,
-            attributes,
-            tile_ids,
-            offset_nys: NYSCoords2::new(x_sw as f64, y_sw as f64),
-            width: w as usize,
-            height: h as usize,
-            raster_file: format!("{uuid}.tif"),
-        };
+            let raster = ObstructionRaster::new(
+                Array2::from_shape_vec((w as usize, h as usize), flat_raster).unwrap(),
+            );
+            let meta = ObstructionMetaOutput {
+                obstruction_id: uuid,
+                obstruction_type: obs_type,
+                attributes,
+                tile_ids,
+                offset_nys: NYSCoords2::new(x_sw as f64, y_sw as f64),
+                width: w as usize,
+                height: h as usize,
+                raster_file: format!("{uuid}.tif"),
+            };
 
-        write_obstruction(&meta, &raster, out_dir)?;
-        written += 1;
-    }
+            write_obstruction(&meta, &raster, out_dir)?;
+            Ok(true)
+        })();
+
+        match result {
+            Ok(true) => { written.fetch_add(1, Ordering::Relaxed); }
+            Ok(false) => { skipped.fetch_add(1, Ordering::Relaxed); }
+            Err(e) => {
+                eprintln!("Error: {e}");
+                skipped.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    });
+
+    pb.finish_and_clear();
+    let written = written.load(Ordering::Relaxed);
+    let skipped = skipped.load(Ordering::Relaxed);
 
     if skipped > 0 {
         eprintln!("Skipped {skipped} rows with missing/invalid data");

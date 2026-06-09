@@ -3,57 +3,68 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use indicatif::{ProgressBar, ProgressStyle};
 use loscope::types::obstructions::ObstructionType;
+use rayon::prelude::*;
 
 /// Scan `{obstructions_dir}/{type}/*.json` files, build a tile→UUID index, and
 /// write one `{out_dir}/{type}.json` per `ObstructionType`.
 pub fn build_obstruction_index(obstructions_dir: &Path, out_dir: &Path) -> Result<()> {
     fs::create_dir_all(out_dir)?;
 
-    // Map: type → tile_id_str → [uuid_str]
-    let mut index: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
-
+    // Collect (type_name, json_path) pairs up front so we can parallelise the reads.
+    let mut json_paths: Vec<(String, std::path::PathBuf)> = Vec::new();
     for type_entry in fs::read_dir(obstructions_dir)? {
         let type_entry = type_entry?;
         if !type_entry.file_type()?.is_dir() {
             continue;
         }
         let type_name = type_entry.file_name().to_string_lossy().to_string();
-
-        // Skip directories that don't correspond to a known ObstructionType.
         if ObstructionType::parse(&type_name).is_err() {
             continue;
         }
-
         for json_entry in fs::read_dir(type_entry.path())? {
             let json_entry = json_entry?;
             let path = json_entry.path();
             if path.extension().map(|e| e != "json").unwrap_or(true) {
                 continue;
             }
+            json_paths.push((type_name.clone(), path));
+        }
+    }
 
-            let text = fs::read_to_string(&path)
-                .with_context(|| format!("Failed to read {}", path.display()))?;
-            let value: serde_json::Value = serde_json::from_str(&text)
-                .with_context(|| format!("Failed to parse {}", path.display()))?;
+    let pb = ProgressBar::new(json_paths.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{bar:40} {pos}/{len} files | {per_sec} | eta: {eta}")
+            .unwrap(),
+    );
 
-            let obstruction_id = match value["obstruction_id"].as_str() {
-                Some(id) => id.to_string(),
-                None => continue,
-            };
+    // Parse files in parallel, collect (type_name, obstruction_id, tile_ids) triples.
+    let entries: Vec<(String, String, Vec<String>)> = json_paths
+        .par_iter()
+        .filter_map(|(type_name, path)| {
+            pb.inc(1);
+            let text = fs::read_to_string(path).ok()?;
+            let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+            let obstruction_id = value["obstruction_id"].as_str()?.to_string();
+            let tile_ids = value["tile_ids"]
+                .as_array()?
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>();
+            Some((type_name.clone(), obstruction_id, tile_ids))
+        })
+        .collect();
 
-            let tile_ids = match value["tile_ids"].as_array() {
-                Some(arr) => arr
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect::<Vec<_>>(),
-                None => continue,
-            };
+    pb.finish_and_clear();
 
-            let type_map = index.entry(type_name.clone()).or_default();
-            for tile_id in tile_ids {
-                type_map.entry(tile_id).or_default().push(obstruction_id.clone());
-            }
+    // Merge sequentially — no locking needed since we're back on one thread.
+    let mut index: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
+    for (type_name, obstruction_id, tile_ids) in entries {
+        let type_map = index.entry(type_name).or_default();
+        for tile_id in tile_ids {
+            type_map.entry(tile_id).or_default().push(obstruction_id.clone());
         }
     }
 

@@ -4,6 +4,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use loscope::types::coords::NYSCoords2;
 use loscope::types::tiles::{TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
 use tiff::decoder::{Decoder, DecodingResult};
@@ -136,38 +137,35 @@ pub fn split_dem(dem_path: &Path, out_dir: &Path) -> Result<Vec<String>> {
             .unwrap(),
     );
 
-    let mut tile_ids: Vec<String> = Vec::new();
-    let mut skipped = 0usize;
+    let results: Result<Vec<Option<String>>> = corners
+        .par_iter()
+        .map(|(e_sw, n_sw)| -> Result<Option<String>> {
+            pb.inc(1);
+            let raster = match extract_dem_tile(&pixels, dem_h, dem_w, *e_sw, *n_sw) {
+                Some(r) => r,
+                None => return Ok(None),
+            };
 
-    for (e_sw, n_sw) in &corners {
-        pb.inc(1);
+            let center = NYSCoords2::new(*e_sw as f64 + 0.5, *n_sw as f64 + 0.5);
+            let tile_id = TileId::from_contained_point(&center);
+            let tile_id_str = tile_id.to_string();
 
-        let raster = match extract_dem_tile(&pixels, dem_h, dem_w, *e_sw, *n_sw) {
-            Some(r) => r,
-            None => { skipped += 1; continue; }
-        };
+            let tif_path = out_dir.join(format!("{tile_id_str}.tif"));
+            let tif_file = File::create(&tif_path)
+                .with_context(|| format!("Cannot create {}", tif_path.display()))?;
+            let mut encoder = TiffEncoder::new(BufWriter::new(tif_file))
+                .context("Failed to create TIFF encoder")?;
+            encoder
+                .write_image::<colortype::Gray16>(TILE_SIDE as u32, TILE_SIDE as u32, &raster)
+                .with_context(|| format!("Failed to write TIFF {}", tif_path.display()))?;
 
-        // Derive tile ID from a point inside the tile.
-        let center = NYSCoords2::new(*e_sw as f64 + 0.5, *n_sw as f64 + 0.5);
-        let tile_id = TileId::from_contained_point(&center);
-        let tile_id_str = tile_id.to_string();
-
-        let tif_path = out_dir.join(format!("{tile_id_str}.tif"));
-        let json_path = out_dir.join(format!("{tile_id_str}.json"));
-
-        // Write Gray16 TIFF.
-        let tif_file = File::create(&tif_path)
-            .with_context(|| format!("Cannot create {}", tif_path.display()))?;
-        let mut encoder = TiffEncoder::new(BufWriter::new(tif_file))
-            .context("Failed to create TIFF encoder")?;
-        encoder
-            .write_image::<colortype::Gray16>(TILE_SIDE as u32, TILE_SIDE as u32, &raster)
-            .with_context(|| format!("Failed to write TIFF {}", tif_path.display()))?;
-
-        tile_ids.push(tile_id_str);
-    }
+            Ok(Some(tile_id_str))
+        })
+        .collect();
 
     pb.finish_and_clear();
+    let mut tile_ids: Vec<String> = results?.into_iter().flatten().collect();
+    let skipped = corners.len() - tile_ids.len();
     tile_ids.sort();
     println!("Done: {} tiles written, {skipped} skipped.", tile_ids.len());
     Ok(tile_ids)

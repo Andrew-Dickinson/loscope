@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use rusqlite::{Connection, OpenFlags};
 
 /// Export one `{bin}.wkt` file per row in `building_footprints`.
@@ -16,36 +18,44 @@ pub fn export_footprint_wkt(db_path: &Path, out_dir: &Path) -> Result<usize> {
         .with_context(|| format!("Cannot open {}", db_path.display()))?;
     conn.execute_batch("PRAGMA query_only=ON;")?;
 
-    let mut stmt = conn.prepare(
-        "SELECT bin, the_geom FROM building_footprints \
+    const QUERY: &str = "SELECT bin, the_geom FROM building_footprints \
          WHERE bin IS NOT NULL AND bin != '' \
-           AND the_geom IS NOT NULL AND the_geom != ''",
+           AND the_geom IS NOT NULL AND the_geom != ''";
+
+    let total: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM ({QUERY})"),
+        [],
+        |r| r.get(0),
     )?;
 
-    let mut count = 0usize;
-    let mut skipped = 0usize;
+    let pb = ProgressBar::new(total as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{bar:40} {pos}/{len} footprints | {per_sec} | eta: {eta}")
+            .unwrap(),
+    );
 
-    let rows = stmt.query_map([], |row| {
-        let bin: String = row.get(0)?;
-        let geom: String = row.get(1)?;
-        Ok((bin, geom))
-    })?;
+    let mut stmt = conn.prepare(QUERY)?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    for result in rows {
-        let (bin, geom) = result?;
-        if bin.is_empty() || geom.is_empty() {
-            skipped += 1;
-            continue;
-        }
-        let out_path = out_dir.join(format!("{bin}.wkt"));
-        std::fs::write(&out_path, &geom)
-            .with_context(|| format!("Failed to write {}", out_path.display()))?;
-        count += 1;
-    }
+    let count = rows
+        .par_iter()
+        .map(|(bin, geom)| {
+            pb.inc(1);
+            let out_path = out_dir.join(format!("{bin}.wkt"));
+            match std::fs::write(&out_path, geom) {
+                Ok(()) => 1usize,
+                Err(e) => {
+                    eprintln!("Failed to write {}: {e}", out_path.display());
+                    0
+                }
+            }
+        })
+        .sum();
 
-    if skipped > 0 {
-        eprintln!("Skipped {skipped} rows with empty BIN or geometry");
-    }
+    pb.finish_and_clear();
     Ok(count)
 }
 

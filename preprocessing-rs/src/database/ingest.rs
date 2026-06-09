@@ -1,6 +1,8 @@
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use indicatif::{ProgressBar, ProgressStyle};
 use rusqlite::{Connection, params_from_iter};
 
 use super::normalize::{
@@ -33,6 +35,15 @@ where
     let norm_headers: Vec<String> = headers.iter().map(normalize_column_name).collect();
     let norm_headers_record: csv::StringRecord = norm_headers.iter().collect();
 
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    pb.set_message(format!("{table}: 0 rows"));
+    pb.enable_steady_tick(Duration::from_millis(100));
+
     let mut count = 0usize;
     let mut batch: Vec<Vec<(String, String)>> = Vec::with_capacity(BATCH_SIZE);
 
@@ -44,14 +55,16 @@ where
                 insert_batch(conn, table, &batch)?;
                 count += batch.len();
                 batch.clear();
+                pb.set_message(format!("{table}: {count} rows"));
             }
         }
     }
     if !batch.is_empty() {
-        count += batch.len();
         insert_batch(conn, table, &batch)?;
+        count += batch.len();
     }
 
+    pb.finish_with_message(format!("{table}: {count} rows"));
     Ok(count)
 }
 
