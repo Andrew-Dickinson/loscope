@@ -38,6 +38,8 @@ pub async fn get_terrain_tile_overview(
 
     // TODO: Add obstructions for bridge tiles/outlines
 
+    // TODO: Obstructions for active waterways and rail lines?
+
     Ok(Json(TerrainTileOverview {
         obstruction_ids: providers
             .obstruction_provider()

@@ -52,6 +52,8 @@ pub async fn point_analysis(
         return Err(Status::BadRequest);
     }
 
+    // TODO: Detect vegetation-only obstructions and report them as seasonal
+
     let result = evaluate_points(
         point_pair.into_inner(),
         providers.elevation_tile_provider().as_ref(),
