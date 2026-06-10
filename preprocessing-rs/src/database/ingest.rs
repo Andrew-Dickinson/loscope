@@ -173,9 +173,9 @@ pub fn ingest_dob_job_applications(conn: &Connection, csv_path: &Path) -> Result
             ("lot".into(), lot.to_string()),
             ("house".into(), get_field(rec, hdrs, "house").to_string()),
             ("street_name".into(), get_field(rec, hdrs, "street_name").to_string()),
-            ("job".into(), get_field(rec, hdrs, "job_").to_string()),
+            ("job".into(), get_field(rec, hdrs, "job").to_string()),
             ("job_type".into(), get_field(rec, hdrs, "job_type").to_string().to_uppercase()),
-            ("pre_filing_date".into(), parse_date(get_field(rec, hdrs, "pre__filing_date")).unwrap_or_default()),
+            ("pre_filing_date".into(), parse_date(get_field(rec, hdrs, "pre_filing_date")).unwrap_or_default()),
             ("approved".into(), parse_date(get_field(rec, hdrs, "approved")).unwrap_or_default()),
             ("proposed_height".into(), parse_numeric(get_field(rec, hdrs, "proposed_height")).map(|v| v.to_string()).unwrap_or_default()),
             ("existing_height".into(), parse_numeric(get_field(rec, hdrs, "existing_height")).map(|v| v.to_string()).unwrap_or_default()),
@@ -185,13 +185,13 @@ pub fn ingest_dob_job_applications(conn: &Connection, csv_path: &Path) -> Result
 
 pub fn ingest_dob_now_job_applications(conn: &Connection, csv_path: &Path) -> Result<usize> {
     ingest_csv(conn, csv_path, "dob_now_job_applications", |rec, hdrs| {
-        let bin = get_field(rec, hdrs, "bin__");
-        let bbl = get_field(rec, hdrs, "bbl__");
+        let bin = get_field(rec, hdrs, "bin");
+        let bbl = get_field(rec, hdrs, "bbl");
         Some(vec![
             ("bin".into(), bin.to_string()),
             ("bbl".into(), bbl.to_string()),
             ("borough".into(), get_field(rec, hdrs, "borough").to_string()),
-            ("house_no".into(), get_field(rec, hdrs, "house__").to_string()),
+            ("house_no".into(), get_field(rec, hdrs, "house_no").to_string()),
             ("street_name".into(), get_field(rec, hdrs, "street_name").to_string()),
             ("job_filing_number".into(), get_field(rec, hdrs, "job_filing_number").to_string()),
             ("job_type".into(), get_field(rec, hdrs, "job_type").to_string().to_lowercase()),
@@ -204,12 +204,12 @@ pub fn ingest_dob_now_job_applications(conn: &Connection, csv_path: &Path) -> Re
 
 pub fn ingest_certificates_of_occupancy(conn: &Connection, csv_path: &Path) -> Result<usize> {
     ingest_csv(conn, csv_path, "certificates_of_occupancy", |rec, hdrs| {
-        let bin = get_field(rec, hdrs, "bin__");
+        let bin = get_field(rec, hdrs, "bin");
         Some(vec![
             ("bin".into(), bin.to_string()),
-            ("bbl".into(), get_field(rec, hdrs, "bbl__").to_string()),
+            ("bbl".into(), get_field(rec, hdrs, "bbl").to_string()),
             ("borough".into(), get_field(rec, hdrs, "borough").to_string()),
-            ("house_no".into(), get_field(rec, hdrs, "house__").to_string()),
+            ("house_no".into(), get_field(rec, hdrs, "house_no").to_string()),
             ("street_name".into(), get_field(rec, hdrs, "street_name").to_string()),
             ("job_type".into(), get_field(rec, hdrs, "job_type").to_string().to_lowercase()),
             ("c_of_o_issuance_date".into(), parse_date(get_field(rec, hdrs, "c_of_o_issuance_date")).unwrap_or_default()),
@@ -221,7 +221,7 @@ pub fn ingest_certificates_of_occupancy(conn: &Connection, csv_path: &Path) -> R
 
 pub fn ingest_dob_permit_issuance(conn: &Connection, csv_path: &Path) -> Result<usize> {
     ingest_csv(conn, csv_path, "dob_permit_issuance", |rec, hdrs| {
-        let bin = get_field(rec, hdrs, "bin__");
+        let bin = get_field(rec, hdrs, "bin");
         let borough = get_field(rec, hdrs, "borough");
         let block = get_field(rec, hdrs, "block");
         let lot = get_field(rec, hdrs, "lot");
@@ -235,7 +235,7 @@ pub fn ingest_dob_permit_issuance(conn: &Connection, csv_path: &Path) -> Result<
             ("borough_number".into(), borough_num),
             ("block".into(), block.to_string()),
             ("lot".into(), lot.to_string()),
-            ("job".into(), get_field(rec, hdrs, "job__").to_string()),
+            ("job".into(), get_field(rec, hdrs, "job").to_string()),
             ("job_type".into(), get_field(rec, hdrs, "job_type").to_string().to_uppercase()),
             ("permit_type".into(), get_field(rec, hdrs, "permit_type").to_string()),
             ("issuance_date".into(), parse_date(get_field(rec, hdrs, "issuance_date")).unwrap_or_default()),
@@ -246,10 +246,10 @@ pub fn ingest_dob_permit_issuance(conn: &Connection, csv_path: &Path) -> Result<
 
 pub fn ingest_dob_now_approved_permits(conn: &Connection, csv_path: &Path) -> Result<usize> {
     ingest_csv(conn, csv_path, "dob_now_approved_permits", |rec, hdrs| {
-        let bin = get_field(rec, hdrs, "bin__");
+        let bin = get_field(rec, hdrs, "bin");
         Some(vec![
             ("bin".into(), bin.to_string()),
-            ("bbl".into(), get_field(rec, hdrs, "bbl__").to_string()),
+            ("bbl".into(), get_field(rec, hdrs, "bbl").to_string()),
             ("borough".into(), get_field(rec, hdrs, "borough").to_string()),
             ("job_filing_number".into(), get_field(rec, hdrs, "job_filing_number").to_string()),
             ("work_type".into(), get_field(rec, hdrs, "work_type").to_string()),

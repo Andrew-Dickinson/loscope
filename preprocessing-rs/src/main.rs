@@ -232,11 +232,11 @@ fn main() -> Result<()> {
         Command::DownloadArcgis { url, output, r#where, chunk } => {
             arcgis::download(&url, &output, &r#where, chunk)?
         }
-        Command::DownloadOpendata { output, chunk } => {
+        Command::DownloadOpendata { output, chunk: _ } => {
             std::fs::create_dir_all(&output)?;
             for ds in socrata::NYC_OPEN_DATA_DATASETS {
                 println!("Downloading {} …", ds.description);
-                socrata::download(ds.id, &output.join(ds.filename), chunk)?;
+                socrata::download_bulk(ds.id, &output.join(ds.filename))?;
             }
         }
         Command::DownloadCityData { output, chunk } => {

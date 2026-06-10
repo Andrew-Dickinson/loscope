@@ -36,7 +36,7 @@ pub fn download_all(out_dir: &Path, chunk_size: usize) -> Result<()> {
     println!("--- Downloading NYC Open Data CSVs ---");
     for ds in socrata::NYC_OPEN_DATA_DATASETS {
         println!("  Downloading {} …", ds.description);
-        socrata::download(ds.id, &out_dir.join(ds.filename), chunk_size)?;
+        socrata::download_bulk(ds.id, &out_dir.join(ds.filename))?;
     }
 
     println!("All downloads complete.");

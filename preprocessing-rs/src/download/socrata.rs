@@ -6,6 +6,69 @@ use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::blocking::Client;
 
 const SOCRATA_BASE: &str = "https://data.cityofnewyork.us/resource";
+const SOCRATA_EXPORT_BASE: &str = "https://data.cityofnewyork.us/api/v3/views";
+
+/// Download a Socrata dataset as a single bulk CSV export via POST.
+///
+/// Socrata exposes `/api/v3/views/{id}/export.csv` which returns the full
+/// dataset in one streaming response (gzip-compressed). This is orders of
+/// magnitude faster than the paginated SoQL approach because the server can
+/// stream a pre-built snapshot rather than executing repeated queries.
+///
+/// The JSON body `{"serializationOptions":{"defaultGroupSeparator":",","defaultDecimalSeparator":"."}}`
+/// matches what the NYC Open Data web UI sends.
+pub fn download_bulk(dataset_id: &str, out_path: &Path) -> Result<()> {
+    let client = Client::builder()
+        .build()
+        .context("Failed to build HTTP client")?;
+
+    let url = format!(
+        "{SOCRATA_EXPORT_BASE}/{dataset_id}/export.csv?accessType=DOWNLOAD"
+    );
+
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner} {bytes} downloaded ({bytes_per_sec})")
+            .unwrap(),
+    );
+
+    let resp = client
+        .post(&url)
+        .header("Accept", "text/csv")
+        .header("Content-Type", "application/json")
+        .body(r#"{"serializationOptions":{"defaultGroupSeparator":",","defaultDecimalSeparator":"."}}"#)
+        .send()
+        .with_context(|| format!("Failed to POST to {url}"))?
+        .error_for_status()
+        .with_context(|| format!("Server returned error for {url}"))?;
+
+    let mut out = std::io::BufWriter::new(
+        std::fs::File::create(out_path)
+            .with_context(|| format!("Cannot create {}", out_path.display()))?,
+    );
+
+    let mut bytes_written: u64 = 0;
+    let mut reader = BufReader::new(resp);
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = std::io::Read::read(&mut reader, &mut buf)
+            .context("Error reading response body")?;
+        if n == 0 {
+            break;
+        }
+        out.write_all(&buf[..n]).context("Error writing output file")?;
+        bytes_written += n as u64;
+        pb.set_position(bytes_written);
+    }
+
+    pb.finish_and_clear();
+    println!(
+        "Wrote {bytes_written} bytes to {}",
+        out_path.display()
+    );
+    Ok(())
+}
 
 /// Download a Socrata dataset as CSV using offset-based pagination.
 ///

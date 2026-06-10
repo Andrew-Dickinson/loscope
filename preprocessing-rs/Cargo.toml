@@ -15,7 +15,7 @@ indicatif = "0.17"
 rayon = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
-reqwest = { version = "0.12", features = ["blocking", "json"] }
+reqwest = { version = "0.12", features = ["blocking", "json", "gzip"] }
 csv = "1"
 indexmap = "2"
 serde = { version = "1", features = ["derive"] }
