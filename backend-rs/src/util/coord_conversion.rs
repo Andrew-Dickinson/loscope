@@ -32,6 +32,11 @@ const METERS_PER_FOOT: f64 = 0.3048;
 
 const CONVERSION_VALIDITY_BOUNDS_GPS: [[f64; 2]; 2] = [[40.2, 41.15], [-77.2, -72.0]];
 
+// Even with high precision conversion, we find a <1 USFT offset remains vs what the city's ArcGIS
+// server is doing, this is a slightly hacky way to cancel most of it out so that things line up
+// better across the various file types and such
+const MANUAL_OFFSET: [f64; 2] = [-0.3074351, -0.1555];
+
 pub struct CoordinateConverter {
     nys_to_gps: Projector,
     gps_to_nys: Projector,
@@ -50,8 +55,6 @@ impl CoordinateConverter {
         // specifiers, this should easily be detectable via testing, and shouldn't be propagated
         // to callers (since this coordinate transform is essential to the functioning
         // of the application and there's nothing callers can do to fix these issues)
-
-        // TODO: Check calibration
 
         Self {
             nys_to_gps: Projector::new(
@@ -82,7 +85,11 @@ impl CoordinateConverter {
             .unwrap();
         // .or_else(|err| Err(CoordinateErr(format!("Error converting {gps_coords:?} to NYS plane {err}"))))?;
 
-        NYSCoords3::new(res.x(), res.y(), res.z())
+        NYSCoords3::new(
+            res.x() + MANUAL_OFFSET[0],
+            res.y() + MANUAL_OFFSET[1],
+            res.z()
+        )
     }
 
     pub fn to_gps2(&self, nys_coords: &NYSCoords2) -> GPSCoords2 {
@@ -93,8 +100,8 @@ impl CoordinateConverter {
         let res = self
             .nys_to_gps
             .convert(Coordinate3::new(
-                *nys_coords.easting(),
-                *nys_coords.northing(),
+                *nys_coords.easting() - MANUAL_OFFSET[0],
+                *nys_coords.northing() - MANUAL_OFFSET[1],
                 *nys_coords.alt_usft(),
             ))
             .unwrap();
@@ -128,6 +135,8 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
     use std::thread;
+    use rocket::yansi::Paint;
+    use crate::types::tiles::TileId;
 
     #[test]
     fn convert_nys_to_gps_simple_roundtrip() {
@@ -176,6 +185,50 @@ mod tests {
         assert_abs_diff_eq!(*new_gps.lat(), *gps.lat(), epsilon = 0.0000001);
         assert_abs_diff_eq!(*new_gps.lon(), *gps.lon(), epsilon = 0.0000001);
         assert_abs_diff_eq!(*new_gps.alt_m(), *gps.alt_m(), epsilon = 0.001);
+    }
+
+    #[test]
+    fn sample_point_validate_accuracy() {
+        let tile_id = TileId::parse("235_00").unwrap();
+        let sw_corner = tile_id.get_sw_corner();
+        let building_corner_from_ortho = NYSCoords3::new(
+            *sw_corner.easting() + 2371.0 / 2.0,
+            *sw_corner.northing() + 3497.0 / 2.0,
+            85.598
+        );
+
+        let building_corner_from_lidar = NYSCoords3::new(
+            1001185.52695,
+            236746.545,
+            85.598
+        );
+
+        let nys_from_footprint = NYSCoords3::new(1001185.43987011, 236746.910087122, 84.352);
+
+        let converter = CoordinateConverter::new();
+        let gps_from_google_earth = GPSCoords3::new(  40.816492, -73.938828, 25.45);
+        let gps_from_footprint = GPSCoords3::new(40.8164832904305,  -73.9388176822344, 25.45);
+
+
+        let converted_to_nys_from_google_earth = converter.to_nys_plane3(&gps_from_google_earth);
+        let converted_to_nys_from_footprint = converter.to_nys_plane3(&gps_from_footprint);
+        assert_abs_diff_eq!(
+            converted_to_nys_from_footprint,
+            nys_from_footprint,
+            epsilon = 0.5
+        );
+
+        assert_abs_diff_eq!(
+            converted_to_nys_from_footprint,
+            building_corner_from_lidar,
+            epsilon = 1.0
+        );
+
+        assert_abs_diff_eq!(
+            converted_to_nys_from_google_earth,
+            building_corner_from_ortho,
+            epsilon = 3.0
+        );
     }
 
     #[test]
