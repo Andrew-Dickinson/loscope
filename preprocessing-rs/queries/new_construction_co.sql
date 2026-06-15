@@ -17,7 +17,7 @@ nb_cos AS (
         SELECT *,
                ROW_NUMBER() OVER (PARTITION BY bin ORDER BY c_of_o_issuance_date ASC) AS rn
         FROM certificates_of_occupancy
-        WHERE lower(job_type) IN (
+        WHERE job_type IN (
                   'new building',
                   'co - new building with existing elements to remain'
               )
@@ -78,7 +78,7 @@ SELECT
     tl.the_geom                         AS output_geometry,
     null                                AS ground_elevation,
     lh.proposed_height                  AS height_roof,
-    'new_construction_certificate_of_occupancy' AS type,
+    'new_construction_co'                       AS type,
     json_object(
         'bin', r.bin,
         'bbl', r.tax_lot_bbl,

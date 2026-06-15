@@ -16,7 +16,7 @@ nb_jobs AS (
         proposed_height,
         'DOB_BIS' as application_system
     FROM dob_job_applications
-    WHERE lower(job_type) = 'nb'
+    WHERE job_type = 'nb'
       AND bin IS NOT NULL AND bin != ''
       AND bin NOT IN (1000000, 2000000, 3000000, 4000000, 5000000)
       AND approved IS NOT NULL
@@ -38,7 +38,7 @@ nb_jobs AS (
         proposed_height,
         'DOB_NOW' as application_system
     FROM dob_now_job_applications
-    WHERE lower(job_type) IN ('new building', 'alt-co - new building with existing elements to remain')
+    WHERE job_type IN ('new building', 'alt-co - new building with existing elements to remain')
       AND bin IS NOT NULL AND bin != ''
       AND bin NOT IN (1000000, 2000000, 3000000, 4000000, 5000000)
       AND approved_date IS NOT NULL
@@ -107,7 +107,7 @@ SELECT
     tl.the_geom                                       AS output_geometry,
     null                                              AS ground_elevation,
     lh.proposed_height                                AS height_roof,
-    'new_building_application_approved_in_last_year'  AS type,
+    'approved_job_applications'                       AS type,
     json_object(
         'bin',               r.bin,
         'bbl',               r.tax_lot_bbl,

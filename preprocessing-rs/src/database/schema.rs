@@ -166,6 +166,7 @@ CREATE INDEX IF NOT EXISTS idx_dja_job_type ON dob_job_applications (job_type);
 CREATE INDEX IF NOT EXISTS idx_dja_pre_filing_date ON dob_job_applications (pre_filing_date);
 CREATE INDEX IF NOT EXISTS idx_dja_approved ON dob_job_applications (approved);
 CREATE INDEX IF NOT EXISTS idx_dja_bin_date ON dob_job_applications (bin, pre_filing_date);
+CREATE INDEX IF NOT EXISTS idx_dja_type_approved ON dob_job_applications (job_type, approved);
 
 CREATE INDEX IF NOT EXISTS idx_dnj_bin ON dob_now_job_applications (bin);
 CREATE INDEX IF NOT EXISTS idx_dnj_bbl ON dob_now_job_applications (bbl);
@@ -173,6 +174,7 @@ CREATE INDEX IF NOT EXISTS idx_dnj_job_type ON dob_now_job_applications (job_typ
 CREATE INDEX IF NOT EXISTS idx_dnj_filing_date ON dob_now_job_applications (filing_date);
 CREATE INDEX IF NOT EXISTS idx_dnj_approved_date ON dob_now_job_applications (approved_date);
 CREATE INDEX IF NOT EXISTS idx_dnj_bin_date ON dob_now_job_applications (bin, filing_date);
+CREATE INDEX IF NOT EXISTS idx_dnj_type_approved ON dob_now_job_applications (job_type, approved_date);
 
 CREATE INDEX IF NOT EXISTS idx_co_bin ON certificates_of_occupancy (bin);
 CREATE INDEX IF NOT EXISTS idx_co_bbl ON certificates_of_occupancy (bbl);
@@ -183,12 +185,15 @@ CREATE INDEX IF NOT EXISTS idx_co_type_status_date ON certificates_of_occupancy 
 
 CREATE INDEX IF NOT EXISTS idx_dpi_bin ON dob_permit_issuance (bin);
 CREATE INDEX IF NOT EXISTS idx_dpi_bbl ON dob_permit_issuance (bbl);
+CREATE INDEX IF NOT EXISTS idx_dpi_job ON dob_permit_issuance (job);
 CREATE INDEX IF NOT EXISTS idx_dpi_job_type ON dob_permit_issuance (job_type);
 CREATE INDEX IF NOT EXISTS idx_dpi_issuance_date ON dob_permit_issuance (issuance_date);
 CREATE INDEX IF NOT EXISTS idx_dpi_expiration_date ON dob_permit_issuance (expiration_date);
+CREATE INDEX IF NOT EXISTS idx_dpi_type_expiry ON dob_permit_issuance (job_type, expiration_date);
 
 CREATE INDEX IF NOT EXISTS idx_dnap_bin ON dob_now_approved_permits (bin);
 CREATE INDEX IF NOT EXISTS idx_dnap_bbl ON dob_now_approved_permits (bbl);
+CREATE INDEX IF NOT EXISTS idx_dnap_job_filing_number ON dob_now_approved_permits (job_filing_number);
 CREATE INDEX IF NOT EXISTS idx_dnap_work_type ON dob_now_approved_permits (work_type);
 CREATE INDEX IF NOT EXISTS idx_dnap_issued_date ON dob_now_approved_permits (issued_date);
 CREATE INDEX IF NOT EXISTS idx_dnap_expired_date ON dob_now_approved_permits (expired_date);

@@ -22,8 +22,12 @@ pub fn parse_numeric(s: &str) -> Option<f64> {
 }
 
 /// Try to parse a date string into ISO format (YYYY-MM-DD).
-/// Accepts: %m/%d/%Y, %Y-%m-%d, %m/%d/%Y %H:%M:%S, ISO 8601 with/without time.
+/// Accepts: %m/%d/%Y, %Y-%m-%d, %m/%d/%Y %H:%M:%S, ISO 8601 with/without time,
+/// and DOB NOW format %m/%d/%y %I:%M:%S %p (2-digit year, 12-hour clock).
 pub fn parse_date(s: &str) -> Option<String> {
+    // Normalize runs of whitespace to a single space so formats don't need to
+    // account for the double-space separator used by DOB NOW exports.
+    let s: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
     let s = s.trim();
     if s.is_empty() {
         return None;
@@ -33,7 +37,11 @@ pub fn parse_date(s: &str) -> Option<String> {
     let formats = [
         "%m/%d/%Y",
         "%Y-%m-%d",
+        "%m/%d/%y %I:%M:%S %p",
+        "%m/%d/%y %I:%M %p",
         "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %I:%M:%S %p",
+        "%Y-%m-%dT%H:%M:%S%.f",
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%d %H:%M:%S",
         "%m/%d/%Y %H:%M",
@@ -43,7 +51,6 @@ pub fn parse_date(s: &str) -> Option<String> {
         if let Ok(dt) = chrono::NaiveDate::parse_from_str(s, fmt) {
             return Some(dt.format("%Y-%m-%d").to_string());
         }
-        // Also try as NaiveDateTime and take the date part.
         if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
             return Some(dt.date().format("%Y-%m-%d").to_string());
         }
@@ -125,6 +132,12 @@ mod tests {
         assert_eq!(parse_date("03/15/2024"), Some("2024-03-15".to_string()));
         assert_eq!(parse_date("2024-03-15"), Some("2024-03-15".to_string()));
         assert_eq!(parse_date("03/15/2024 10:30:00"), Some("2024-03-15".to_string()));
+        // DOB NOW format: 2-digit year, 12-hour clock, double space separator
+        assert_eq!(parse_date("09/02/25  1:24:22 PM"), Some("2025-09-02".to_string()));
+        assert_eq!(parse_date("10/02/24  1:39:31 PM"), Some("2024-10-02".to_string()));
+        // DOB NOW job application dates: ISO with milliseconds
+        assert_eq!(parse_date("2019-10-24T00:00:00.000"), Some("2019-10-24".to_string()));
+        assert_eq!(parse_date("2025-06-05T18:00:26.000"), Some("2025-06-05".to_string()));
         assert_eq!(parse_date(""), None);
         assert_eq!(parse_date("not-a-date"), None);
     }

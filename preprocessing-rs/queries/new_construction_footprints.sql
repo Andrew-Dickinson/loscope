@@ -4,7 +4,7 @@ SELECT
     the_geom as output_geometry,
     ground_elevation,
     height_roof,
-    'new_construction_building_footprint' AS type,
+    'new_construction_footprints'         AS type,
     json_object(
         'bin', bin,
         'bbl', base_bbl,

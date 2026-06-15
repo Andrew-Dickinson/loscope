@@ -92,7 +92,9 @@ fn insert_batch(conn: &Connection, table: &str, batch: &[Vec<(String, String)>])
     let mut stmt = conn.prepare_cached(&sql)?;
 
     for row in batch {
-        let vals: Vec<&str> = row.iter().map(|(_, v)| v.as_str()).collect();
+        let vals: Vec<Option<&str>> = row.iter()
+            .map(|(_, v)| if v.is_empty() { None } else { Some(v.as_str()) })
+            .collect();
         stmt.execute(params_from_iter(vals))?;
     }
     Ok(())
@@ -188,7 +190,7 @@ pub fn ingest_dob_job_applications(conn: &Connection, csv_path: &Path) -> Result
             ("house".into(), get_field(rec, hdrs, "house").to_string()),
             ("street_name".into(), get_field(rec, hdrs, "street_name").to_string()),
             ("job".into(), get_field(rec, hdrs, "job").to_string()),
-            ("job_type".into(), get_field(rec, hdrs, "job_type").to_string().to_uppercase()),
+            ("job_type".into(), get_field(rec, hdrs, "job_type").to_string().to_lowercase()),
             ("pre_filing_date".into(), parse_date(get_field(rec, hdrs, "pre_filing_date")).unwrap_or_default()),
             ("approved".into(), parse_date(get_field(rec, hdrs, "approved")).unwrap_or_default()),
             ("proposed_height".into(), parse_numeric(get_field(rec, hdrs, "proposed_height")).map(|v| v.to_string()).unwrap_or_default()),
@@ -250,7 +252,7 @@ pub fn ingest_dob_permit_issuance(conn: &Connection, csv_path: &Path) -> Result<
             ("block".into(), block.to_string()),
             ("lot".into(), lot.to_string()),
             ("job".into(), get_field(rec, hdrs, "job").to_string()),
-            ("job_type".into(), get_field(rec, hdrs, "job_type").to_string().to_uppercase()),
+            ("job_type".into(), get_field(rec, hdrs, "job_type").to_string().to_lowercase()),
             ("permit_type".into(), get_field(rec, hdrs, "permit_type").to_string()),
             ("issuance_date".into(), parse_date(get_field(rec, hdrs, "issuance_date")).unwrap_or_default()),
             ("expiration_date".into(), parse_date(get_field(rec, hdrs, "expiration_date")).unwrap_or_default()),
