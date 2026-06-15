@@ -19,7 +19,7 @@ nb_jobs AS (
     WHERE lower(job_type) = 'nb'
       AND bin IS NOT NULL AND bin != ''
       AND bin NOT IN (1000000, 2000000, 3000000, 4000000, 5000000)
-      AND pre_filing_date >= '2025-03-08'
+      AND pre_filing_date >= date('now', '-1 year')
 
     UNION ALL
 
@@ -40,7 +40,7 @@ nb_jobs AS (
     WHERE lower(job_type) IN ('new building', 'alt-co - new building with existing elements to remain')
       AND bin IS NOT NULL AND bin != ''
       AND bin NOT IN (1000000, 2000000, 3000000, 4000000, 5000000)
-      AND filing_date >= '2025-03-08'
+      AND filing_date >= date('now', '-1 year')
 ),
 
 nb_jobs_deduped AS (

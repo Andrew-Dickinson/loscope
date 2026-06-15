@@ -57,7 +57,7 @@ active_permit_jobs AS (
     SELECT DISTINCT job AS job_id
     FROM dob_permit_issuance
     WHERE issuance_date IS NOT NULL
-      AND (expiration_date IS NOT NULL AND expiration_date >= '2025-01-01')
+      AND (expiration_date IS NOT NULL AND expiration_date >= date('now', '-1 year'))
       AND bin IS NOT NULL AND bin != ''
       AND bin NOT IN (1000000, 2000000, 3000000, 4000000, 5000000)
       AND lower(job_type) = 'nb'
@@ -67,7 +67,7 @@ active_permit_jobs AS (
     SELECT DISTINCT job_filing_number as job_id
     FROM dob_now_approved_permits
     WHERE issued_date IS NOT NULL
-      AND (expired_date IS NOT NULL AND expired_date >= '2025-01-01')
+      AND (expired_date IS NOT NULL AND expired_date >= date('now', '-1 year'))
       AND bin IS NOT NULL AND bin != ''
       AND bin NOT IN (1000000, 2000000, 3000000, 4000000, 5000000)
 ),

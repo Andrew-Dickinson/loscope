@@ -20,7 +20,7 @@ nb_jobs AS (
       AND bin IS NOT NULL AND bin != ''
       AND bin NOT IN (1000000, 2000000, 3000000, 4000000, 5000000)
       AND approved IS NOT NULL
-      AND approved >= '2025-03-08'
+      AND approved >= date('now', '-1 year')
 
     UNION ALL
 
@@ -42,7 +42,7 @@ nb_jobs AS (
       AND bin IS NOT NULL AND bin != ''
       AND bin NOT IN (1000000, 2000000, 3000000, 4000000, 5000000)
       AND approved_date IS NOT NULL
-      AND approved_date >= '2025-03-08'
+      AND approved_date >= date('now', '-1 year')
 ),
 
 nb_jobs_deduped AS (
