@@ -473,6 +473,14 @@ fn run_build_obstructions(
         props_str: Option<String>,
     }
 
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner} Querying database... {elapsed}")
+            .unwrap(),
+    );
+    spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+
     let mut stmt = conn.prepare(&sql)?;
     let raw_rows: Vec<RawRow> = stmt
         .query_map([], |row| {
@@ -485,6 +493,9 @@ fn run_build_obstructions(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    spinner.finish_and_clear();
+    println!("Loaded {} row(s), rasterizing...", raw_rows.len());
 
     let pb = ProgressBar::new(raw_rows.len() as u64);
     pb.set_style(
