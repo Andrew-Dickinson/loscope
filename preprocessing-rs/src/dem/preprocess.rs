@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
@@ -7,7 +8,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use loscope::types::coords::NYSCoords2;
 use loscope::types::tiles::{TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
-use tiff::decoder::{Decoder, DecodingResult};
+use tiff::decoder::{Decoder, DecodingResult, Limits};
 use tiff::encoder::{TiffEncoder, colortype};
 
 // NW (top-left) corner of the citywide 2010 DEM, in NYS State Plane easting/northing.
@@ -79,10 +80,8 @@ pub fn extract_dem_tile(
     for (sub_row, row) in (ac_rs..ac_re).enumerate() {
         for (sub_col, col) in (ac_cs..ac_ce).enumerate() {
             let h_ft = dem[row * dem_w + col] as f64;
-            // DEM axes: increasing row → decreasing northing; increasing col → increasing easting.
-            // Output axes: [easting_local, northing_local] stored flat as [x * TILE_SIDE + y].
-            let x = dst_e + sub_col; // easting_local
-            let y = dst_n + (ac_re - ac_rs - 1 - sub_row); // northing_local (rows flipped)
+            let x = dst_e + sub_col;
+            let y = dst_n + (ac_re - ac_rs - 1 - sub_row);
             if x < TILE_SIDE && y < TILE_SIDE {
                 out[x * TILE_SIDE + y] = h_ft;
             }
@@ -101,25 +100,60 @@ pub fn extract_dem_tile(
     Some(result)
 }
 
-/// Split a citywide DEM GeoTIFF into canonical 500-usft tiles.
+/// Convert a completed f64 tile buffer to u16 inches and write it as Gray16 TIFF.
+/// Returns the tile ID string, or None if the tile is all-zero.
+fn flush_tile(buf: Vec<f64>, e_sw: i64, n_sw: i64, out_dir: &Path) -> Result<Option<String>> {
+    let result: Vec<u16> = buf
+        .iter()
+        .map(|&h| (h * 12.0).round().clamp(0.0, 65535.0) as u16)
+        .collect();
+
+    if result.iter().all(|&v| v == 0) {
+        return Ok(None);
+    }
+
+    let center = NYSCoords2::new(e_sw as f64 + 0.5, n_sw as f64 + 0.5);
+    let tile_id = TileId::from_contained_point(&center);
+    let tile_id_str = tile_id.to_string();
+
+    let tif_path = out_dir.join(format!("{tile_id_str}.tif"));
+    let tif_file = File::create(&tif_path)
+        .with_context(|| format!("Cannot create {}", tif_path.display()))?;
+    let mut encoder = TiffEncoder::new(BufWriter::new(tif_file))
+        .context("Failed to create TIFF encoder")?;
+    encoder
+        .write_image::<colortype::Gray16>(TILE_SIDE as u32, TILE_SIDE as u32, &result)
+        .with_context(|| format!("Failed to write TIFF {}", tif_path.display()))?;
+
+    Ok(Some(tile_id_str))
+}
+
+/// Split a citywide DEM GeoTIFF into canonical 500-usft tiles, streaming strip by strip.
 ///
-/// Input must be in EPSG:6539+6360, 1 usft/pixel, heights in US survey feet,
-/// with the NW corner at (DEM_ORIGIN_E, DEM_ORIGIN_N). Writes `{tile_id}.tif`
-/// (Gray16) and `{tile_id}.json` per non-empty tile.
+/// Each pixel at (row, col) maps to exactly one tile: the tile buffers for one northing
+/// band are held in memory at a time and flushed as soon as the band's last row is read.
+/// Peak memory is O(image_width × TILE_SIDE × 8 bytes) rather than the full image.
+///
+/// Input must be a stripped (not tiled) TIFF in EPSG:6539+6360, 1 usft/pixel, heights
+/// in US survey feet, with the NW corner at (DEM_ORIGIN_E, DEM_ORIGIN_N).
 pub fn split_dem(dem_path: &Path, out_dir: &Path) -> Result<Vec<String>> {
     std::fs::create_dir_all(out_dir)?;
 
     println!("Reading {} …", dem_path.display());
     let file = File::open(dem_path)
         .with_context(|| format!("Cannot open {}", dem_path.display()))?;
-    let mut decoder = Decoder::new(file).context("Failed to open DEM TIFF")?;
+    let mut decoder = Decoder::new(file)
+        .context("Failed to open DEM TIFF")?
+        .with_limits({
+            let mut limits = Limits:: default();
+            // Profiling shows this tops out at around 2GB, so this should be plenty of buffer
+            limits.decoding_buffer_size = 5 * 1024 * 1024 * 1024;
+            limits.intermediate_buffer_size = 5 * 1024 * 1024 * 1024;
+            limits
+        });
+
     let (dem_w, dem_h) = decoder.dimensions().context("Failed to read DEM dimensions")?;
     let (dem_w, dem_h) = (dem_w as usize, dem_h as usize);
-
-    let pixels = match decoder.read_image().context("Failed to read DEM image data")? {
-        DecodingResult::I32(v) => v,
-        other => anyhow::bail!("Expected I32 DEM data, got {:?}", other),
-    };
 
     println!(
         "DEM size: {dem_w}×{dem_h} pixels  ({:.1}×{:.1} miles)",
@@ -127,53 +161,148 @@ pub fn split_dem(dem_path: &Path, out_dir: &Path) -> Result<Vec<String>> {
         dem_h as f64 / 5280.0
     );
 
-    let corners = dem_tile_sw_corners(dem_h, dem_w);
-    println!("Candidate tiles: {}  → writing to {}", corners.len(), out_dir.display());
+    let strip_count = decoder
+        .strip_count()
+        .context("Failed to get strip count — is the DEM tiled rather than stripped?")?;
 
-    let pb = ProgressBar::new(corners.len() as u64);
+    let pb = ProgressBar::new(dem_h as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("{bar:40} {pos}/{len} tiles | {per_sec} | eta: {eta}")
+            .template("{bar:40} {pos}/{len} rows | {per_sec} | eta: {eta}")
             .unwrap(),
     );
 
-    let results: Result<Vec<Option<String>>> = corners
-        .par_iter()
-        .map(|(e_sw, n_sw)| -> Result<Option<String>> {
-            pb.inc(1);
-            let raster = match extract_dem_tile(&pixels, dem_h, dem_w, *e_sw, *n_sw) {
-                Some(r) => r,
-                None => return Ok(None),
-            };
+    // Active tile buffers keyed by (e_sw, n_sw). At most one northing band is live at once.
+    let mut tile_buffers: HashMap<(i64, i64), Vec<f64>> = HashMap::new();
+    let mut tile_ids: Vec<String> = Vec::new();
+    let mut current_row = 0usize;
 
-            let center = NYSCoords2::new(*e_sw as f64 + 0.5, *n_sw as f64 + 0.5);
-            let tile_id = TileId::from_contained_point(&center);
-            let tile_id_str = tile_id.to_string();
+    for strip_idx in 0..strip_count {
+        let strip_data = match decoder
+            .read_chunk(strip_idx)
+            .with_context(|| format!("Failed to read strip {strip_idx}"))?
+        {
+            DecodingResult::I32(v) => v,
+            other => anyhow::bail!("Expected I32 DEM data, got {:?}", other),
+        };
 
-            let tif_path = out_dir.join(format!("{tile_id_str}.tif"));
-            let tif_file = File::create(&tif_path)
-                .with_context(|| format!("Cannot create {}", tif_path.display()))?;
-            let mut encoder = TiffEncoder::new(BufWriter::new(tif_file))
-                .context("Failed to create TIFF encoder")?;
-            encoder
-                .write_image::<colortype::Gray16>(TILE_SIDE as u32, TILE_SIDE as u32, &raster)
-                .with_context(|| format!("Failed to write TIFF {}", tif_path.display()))?;
+        let rows_in_strip = strip_data.len() / dem_w;
 
-            Ok(Some(tile_id_str))
-        })
+        for row_in_strip in 0..rows_in_strip {
+            let row = current_row + row_in_strip;
+            if row >= dem_h {
+                break;
+            }
+
+            // Northing of the SW corner of the pixel at this row.
+            let northing = DEM_ORIGIN_N - row as i64 - 1;
+            let n_sw = (northing / TILE_SIDE as i64) * TILE_SIDE as i64;
+            let y = (northing - n_sw) as usize; // 0 = southernmost row of the tile
+
+            let row_slice = &strip_data[row_in_strip * dem_w..(row_in_strip + 1) * dem_w];
+            for (col, &pixel) in row_slice.iter().enumerate() {
+                let easting = DEM_ORIGIN_E + col as i64;
+                let e_sw = (easting / TILE_SIDE as i64) * TILE_SIDE as i64;
+                let x = (easting - e_sw) as usize;
+
+                tile_buffers
+                    .entry((e_sw, n_sw))
+                    .or_insert_with(|| vec![0.0f64; TILE_SIDE * TILE_SIDE])
+                    [x * TILE_SIDE + y] = pixel as f64;
+            }
+
+            // y == 0 means this is the southernmost (last) row for this northing band.
+            if y == 0 {
+                let to_flush: Vec<((i64, i64), Vec<f64>)> = tile_buffers
+                    .extract_if(|(_, ns), _| *ns == n_sw)
+                    .collect();
+
+                let new_ids: Result<Vec<Option<String>>> = to_flush
+                    .into_par_iter()
+                    .map(|((e_sw, n_sw), buf)| flush_tile(buf, e_sw, n_sw, out_dir))
+                    .collect();
+                tile_ids.extend(new_ids?.into_iter().flatten());
+            }
+        }
+
+        current_row += rows_in_strip;
+        pb.set_position(current_row as u64);
+    }
+
+    // Flush any partial tiles at the southern edge of the DEM.
+    let remaining: Vec<((i64, i64), Vec<f64>)> = tile_buffers.drain().collect();
+    let new_ids: Result<Vec<Option<String>>> = remaining
+        .into_par_iter()
+        .map(|((e_sw, n_sw), buf)| flush_tile(buf, e_sw, n_sw, out_dir))
         .collect();
+    tile_ids.extend(new_ids?.into_iter().flatten());
 
     pb.finish_and_clear();
-    let mut tile_ids: Vec<String> = results?.into_iter().flatten().collect();
-    let skipped = corners.len() - tile_ids.len();
     tile_ids.sort();
-    println!("Done: {} tiles written, {skipped} skipped.", tile_ids.len());
+    println!("Done: {} tiles written.", tile_ids.len());
     Ok(tile_ids)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tiff::decoder::Decoder as TiffDecoder;
+
+    /// Write a Vec<i32> as a single-strip GrayI32 TIFF and return the path.
+    fn write_synthetic_dem(path: &std::path::Path, dem: &[i32], w: usize, h: usize) {
+        let f = File::create(path).unwrap();
+        let mut enc = TiffEncoder::new(BufWriter::new(f)).unwrap();
+        enc.write_image::<colortype::GrayI32>(w as u32, h as u32, dem).unwrap();
+    }
+
+    /// Decode a Gray16 TIFF tile written by split_dem back into a Vec<u16>.
+    fn read_tile(path: &std::path::Path) -> Vec<u16> {
+        let f = File::open(path).unwrap();
+        let mut dec = TiffDecoder::new(f).unwrap().with_limits(Limits::unlimited());
+        match dec.read_image().unwrap() {
+            DecodingResult::U16(v) => v,
+            other => panic!("unexpected pixel type {:?}", other),
+        }
+    }
+
+    /// Verify that split_dem produces tiles identical to extract_dem_tile for every
+    /// candidate corner of a synthetic DEM.
+    #[test]
+    fn streaming_matches_batch_extraction() {
+        let dem_h = 600usize;
+        let dem_w = 800usize;
+        // Unique-ish small positive values so ft×12 fits in u16.
+        let dem: Vec<i32> = (0..dem_h * dem_w)
+            .map(|i| (i % 100 + 1) as i32)
+            .collect();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dem_path = tmp.path().join("synthetic.tif");
+        let out_dir = tmp.path().join("tiles");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        write_synthetic_dem(&dem_path, &dem, dem_w, dem_h);
+        split_dem(&dem_path, &out_dir).unwrap();
+
+        for (e_sw, n_sw) in dem_tile_sw_corners(dem_h, dem_w) {
+            let expected = extract_dem_tile(&dem, dem_h, dem_w, e_sw, n_sw);
+            let center = NYSCoords2::new(e_sw as f64 + 0.5, n_sw as f64 + 0.5);
+            let tile_id = TileId::from_contained_point(&center).to_string();
+            let tif_path = out_dir.join(format!("{tile_id}.tif"));
+
+            match expected {
+                None => assert!(
+                    !tif_path.exists(),
+                    "tile {tile_id} should not have been written"
+                ),
+                Some(want) => {
+                    assert!(tif_path.exists(), "tile {tile_id} was not written");
+                    let got = read_tile(&tif_path);
+                    assert_eq!(got, want, "pixel mismatch in tile {tile_id}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn extract_tile_dims_are_always_500x500() {
