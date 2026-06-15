@@ -47,21 +47,34 @@ where
     let mut count = 0usize;
     let mut batch: Vec<Vec<(String, String)>> = Vec::with_capacity(BATCH_SIZE);
 
-    for result in reader.records() {
-        let record = result?;
-        if let Some(row) = col_mapper(&record, &norm_headers_record) {
-            batch.push(row);
-            if batch.len() >= BATCH_SIZE {
-                insert_batch(conn, table, &batch)?;
-                count += batch.len();
-                batch.clear();
-                pb.set_message(format!("{table}: {count} rows"));
+    conn.execute_batch("BEGIN;")?;
+    let result: Result<()> = (|| {
+        for result in reader.records() {
+            let record = result?;
+            if let Some(row) = col_mapper(&record, &norm_headers_record) {
+                batch.push(row);
+                if batch.len() >= BATCH_SIZE {
+                    insert_batch(conn, table, &batch)?;
+                    count += batch.len();
+                    batch.clear();
+                    pb.set_message(format!("{table}: {count} rows"));
+                }
             }
         }
-    }
-    if !batch.is_empty() {
-        insert_batch(conn, table, &batch)?;
-        count += batch.len();
+        if !batch.is_empty() {
+            insert_batch(conn, table, &batch)?;
+            count += batch.len();
+        }
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT;")?,
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            pb.finish_with_message(format!("{table}: failed"));
+            return Err(e);
+        }
     }
 
     pb.finish_with_message(format!("{table}: {count} rows"));
