@@ -135,6 +135,7 @@ pub fn ingest_building_footprints(conn: &Connection, csv_path: &Path) -> Result<
             ("height_roof".into(), height_roof.to_string()),
             ("ground_elevation".into(), ground_elevation.to_string()),
             ("construction_year".into(), construction_year.to_string()),
+            ("last_status_type".into(), get_field(rec, hdrs, "last_status_type").to_string()),
             ("last_edited_date".into(), parse_date(get_field(rec, hdrs, "last_edited_date")).unwrap_or_default()),
         ])
     })

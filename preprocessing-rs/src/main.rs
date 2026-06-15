@@ -477,11 +477,11 @@ fn run_build_obstructions(
     let raw_rows: Vec<RawRow> = stmt
         .query_map([], |row| {
             Ok(RawRow {
-                geom_str: row.get(0)?,
-                ground_elevation: row.get(1)?,
-                height_roof: row.get(2)?,
-                type_str: row.get(3)?,
-                props_str: row.get(4)?,
+                geom_str: row.get("output_geometry")?,
+                ground_elevation: row.get("ground_elevation")?,
+                height_roof: row.get("height_roof")?,
+                type_str: row.get("type")?,
+                props_str: row.get("props")?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

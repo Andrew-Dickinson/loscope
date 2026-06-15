@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS building_footprints (
     height_roof REAL,
     ground_elevation REAL,
     construction_year INTEGER,
+    last_status_type TEXT,
     last_edited_date TEXT
 );
 
