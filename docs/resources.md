@@ -28,3 +28,5 @@ https://spatialreference.org/ref/epsg/6539/
 https://spatialreference.org/ref/epsg/4326/
 
 https://gis.ny.gov/civil-boundaries
+
+https://osmdata.openstreetmap.de/data/land-polygons.html
