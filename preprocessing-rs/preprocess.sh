@@ -1,14 +1,22 @@
 #!/bin/bash
 
-# TODO: Test me on an EC2 instance
+# TODO: Test e2e on EC2
 
 set +ex
 
 export PATH="$PATH:target/release/"
 
+echo "#### Converting DEM file into GeoTIFF..."
+gdal_translate \
+    -of GTiff \
+    -ot Int32 \
+    -co COMPRESS=LZW \
+    -co BIGTIFF=YES \
+    ../data/dem-raw/unpacked/DEM_LiDAR_1ft_2010_Improved_NYC.img \
+    ../data/dem-raw/whole_city.tif
+
 echo "#### Slicing DEM file into tiles..."
-loscope-preprocessing preprocess-dem ../data/dem-raw/unpacked/something.tiff \
-        --output ../data/dem-tiles/
+loscope-preprocessing preprocess-dem ../data/dem-raw/whole_city.tif --output ../data/dem-tiles/
 
 echo "#### Building Sqlite DB..."
 loscope-preprocessing build-database --output ../data/nyc_dob.db \
@@ -25,14 +33,13 @@ echo "#### Writing footprint WKT files..."
 loscope-preprocessing build-footprint-wkt --db ../data/nyc_dob.db \
   --output ../data/footprint-wkt/
 
-# TODO: Parameterize dates in these query files
 echo "#### Writing obstruction rasters..."
 for query_file in ./queries/*.sql; do
-  query=$(basename "$query_file" .sql)
+  echo "Running $query_file"
   loscope-preprocessing build-obstructions \
     --db ../data/nyc_dob.db \
     --query "$query_file" \
-    --output "../data/obstructions/${query}/" \
+    --output "../data/obstructions/" \
     --dem-cache ../data/dem-tiles
 done
 
@@ -42,14 +49,16 @@ loscope-preprocessing build-obstruction-index \
     --output "../data/obstructions/_indexes/"
 
 echo "#### De-noising LAS tiles..."
-ls ../data/raw-lidar-tiles/*.las | cut -d. -f1 | cut -d"/" -f4 | parallel -j4 --progress --joblog tmp/preprocess.log \
+mkdir -p ../data/denoised-las-tiles/
+BASENAME='{/}'
+find ../data/raw-lidar-tiles/ -maxdepth 1 -name '*.las' | parallel -j16 --progress --joblog /tmp/preprocess.log \
     docker run \
         -v ./pdal-config/denoise_pipeline.json:/denoise_pipeline.json \
         -v ../data/:/data \
         pdal/pdal \
             pdal pipeline /denoise_pipeline.json \
-                --readers.las.filename=/data/raw-lidar-tiles/{}.las \
-                --writers.las.filename=/data/denoised-las-tiles/{}.las
+                "--readers.las.filename=/data/raw-lidar-tiles/$BASENAME" \
+                "--writers.las.filename=/data/denoised-las-tiles/$BASENAME"
 
 
 echo "#### Slicing and rasterizing LAS tiles into subtiles..."
