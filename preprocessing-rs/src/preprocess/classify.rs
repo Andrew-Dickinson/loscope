@@ -226,7 +226,13 @@ pub fn build_class_grid(
                 continue;
             }
 
-            // Rule 2: vegetation
+            // Rule 2: water – outside all land polygons, and not inside a hydro structure
+            if !land_mask[idx] && !hydro_mask[idx] {
+                class_grid[idx] = PixelClass::Water as u8;
+                continue;
+            }
+
+            // Rule 3: vegetation from lidar data
             let max_veg = veg_grid[idx];
             if max_veg > 0.0 && max_veg >= height_grid[idx] - VEG_Z_TOLERANCE_USFT {
                 let in_buffered_obstruction =
@@ -235,11 +241,6 @@ pub fn build_class_grid(
                     class_grid[idx] = PixelClass::Vegetation as u8;
                     continue;
                 }
-            }
-
-            // Rule 3: water – outside all land polygons, and not inside a hydro structure
-            if !land_mask[idx] && !hydro_mask[idx] {
-                class_grid[idx] = PixelClass::Water as u8;
             }
 
             // Rule 4: None (already the default)
