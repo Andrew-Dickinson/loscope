@@ -211,7 +211,8 @@ pub fn build_class_grid(
     let misc_buffer_mask =
         build_buffer_only_mask(misc_structure_polys, origin_e, origin_n, GRID_SIDE, BUFFER_USFT);
     let land_mask = build_containment_mask(land_polys, origin_e, origin_n, GRID_SIDE);
-    let hydro_mask = build_containment_mask(hydro_polys, origin_e, origin_n, GRID_SIDE);
+    let (hydro_mask, hydro_buffer_mask) =
+        build_poly_masks(hydro_polys, origin_e, origin_n, GRID_SIDE, BUFFER_USFT);
 
     let mut class_grid = vec![PixelClass::None as u8; GRID_SIDE * GRID_SIDE];
 
@@ -229,7 +230,7 @@ pub fn build_class_grid(
             let max_veg = veg_grid[idx];
             if max_veg > 0.0 && max_veg >= height_grid[idx] - VEG_Z_TOLERANCE_USFT {
                 let in_buffered_obstruction =
-                    building_buffer_mask[idx] || misc_buffer_mask[idx];
+                    building_buffer_mask[idx] || misc_buffer_mask[idx] || hydro_buffer_mask[idx];
                 if !in_buffered_obstruction {
                     class_grid[idx] = PixelClass::Vegetation as u8;
                     continue;
@@ -699,6 +700,32 @@ mod tests {
         assert_ne!(grid[7 * GRID_SIDE + 7], PixelClass::Water as u8);
         // Pixel outside the hydro structure should still be Water
         assert_eq!(grid[100 * GRID_SIDE + 100], PixelClass::Water as u8);
+    }
+
+    #[test]
+    fn hydro_structure_suppresses_vegetation() {
+        let (oe, on) = origin();
+        let mut height = vec![0.0; GRID_SIDE * GRID_SIDE];
+        let mut veg = vec![0.0; GRID_SIDE * GRID_SIDE];
+
+        let idx = 7 * GRID_SIDE + 7;
+        height[idx] = 30.0;
+        veg[idx] = 28.0; // within tolerance → would be vegetation
+
+        let hydro = polygon![
+            (x: oe + 5.0,  y: on + 5.0),
+            (x: oe + 10.0, y: on + 5.0),
+            (x: oe + 10.0, y: on + 10.0),
+            (x: oe + 5.0,  y: on + 10.0),
+            (x: oe + 5.0,  y: on + 5.0),
+        ];
+        let grid = build_class_grid(
+            &height, &veg,
+            &[], &[], &[&hydro], &[],
+            las_id(),
+        );
+
+        assert_ne!(grid[idx], PixelClass::Vegetation as u8);
     }
 
     #[test]
