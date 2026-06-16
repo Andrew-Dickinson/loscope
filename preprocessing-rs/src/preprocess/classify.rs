@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 #[allow(deprecated)]
-use geo::{BoundingRect, Contains, EuclideanDistance, MultiPolygon, Point, Polygon, Rect};
+use geo::{BooleanOps, BoundingRect, Contains, EuclideanDistance, MultiPolygon, Point, Polygon, Rect};
 use loscope::types::coords::GPSCoords2;
 use loscope::util::coord_conversion::CoordinateConverter;
 use wkt::TryFromWkt;
@@ -273,24 +273,36 @@ fn build_containment_mask(
     origin_n: f64,
     side: usize,
 ) -> Vec<bool> {
+    let tile_poly = Rect::new(
+        geo::coord! { x: origin_e, y: origin_n },
+        geo::coord! { x: origin_e + side as f64, y: origin_n + side as f64 },
+    )
+    .to_polygon();
+
     let mut mask = vec![false; side * side];
     for poly in polys {
-        let bbox = match poly.bounding_rect() {
-            Some(b) => b,
-            None => continue,
-        };
-        let x0 = tile_clamp(bbox.min().x - origin_e, side);
-        let y0 = tile_clamp(bbox.min().y - origin_n, side);
-        let x1 = tile_clamp(bbox.max().x - origin_e + 1.0, side);
-        let y1 = tile_clamp(bbox.max().y - origin_n + 1.0, side);
-        for xi in x0..x1 {
-            for yi in y0..y1 {
-                let idx = xi * side + yi;
-                if !mask[idx] {
-                    let center =
-                        Point::new(origin_e + xi as f64 + 0.5, origin_n + yi as f64 + 0.5);
-                    if poly.contains(&center) {
-                        mask[idx] = true;
+        // Clip to tile extent before rasterizing — complex coastline polygons can have
+        // tens of thousands of vertices, but after clipping only the ~10–50 vertices
+        // crossing the tile boundary remain, cutting poly.contains() cost ~1000×.
+        let clipped = tile_poly.intersection(*poly);
+        for piece in &clipped {
+            let bbox = match piece.bounding_rect() {
+                Some(b) => b,
+                None => continue,
+            };
+            let x0 = tile_clamp(bbox.min().x - origin_e, side);
+            let y0 = tile_clamp(bbox.min().y - origin_n, side);
+            let x1 = tile_clamp(bbox.max().x - origin_e + 1.0, side);
+            let y1 = tile_clamp(bbox.max().y - origin_n + 1.0, side);
+            for xi in x0..x1 {
+                for yi in y0..y1 {
+                    let idx = xi * side + yi;
+                    if !mask[idx] {
+                        let center =
+                            Point::new(origin_e + xi as f64 + 0.5, origin_n + yi as f64 + 0.5);
+                        if piece.contains(&center) {
+                            mask[idx] = true;
+                        }
                     }
                 }
             }
