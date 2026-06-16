@@ -246,7 +246,43 @@ pub fn build_class_grid(
         }
     }
 
+    fill_veg_holes(&mut class_grid);
     class_grid
+}
+
+// ── Vegetation smoothing ──────────────────────────────────────────────────────
+
+/// Promote `None` pixels to `Vegetation` when the majority of their 3×3 neighbours
+/// are `Vegetation`. Runs once after the main classification pass to fill gaps
+/// caused by LiDAR points falling between grid cells. Buildings and water are
+/// never touched.
+fn fill_veg_holes(class_grid: &mut ClassGrid) {
+    let side = GRID_SIDE;
+    let snapshot = class_grid.clone();
+    for x in 0..side {
+        for y in 0..side {
+            let idx = x * side + y;
+            if snapshot[idx] != PixelClass::None as u8 {
+                continue;
+            }
+            let mut veg = 0u8;
+            let mut total = 0u8;
+            for nx in x.saturating_sub(1)..=(x + 1).min(side - 1) {
+                for ny in y.saturating_sub(1)..=(y + 1).min(side - 1) {
+                    if nx == x && ny == y {
+                        continue;
+                    }
+                    total += 1;
+                    if snapshot[nx * side + ny] == PixelClass::Vegetation as u8 {
+                        veg += 1;
+                    }
+                }
+            }
+            if veg > total / 2 {
+                class_grid[idx] = PixelClass::Vegetation as u8;
+            }
+        }
+    }
 }
 
 // ── Rasterization helpers ─────────────────────────────────────────────────────
@@ -781,6 +817,51 @@ mod tests {
         );
 
         assert!(grid.iter().all(|&c| c == PixelClass::None as u8));
+    }
+
+    #[test]
+    fn veg_hole_filled_by_majority_neighbours() {
+        let mut height = vec![0.0f64; GRID_SIDE * GRID_SIDE];
+        let mut veg = vec![0.0f64; GRID_SIDE * GRID_SIDE];
+
+        // Surround pixel (10, 10) with vegetation on 5 of its 8 neighbours.
+        let neighbours = [(9,9),(9,10),(9,11),(10,9),(10,11),(11,9),(11,10),(11,11)];
+        for &(x, y) in &neighbours[..5] {
+            let i = x * GRID_SIDE + y;
+            height[i] = 30.0;
+            veg[i] = 28.0;
+        }
+        let land = whole_tile_land_poly(las_id());
+        let grid = build_class_grid(
+            &height, &veg,
+            &[], &[], &[], &filter(&land),
+            las_id(),
+        );
+
+        // The gap pixel (10,10) had no veg returns but should be filled in.
+        assert_eq!(grid[10 * GRID_SIDE + 10], PixelClass::Vegetation as u8);
+    }
+
+    #[test]
+    fn veg_hole_not_filled_by_minority_neighbours() {
+        let mut height = vec![0.0f64; GRID_SIDE * GRID_SIDE];
+        let mut veg = vec![0.0f64; GRID_SIDE * GRID_SIDE];
+
+        // Only 2 of 8 neighbours are vegetation — not a majority.
+        let neighbours = [(9,9),(9,10)];
+        for &(x, y) in &neighbours {
+            let i = x * GRID_SIDE + y;
+            height[i] = 30.0;
+            veg[i] = 28.0;
+        }
+        let land = whole_tile_land_poly(las_id());
+        let grid = build_class_grid(
+            &height, &veg,
+            &[], &[], &[], &filter(&land),
+            las_id(),
+        );
+
+        assert_ne!(grid[10 * GRID_SIDE + 10], PixelClass::Vegetation as u8);
     }
 
     #[test]
