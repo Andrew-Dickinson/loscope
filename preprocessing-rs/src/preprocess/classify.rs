@@ -25,6 +25,12 @@ pub type ClassGrid = Vec<u8>;
 
 // ── OSM loading ──────────────────────────────────────────────────────────────
 
+// Bounding box for the NYC metro area in WGS84, with a generous buffer.
+// Any land polygon whose WGS84 bbox doesn't overlap this is irrelevant to NYC
+// and converting it through the NYS LI projection (which is only valid locally)
+// would produce garbage coordinates that can corrupt containment checks.
+const NYC_BOUNDS_WGS84: [f64; 4] = [-74.4, 40.3, -73.5, 41.1]; // [min_lon, min_lat, max_lon, max_lat]
+
 /// Load land polygons from an OSM land-polygons shapefile (WGS84).
 /// Returns (bounding_rect, polygon) pairs in EPSG 6539 (NYS LI, US survey feet).
 pub fn load_osm_land_polys(path: &Path) -> Result<Vec<(Rect<f64>, Polygon<f64>)>> {
@@ -40,6 +46,20 @@ pub fn load_osm_land_polys(path: &Path) -> Result<Vec<(Rect<f64>, Polygon<f64>)>
             shapefile::Shape::Polygon(p) => p,
             _ => continue,
         };
+
+        // Skip polygons outside the NYC area before converting — projecting
+        // global coordinates through the NYS LI projection produces garbage.
+        let bb = sf_poly.bbox();
+        let [bb_min_x, bb_max_x] = bb.x_range();
+        let [bb_min_y, bb_max_y] = bb.y_range();
+        let overlaps_nyc = bb_min_x < NYC_BOUNDS_WGS84[2]
+            && bb_max_x > NYC_BOUNDS_WGS84[0]
+            && bb_min_y < NYC_BOUNDS_WGS84[3]
+            && bb_max_y > NYC_BOUNDS_WGS84[1];
+        if !overlaps_nyc {
+            continue;
+        }
+
         for poly in shapefile_polygon_to_geo(sf_poly, &converter) {
             if let Some(bbox) = poly.bounding_rect() {
                 polys.push((bbox, poly));
