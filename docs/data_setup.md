@@ -140,7 +140,7 @@ docker push "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/loscope-prepr
 
 Next we need to set up some supporting resources to enable the Fargate task to run:
 ```
-aws ecs create-cluster --cluster-name loscope-preprocessing 
+aws ecs create-cluster --cluster-name loscope-preprocessing --settings name=containerInsights,value=enhanced
 aws iam create-role --role-name ECS-role-Preprocessing --assume-role-policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ecs-tasks.amazonaws.com\"},\"Action\":\"sts:AssumeRole\",\"Condition\":{\"StringEquals\":{\"aws:SourceAccount\":\"${AWS_ACCOUNT_ID}\"},\"ArnLike\":{\"aws:SourceArn\":\"arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:*\"}}}]}"
 aws iam attach-role-policy --role-name ECS-role-Preprocessing --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
 aws iam attach-role-policy --role-name ECS-role-Preprocessing --policy-arn arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM

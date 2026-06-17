@@ -2,7 +2,7 @@
 
 # TODO: Test e2e on EC2
 
-set +ex
+set -ex
 
 export PATH="$PATH:target/release/"
 
