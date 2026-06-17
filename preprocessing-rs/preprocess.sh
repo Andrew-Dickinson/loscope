@@ -52,13 +52,9 @@ echo "#### De-noising LAS tiles..."
 mkdir -p ../data/denoised-las-tiles/
 BASENAME='{/}'
 find ../data/raw-lidar-tiles/ -maxdepth 1 -name '*.las' | parallel -j16 --progress --joblog /tmp/preprocess.log \
-    docker run \
-        -v ./pdal-config/denoise_pipeline.json:/denoise_pipeline.json \
-        -v ../data/:/data \
-        pdal/pdal \
-            pdal pipeline /denoise_pipeline.json \
-                "--readers.las.filename=/data/raw-lidar-tiles/$BASENAME" \
-                "--writers.las.filename=/data/denoised-las-tiles/$BASENAME"
+    pdal pipeline ./pdal-config/denoise_pipeline.json \
+        "--readers.las.filename=../data/raw-lidar-tiles/$BASENAME" \
+        "--writers.las.filename=../data/denoised-las-tiles/$BASENAME"
 
 
 echo "#### Slicing and rasterizing LAS tiles into subtiles..."

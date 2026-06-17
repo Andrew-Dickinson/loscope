@@ -1,0 +1,51 @@
+FROM rust:bookworm AS chef
+# We only pay the installation cost once,
+# it will be cached from the second build onwards
+RUN cargo install --locked cargo-chef
+WORKDIR /app
+
+
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare  --recipe-path recipe.json
+
+FROM chef AS builder
+
+RUN apt-get update && apt-get install -y \
+    libopenjp2-7-dev \
+    cmake \
+    libsqlite3-dev \
+    sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+COPY Cargo.toml ./
+COPY backend-rs ./backend-rs
+COPY preprocessing-rs ./preprocessing-rs
+
+RUN cargo build --release -p loscope-preprocessing
+
+
+FROM pdal/pdal
+
+RUN apt-get update && apt-get install -y \
+    libopenjp2-7 \
+    libsqlite3-0 \
+    ca-certificates \
+    curl \
+    ncftp aria2 wget unzip nodejs npm gdal-bin \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g osmtogeojson
+
+COPY --from=builder /app/target/release/loscope-preprocessing  /usr/local/bin/loscope-preprocessing
+
+WORKDIR /app
+
+COPY preprocessing-rs/*.sh .
+COPY preprocessing-rs/queries ./queries
+COPY preprocessing-rs/pdal-config ./pdal-config
+
+ENTRYPOINT ["./entrypoint.sh"]
