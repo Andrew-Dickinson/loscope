@@ -93,22 +93,22 @@ pub fn split_tiles(filled: &[u16], las_id: LASTileId) -> Vec<ElevationTile> {
     tiles
 }
 
-fn extract_class_subtile(class_grid: &ClassGrid, xi: usize, yi: usize) -> Vec<u8> {
-    let x0 = xi * TILE_SIDE;
-    let y0 = yi * TILE_SIDE;
-    let mut out = vec![0u8; TILE_SIDE * TILE_SIDE];
-    for dx in 0..TILE_SIDE {
-        for dy in 0..TILE_SIDE {
-            let src = (x0 + dx) * GRID_SIDE + (y0 + dy);
-            out[dx * TILE_SIDE + dy] = class_grid[src];
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn extract_class_subtile(class_grid: &ClassGrid, xi: usize, yi: usize) -> Vec<u8> {
+        let x0 = xi * TILE_SIDE;
+        let y0 = yi * TILE_SIDE;
+        let mut out = vec![0u8; TILE_SIDE * TILE_SIDE];
+        for dx in 0..TILE_SIDE {
+            for dy in 0..TILE_SIDE {
+                let src = (x0 + dx) * GRID_SIDE + (y0 + dy);
+                out[dx * TILE_SIDE + dy] = class_grid[src];
+            }
+        }
+        out
+    }
 
     fn make_las_id() -> LASTileId {
         // 500300 is a valid NYC LAS tile ID used in backend-rs tests.

@@ -1,7 +1,4 @@
 use geo::{BoundingRect, Contains, Point, Polygon, Rect};
-use loscope::types::tiles::SUBGRID_TILE_SIDE_LENGTH_USFT;
-
-const TILE_SIDE: f64 = SUBGRID_TILE_SIDE_LENGTH_USFT as f64;
 
 /// Rasterize a polygon to a 1-usft grid covering its bounding box.
 ///

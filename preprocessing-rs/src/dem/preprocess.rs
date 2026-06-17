@@ -18,28 +18,6 @@ const DEM_ORIGIN_N: i64 = 275_160;
 
 const TILE_SIDE: usize = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
 
-/// SW corners of all canonical 500-usft tiles that overlap the DEM extent.
-fn dem_tile_sw_corners(dem_h: usize, dem_w: usize) -> Vec<(i64, i64)> {
-    let n_min = DEM_ORIGIN_N - dem_h as i64;
-    let e_max = DEM_ORIGIN_E + dem_w as i64 - 1;
-    let n_max = DEM_ORIGIN_N - 1;
-
-    let e_start = (DEM_ORIGIN_E / TILE_SIDE as i64) * TILE_SIDE as i64;
-    let n_start = (n_min / TILE_SIDE as i64) * TILE_SIDE as i64;
-
-    let mut corners = Vec::new();
-    let mut e = e_start;
-    while e <= e_max {
-        let mut n = n_start;
-        while n <= n_max {
-            corners.push((e, n));
-            n += TILE_SIDE as i64;
-        }
-        e += TILE_SIDE as i64;
-    }
-    corners
-}
-
 /// Extract a 500×500 uint16 raster (inches) for the canonical tile at (e_sw, n_sw).
 ///
 /// Input DEM is in [row, col] layout (row 0 = northernmost). Heights are in US survey
@@ -247,6 +225,28 @@ pub fn split_dem(dem_path: &Path, out_dir: &Path) -> Result<Vec<String>> {
 mod tests {
     use super::*;
     use tiff::decoder::Decoder as TiffDecoder;
+
+    /// SW corners of all canonical 500-usft tiles that overlap the DEM extent.
+    fn dem_tile_sw_corners(dem_h: usize, dem_w: usize) -> Vec<(i64, i64)> {
+        let n_min = DEM_ORIGIN_N - dem_h as i64;
+        let e_max = DEM_ORIGIN_E + dem_w as i64 - 1;
+        let n_max = DEM_ORIGIN_N - 1;
+
+        let e_start = (DEM_ORIGIN_E / TILE_SIDE as i64) * TILE_SIDE as i64;
+        let n_start = (n_min / TILE_SIDE as i64) * TILE_SIDE as i64;
+
+        let mut corners = Vec::new();
+        let mut e = e_start;
+        while e <= e_max {
+            let mut n = n_start;
+            while n <= n_max {
+                corners.push((e, n));
+                n += TILE_SIDE as i64;
+            }
+            e += TILE_SIDE as i64;
+        }
+        corners
+    }
 
     /// Write a Vec<i32> as a single-strip GrayI32 TIFF and return the path.
     fn write_synthetic_dem(path: &std::path::Path, dem: &[i32], w: usize, h: usize) {
