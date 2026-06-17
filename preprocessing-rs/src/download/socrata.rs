@@ -1,5 +1,6 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -18,6 +19,8 @@ const SOCRATA_EXPORT_BASE: &str = "https://data.cityofnewyork.us/api/v3/views";
 /// The JSON body `{"serializationOptions":{"defaultGroupSeparator":",","defaultDecimalSeparator":"."}}`
 /// matches what the NYC Open Data web UI sends.
 pub fn download_bulk(dataset_id: &str, out_path: &Path) -> Result<()> {
+    const MAX_RETRIES: u32 = 7;
+
     let client = Client::builder()
         .build()
         .context("Failed to build HTTP client")?;
@@ -33,41 +36,72 @@ pub fn download_bulk(dataset_id: &str, out_path: &Path) -> Result<()> {
             .unwrap(),
     );
 
-    let resp = client
-        .post(&url)
-        .header("Accept", "text/csv")
-        .header("Content-Type", "application/json")
-        .body(r#"{"serializationOptions":{"defaultGroupSeparator":",","defaultDecimalSeparator":"."}}"#)
-        .send()
-        .with_context(|| format!("Failed to POST to {url}"))?
-        .error_for_status()
-        .with_context(|| format!("Server returned error for {url}"))?;
+    let mut last_err: anyhow::Error = anyhow::anyhow!("no attempts made");
 
-    let mut out = std::io::BufWriter::new(
-        std::fs::File::create(out_path)
-            .with_context(|| format!("Cannot create {}", out_path.display()))?,
-    );
-
-    let mut bytes_written: u64 = 0;
-    let mut reader = BufReader::new(resp);
-    let mut buf = [0u8; 65536];
-    loop {
-        let n = std::io::Read::read(&mut reader, &mut buf)
-            .context("Error reading response body")?;
-        if n == 0 {
-            break;
+    for attempt in 0..=MAX_RETRIES {
+        if attempt > 0 {
+            let delay = Duration::from_secs(1 << (attempt - 1));
+            eprintln!("{last_err}, retrying in {delay:?}…");
+            std::thread::sleep(delay);
+            pb.set_position(0);
         }
-        out.write_all(&buf[..n]).context("Error writing output file")?;
-        bytes_written += n as u64;
-        pb.set_position(bytes_written);
+
+        let resp = match client
+            .post(&url)
+            .header("Accept", "text/csv")
+            .header("Content-Type", "application/json")
+            .body(r#"{"serializationOptions":{"defaultGroupSeparator":",","defaultDecimalSeparator":"."}}"#)
+            .send()
+        {
+            Err(e) => { last_err = anyhow::Error::new(e); continue; }
+            Ok(r) => r,
+        };
+
+        let status = resp.status();
+        if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            last_err = anyhow::anyhow!("server returned {status}");
+            continue;
+        }
+        if let Err(e) = resp.error_for_status_ref() {
+            return Err(e).with_context(|| format!("Server returned error for {url}"));
+        }
+
+        // Truncate/create the file fresh on each attempt so a partial write
+        // from a previous attempt doesn't corrupt the output.
+        let mut out = std::io::BufWriter::new(
+            std::fs::File::create(out_path)
+                .with_context(|| format!("Cannot create {}", out_path.display()))?,
+        );
+
+        let mut bytes_written: u64 = 0;
+        let mut reader = BufReader::new(resp);
+        let mut buf = [0u8; 65536];
+        let stream_err = loop {
+            match std::io::Read::read(&mut reader, &mut buf) {
+                Err(e) => break Some(e),
+                Ok(0) => break None,
+                Ok(n) => {
+                    if let Err(e) = out.write_all(&buf[..n]) {
+                        return Err(e).context("Error writing output file");
+                    }
+                    bytes_written += n as u64;
+                    pb.set_position(bytes_written);
+                }
+            }
+        };
+
+        if let Some(e) = stream_err {
+            last_err = anyhow::Error::new(e).context("Error reading response body");
+            continue;
+        }
+
+        pb.finish_and_clear();
+        println!("Wrote {bytes_written} bytes to {}", out_path.display());
+        return Ok(());
     }
 
     pb.finish_and_clear();
-    println!(
-        "Wrote {bytes_written} bytes to {}",
-        out_path.display()
-    );
-    Ok(())
+    Err(last_err).with_context(|| format!("Failed to download {url} after {MAX_RETRIES} retries"))
 }
 
 /// Download a Socrata dataset as CSV using offset-based pagination.

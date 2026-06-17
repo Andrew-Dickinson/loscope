@@ -1,5 +1,6 @@
 use std::io::BufWriter;
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -76,12 +77,8 @@ pub fn download(
         "{url}/query?where={}&returnCountOnly=true&f=json",
         urlencoding(where_clause)
     );
-    let count_resp: Value = client
-        .get(&count_url)
-        .send()
-        .context("Failed to fetch feature count")?
-        .json()
-        .context("Failed to parse feature count response")?;
+    let count_resp: Value = get_json(&client, &count_url)
+        .context("Failed to fetch feature count")?;
     if let Some(error_json) = count_resp.get("error") {
         return Err(anyhow!("{}", error_json.to_string())).context(format!(" while accessing {}", count_url));
     }
@@ -105,12 +102,8 @@ pub fn download(
              &resultOffset={offset}&resultRecordCount={chunk_size}&f=json",
             urlencoding(where_clause)
         );
-        let resp: Value = client
-            .get(&page_url)
-            .send()
-            .with_context(|| format!("Failed to fetch features at offset {offset}"))?
-            .json()
-            .context("Failed to parse feature page")?;
+        let resp: Value = get_json(&client, &page_url)
+            .with_context(|| format!("Failed to fetch features at offset {offset}"))?;
 
         if let Some(error_json) = resp.get("error") {
             return Err(anyhow!("{}", error_json.to_string())).context(format!(" while accessing {}", count_url));
@@ -165,6 +158,34 @@ pub fn download(
     pb.finish_and_clear();
     println!("Wrote {} features to {}", offset, out_path.display());
     Ok(())
+}
+
+fn get_json(client: &Client, url: &str) -> Result<Value> {
+    const MAX_RETRIES: u32 = 7;
+    let mut last_err: anyhow::Error = anyhow!("no attempts made");
+    for attempt in 0..=MAX_RETRIES {
+        if attempt > 0 {
+            let delay = Duration::from_secs(1 << (attempt - 1));
+            eprintln!("{last_err}, retrying in {delay:?}…");
+            std::thread::sleep(delay);
+        }
+        let result = client.get(url).send();
+        match result {
+            Err(e) => { last_err = anyhow::Error::new(e); continue; }
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    last_err = anyhow!("server returned {status}");
+                    continue;
+                }
+                match resp.error_for_status() {
+                    Err(e) => return Err(e).with_context(|| format!("Server returned error for {url}")),
+                    Ok(r) => return r.json().context("Failed to parse JSON response"),
+                }
+            }
+        }
+    }
+    Err(last_err).with_context(|| format!("Failed to GET {url} after {MAX_RETRIES} retries"))
 }
 
 fn urlencoding(s: &str) -> String {
