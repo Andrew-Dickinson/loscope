@@ -1,6 +1,8 @@
 services:
   backend:
-    build: ./backend-rs
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
     environment:
       ROCKET_ADDRESS: "0.0.0.0"
       ROCKET_PORT: "8000"
@@ -30,7 +32,9 @@ services:
       start_period: 10s
 
   frontend:
-    build: ./frontend-ts
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
     ports:
       - "80:80"
     depends_on:
