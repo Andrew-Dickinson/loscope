@@ -25,8 +25,12 @@ pub fn download_bulk(dataset_id: &str, out_path: &Path) -> Result<()> {
         .build()
         .context("Failed to build HTTP client")?;
 
+    let cache_bust: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let url = format!(
-        "{SOCRATA_EXPORT_BASE}/{dataset_id}/export.csv?accessType=DOWNLOAD"
+        "{SOCRATA_EXPORT_BASE}/{dataset_id}/export.csv?cacheBust={cache_bust}&accessType=DOWNLOAD"
     );
 
     let pb = ProgressBar::new_spinner();
