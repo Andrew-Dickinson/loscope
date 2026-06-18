@@ -24,7 +24,7 @@ backend.
 ### Software
 #### MacOS
 ```
-brew install ncftp aria2 wget unzip node gdal pdal
+brew install ncftp aria2 wget unzip node gdal pdal parallel
 ```
 
 ```
@@ -36,7 +36,7 @@ You'll also need docker. Install docker desktop from https://www.docker.com/prod
 #### Debian
 ```
 sudo apt update
-sudo apt install ncftp aria2 wget unzip nodejs npm gdal-bin pdal
+sudo apt install ncftp aria2 wget unzip nodejs npm gdal-bin parallel
 ```
 
 ```
@@ -48,6 +48,8 @@ You'll also need docker:
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER && newgrp docker
 ```
+
+And you'll need to have `pdal` available on your shell. Options here: https://pdal.io/en/2.9.0/download.html
 
 ## Build Preprocessor
 ```
