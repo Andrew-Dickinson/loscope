@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y \
     libsqlite3-0 \
     ca-certificates \
     curl \
-    ncftp aria2 wget unzip nodejs npm gdal-bin \
+    ncftp aria2 wget unzip nodejs npm gdal-bin parallel \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g osmtogeojson
