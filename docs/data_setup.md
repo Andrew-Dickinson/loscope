@@ -7,7 +7,7 @@ https://data.cityofnewyork.us/profile/edit/developer_settings
 
 ### Hardware
 Mostly this is storage heavy, though CPU cores help with parallel preprocessing, and you probably don't want to attempt 
-this with less than 8GB ram, though I haven't tested this with anything less than 32GB. Having >1 Gbps internet
+this with less than 8GB ram, though I haven't tested this with anything less than 16GB. Having >1 Gbps internet
 bandwidth will also help to speed up the large file downloads.
 
 The raw lidar data is huge, you'll need ~1.9TB of free storage, ideally on an SSD, to follow along with these 
@@ -15,11 +15,13 @@ preprocessing steps. However, the final artifacts needed by the backend are smal
 copied to a more flexible location for serving via HTTP to backend workers.
 
 The workflow I use is to spin up a c8a.4xlarge AWS EC2 instance, with an attached gp3 SDD-backed volume,
-configured for 1 GiB/s of disk throughput and 10k IOPS. This is expensive, so I keep it just long enough to run 
+configured for 1 GiB/s of disk throughput and 5-10k IOPS. This is expensive, so I keep it just long enough to run 
 preprocessing before tearing down both the SDD and the instance. I copy the artifacts it produces to AWS S3, where they 
 can be served to workers running the service backend. However, nothing about this project is tightly coupled to AWS, 
 any Linux box with sufficient storage will work for preprocessing and any HTTP file server can act as the file provider
 backend.
+
+You can also use AWS Fargate as the compute platform, by following the instructions at the end of this file.
 
 ### Software
 #### MacOS
@@ -208,8 +210,8 @@ cat > /tmp/task-definition.json <<EOF
     "requiresCompatibilities": [
         "FARGATE"
     ],
-    "cpu": "16384",
-    "memory": "32768",
+    "cpu": "8192",
+    "memory": "16384",
     "runtimePlatform": {
         "cpuArchitecture": "ARM64",
         "operatingSystemFamily": "LINUX"
@@ -271,8 +273,8 @@ cat > /tmp/run-task.json <<EOF
                 "roleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ECSServiceRoleForVolumes",
                 "volumeType": "gp3",
                 "sizeInGiB": 2000,
-                "iops": 5000,
-                "throughput": 1000,
+                "iops": 3000,
+                "throughput": 200,
                 "filesystemType": "xfs",
                 "encrypted": false,
                 "terminationPolicy": {"deleteOnTermination": true}
