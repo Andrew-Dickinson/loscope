@@ -233,14 +233,16 @@ fn main() -> Result<()> {
             arcgis::download(&url, &output, &r#where, chunk)?
         }
         Command::DownloadOpendata { output, chunk: _ } => {
+            let creds = socrata::read_credentials()?;
             std::fs::create_dir_all(&output)?;
             for ds in socrata::NYC_OPEN_DATA_DATASETS {
                 println!("Downloading {} …", ds.description);
-                socrata::download_bulk(ds.id, &output.join(ds.filename))?;
+                socrata::download_bulk(ds.id, &output.join(ds.filename), &creds)?;
             }
         }
         Command::DownloadCityData { output, chunk } => {
-            city_data::download_all(&output, chunk)?
+            let creds = socrata::read_credentials()?;
+            city_data::download_all(&output, chunk, &creds)?
         }
         Command::BuildDatabase {
             output, footprints, tax_lots, dob_jobs, dob_now_jobs, cos, permits, now_permits, condos,

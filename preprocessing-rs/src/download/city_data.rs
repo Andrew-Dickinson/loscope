@@ -14,7 +14,7 @@ const TAX_LOTS_URL: &str =
 /// Geographic datasets (building footprints, tax lots) are fetched from ArcGIS;
 /// DOB tabular datasets are fetched from NYC Open Data (Socrata). All files are
 /// written to `out_dir`.
-pub fn download_all(out_dir: &Path, chunk_size: usize) -> Result<()> {
+pub fn download_all(out_dir: &Path, chunk_size: usize, creds: &socrata::Credentials) -> Result<()> {
     std::fs::create_dir_all(out_dir)?;
 
     println!("--- Downloading building footprints from ArcGIS ---");
@@ -36,7 +36,7 @@ pub fn download_all(out_dir: &Path, chunk_size: usize) -> Result<()> {
     println!("--- Downloading NYC Open Data CSVs ---");
     for ds in socrata::NYC_OPEN_DATA_DATASETS {
         println!("  Downloading {} …", ds.description);
-        socrata::download_bulk(ds.id, &out_dir.join(ds.filename))?;
+        socrata::download_bulk(ds.id, &out_dir.join(ds.filename), creds)?;
     }
 
     println!("All downloads complete.");

@@ -9,21 +9,57 @@ use reqwest::blocking::Client;
 const SOCRATA_BASE: &str = "https://data.cityofnewyork.us/resource";
 const SOCRATA_EXPORT_BASE: &str = "https://data.cityofnewyork.us/api/v3/views";
 
+pub struct Credentials {
+    pub key_id: String,
+    pub secret_key: String,
+}
+
+pub fn read_credentials() -> Result<Credentials> {
+    let key_id = std::env::var("SOCRATA_API_KEY_ID")
+        .context("SOCRATA_API_KEY_ID env var is required")?;
+    let secret_key = std::env::var("SOCRATA_SECRET_KEY")
+        .context("SOCRATA_SECRET_KEY env var is required")?;
+    if key_id.is_empty() {
+        anyhow::bail!("SOCRATA_API_KEY_ID is set but empty");
+    }
+    if secret_key.is_empty() {
+        anyhow::bail!("SOCRATA_SECRET_KEY is set but empty");
+    }
+    Ok(Credentials { key_id, secret_key })
+}
+
+fn fetch_row_count(client: &Client, dataset_id: &str, creds: &Credentials) -> Result<u64> {
+    let url = format!(
+        "{SOCRATA_EXPORT_BASE}/{dataset_id}/query.json?query=select%20count(*)%20as%20count"
+    );
+    let body: serde_json::Value = client
+        .get(&url)
+        .basic_auth(&creds.key_id, Some(&creds.secret_key))
+        .send()
+        .with_context(|| format!("Failed to fetch row count for {dataset_id}"))?
+        .error_for_status()
+        .with_context(|| format!("Row count request failed for {dataset_id}"))?
+        .json()
+        .context("Failed to parse row count response")?;
+    body[0]["count"]
+        .as_str()
+        .and_then(|s| s.parse().ok())
+        .with_context(|| format!("Unexpected row count response: {body}"))
+}
+
 /// Download a Socrata dataset as a single bulk CSV export via POST.
 ///
-/// Socrata exposes `/api/v3/views/{id}/export.csv` which returns the full
-/// dataset in one streaming response (gzip-compressed). This is orders of
-/// magnitude faster than the paginated SoQL approach because the server can
-/// stream a pre-built snapshot rather than executing repeated queries.
-///
-/// The JSON body `{"serializationOptions":{"defaultGroupSeparator":",","defaultDecimalSeparator":"."}}`
-/// matches what the NYC Open Data web UI sends.
-pub fn download_bulk(dataset_id: &str, out_path: &Path) -> Result<()> {
+/// Fetches the expected row count first, streams the export, and verifies the
+/// downloaded row count matches. Retries on network errors or count mismatches.
+pub fn download_bulk(dataset_id: &str, out_path: &Path, creds: &Credentials) -> Result<()> {
     const MAX_RETRIES: u32 = 7;
 
     let client = Client::builder()
         .build()
         .context("Failed to build HTTP client")?;
+
+    let expected_rows = fetch_row_count(&client, dataset_id, creds)
+        .with_context(|| format!("Could not get expected row count for {dataset_id}"))?;
 
     let cache_bust: u64 = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -36,9 +72,10 @@ pub fn download_bulk(dataset_id: &str, out_path: &Path) -> Result<()> {
     let pb = ProgressBar::new_spinner();
     pb.set_style(
         ProgressStyle::default_spinner()
-            .template("{spinner} {bytes} downloaded ({bytes_per_sec})")
+            .template("{spinner} {bytes} downloaded ({bytes_per_sec}) — expecting {msg} rows")
             .unwrap(),
     );
+    pb.set_message(expected_rows.to_string());
 
     let mut last_err: anyhow::Error = anyhow::anyhow!("no attempts made");
 
@@ -47,7 +84,6 @@ pub fn download_bulk(dataset_id: &str, out_path: &Path) -> Result<()> {
             let delay = Duration::from_secs(1 << (attempt - 1));
             eprintln!("{last_err}, retrying in {delay:?}…");
             std::thread::sleep(delay);
-            pb.set_position(0);
         }
 
         let resp = match client
@@ -99,8 +135,27 @@ pub fn download_bulk(dataset_id: &str, out_path: &Path) -> Result<()> {
             continue;
         }
 
+        // Flush before counting so the file is fully written.
+        drop(out);
+
+        // Count rows with the csv crate so quoted fields containing embedded
+        // newlines are handled correctly.
+        let downloaded_rows = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_path(out_path)
+            .with_context(|| format!("Cannot open {} for row count", out_path.display()))?
+            .records()
+            .count() as u64;
+
+        if downloaded_rows != expected_rows {
+            last_err = anyhow::anyhow!(
+                "row count mismatch: expected {expected_rows}, got {downloaded_rows}"
+            );
+            continue;
+        }
+
         pb.finish_and_clear();
-        println!("Wrote {bytes_written} bytes to {}", out_path.display());
+        println!("Wrote {downloaded_rows} rows ({bytes_written} bytes) to {}", out_path.display());
         return Ok(());
     }
 

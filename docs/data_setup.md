@@ -1,5 +1,10 @@
 ## Prereqs
 
+### Socrata Account & API Key
+
+You need to sign-up for an account at https://data.cityofnewyork.us/signup and create an API key under
+https://data.cityofnewyork.us/profile/edit/developer_settings
+
 ### Hardware
 Mostly this is storage heavy, though CPU cores help with parallel preprocessing, and you probably don't want to attempt 
 this with less than 8GB ram, though I haven't tested this with anything less than 32GB. Having >1 Gbps internet
@@ -52,7 +57,7 @@ cd preprocessing-rs/ && cargo build --release
 ## Download Data & Preprocess
 
 ```
-cd preprocessing-rs/ && ./download.sh
+SOCRATA_API_KEY_ID=<your key id here> SOCRATA_SECRET_KEY=<your key here> cd preprocessing-rs/ && ./download.sh
 ```
 (this can run for 1-3 hours depending on your internet connection)
 
@@ -87,7 +92,8 @@ cd preprocessing-rs/ && ./upload-scp.sh <file-server-hostname>:<path-on-file-ser
 ### Option C: Use AWS S3 as the file server
 
 If you don't want to use your own HTTP server, a good managed option for hosting static files is AWS S3. We provide a
-script to help upload the files to your bucket:
+script to help upload the files to your bucket. Ensure you have the correct AWS CLI credentials configured (usually 
+via an AWS_PROFILE) and then run:
 ```
 cd preprocessing-rs/ && ./upload-s3.sh <s3-bucket-name> <s3-key-prefix>
 ```
@@ -227,6 +233,8 @@ SG_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=${DEFAULT
 
 Write the launch parameters to a file like:
 ```
+SOCRATA_API_KEY_ID=<your key id here>
+SOCRATA_SECRET_KEY=<your key here>
 cat > /tmp/run-task.json <<EOF
 {
     "cluster": "loscope-preprocessing",
@@ -247,7 +255,9 @@ cat > /tmp/run-task.json <<EOF
                 "name": "loscope-preprocessing",
                 "environment": [
                     {"name": "OUTPUT_S3_BUCKET", "value": "${OUTPUT_S3_BUCKET}"},
-                    {"name": "OUTPUT_S3_PREFIX", "value": "${OUTPUT_S3_PREFIX}"}
+                    {"name": "OUTPUT_S3_PREFIX", "value": "${OUTPUT_S3_PREFIX}"},
+                    {"name": "SOCRATA_API_KEY_ID", "value": "${SOCRATA_API_KEY_ID}"},
+                    {"name": "SOCRATA_SECRET_KEY", "value": "${SOCRATA_SECRET_KEY}"}
                 ]
             }
         ]
