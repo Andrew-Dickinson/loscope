@@ -7,7 +7,7 @@ https://data.cityofnewyork.us/profile/edit/developer_settings
 
 ### Hardware
 Mostly this is storage heavy, though CPU cores help with parallel preprocessing, and you probably don't want to attempt 
-this with less than 8GB ram, though I haven't tested this with anything less than 16GB. Having >1 Gbps internet
+this with less than 8GB ram, though I haven't tested this with anything less than 32GB. Having >1 Gbps internet
 bandwidth will also help to speed up the large file downloads.
 
 The raw lidar data is huge, you'll need ~1.9TB of free storage, ideally on an SSD, to follow along with these 
@@ -210,8 +210,8 @@ cat > /tmp/task-definition.json <<EOF
     "requiresCompatibilities": [
         "FARGATE"
     ],
-    "cpu": "8192",
-    "memory": "16384",
+    "cpu": "16384",
+    "memory": "32768",
     "runtimePlatform": {
         "cpuArchitecture": "ARM64",
         "operatingSystemFamily": "LINUX"
@@ -274,7 +274,7 @@ cat > /tmp/run-task.json <<EOF
                 "volumeType": "gp3",
                 "sizeInGiB": 2000,
                 "iops": 3000,
-                "throughput": 200,
+                "throughput": 400,
                 "filesystemType": "xfs",
                 "encrypted": false,
                 "terminationPolicy": {"deleteOnTermination": true}
