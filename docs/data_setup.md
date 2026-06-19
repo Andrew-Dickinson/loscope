@@ -33,7 +33,8 @@ brew install ncftp aria2 wget unzip node gdal pdal parallel
 npm install -g osmtogeojson
 ```
 
-You'll also need docker. Install docker desktop from https://www.docker.com/products/docker-desktop/ if needed
+To follow along with the optional AWS bits, you'll need the AWS CLI:
+https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 
 #### Debian
 ```
@@ -45,11 +46,8 @@ sudo apt install ncftp aria2 wget unzip nodejs npm gdal-bin parallel
 npm install -g osmtogeojson
 ```
 
-You'll also need docker:
-```
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER && newgrp docker
-```
+To follow along with the optional AWS bits, you'll need the AWS CLI:
+https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 
 And you'll need to have `pdal` available on your shell. Options here: https://pdal.io/en/2.9.0/download.html
 

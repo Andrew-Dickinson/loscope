@@ -38,6 +38,11 @@ RUN apt-get update && apt-get install -y \
     ncftp aria2 wget unzip nodejs npm gdal-bin parallel \
     && rm -rf /var/lib/apt/lists/*
 
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o awscliv2.zip \
+    && unzip awscliv2.zip \
+    && ./aws/install \
+    && rm -rf awscliv2.zip aws
+
 RUN npm install -g osmtogeojson
 
 COPY --from=builder /app/target/release/loscope-preprocessing  /usr/local/bin/loscope-preprocessing
