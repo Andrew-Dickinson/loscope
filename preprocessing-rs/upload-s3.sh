@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# TODO: Test e2e on EC2
-
 usage() {
     echo "Usage: $0 <destination-bucket> <destination-prefix>" >&2
     echo "  destination-bucket   S3 bucket name (without s3:// prefix)" >&2
@@ -19,12 +17,12 @@ DESTINATION_PREFIX=$2
 
 ulimit -n 50000
 
-aws configure set default.s3.max_concurrent_requests 5000
-aws configure set default.s3.max_queue_size 50000
+aws configure set default.s3.max_concurrent_requests 50
+aws configure set default.s3.max_queue_size 10000
 aws configure set default.s3.multipart_threshold 64MB
 aws configure set default.s3.multipart_chunksize 16MB
 
-aws s3 cp --recursive ../data/preprocessed-lidar-tiles/ "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/preprocessed-lidar-tiles/"
-aws s3 cp --recursive ../data/orthos/                   "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/ortho-photos/"
-aws s3 cp --recursive ../data/obstructions/             "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/simulated-obstructions/"
-aws s3 cp --recursive ../data/footprint-wkt/            "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/building-footprints/"
+aws s3 cp --recursive --cli-read-timeout 0 ../data/preprocessed-lidar-tiles/ "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/preprocessed-lidar-tiles/"
+aws s3 cp --recursive --cli-read-timeout 0 ../data/orthos/                   "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/ortho-photos/"
+aws s3 cp --recursive --cli-read-timeout 0 ../data/obstructions/             "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/simulated-obstructions/"
+aws s3 cp --recursive --cli-read-timeout 0 ../data/footprint-wkt/            "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/building-footprints/"
