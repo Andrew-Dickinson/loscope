@@ -4,12 +4,12 @@ use crate::providers::elevation_tile_provider::{
     CachingElevationTileProvider, ElevationTileProvider,
 };
 use crate::providers::evaluation_result_provider::PointEvaluationResultProvider;
-use crate::providers::footprint_provider::{FootprintProvider, StringBackedFootprintProvider};
+use crate::providers::footprint_provider::{CachingFootprintProvider, FootprintProvider, StringBackedFootprintProvider};
 use crate::providers::meshdb_provider::ProgenitorMeshDBProvider;
 use crate::providers::obstruction_provider::{CachingObstructionProvider, ObstructionProvider};
 use crate::providers::ortho_provider::{CachingOrthoProvider, OrthoProvider};
 use crate::types::errors::ProviderInitErr;
-use crate::util::env::{LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, LOS_OBSTRUCTION_S3_PREFIX, LOS_ORTHOS_S3_PREFIX, LOS_TERRAIN_TILE_S3_PREFIX, MESHDB_API_TOKEN, NYC_DOB_SQLITE_DB_FILE, expect_env, get_env, REDIS_URL};
+use crate::util::env::{LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, LOS_OBSTRUCTION_S3_PREFIX, LOS_ORTHOS_S3_PREFIX, LOS_TERRAIN_TILE_S3_PREFIX, MESHDB_API_TOKEN, expect_env, get_env, REDIS_URL, LOS_FOOTPRINTS_S3_PREFIX};
 use backends::asset_fetcher::{AssetType, S3AssetFetcher};
 use backends::fs_cache::{AssetProvider, CachingAssetProvider};
 use derive_getters::Getters;
@@ -57,6 +57,10 @@ impl Providers {
                 AssetType::ObstructionIndex,
                 Utf8UnixPathBuf::from(expect_env(LOS_OBSTRUCTION_S3_PREFIX) + "_indexes"),
             ),
+            (
+                AssetType::BuildingFootprintWKT,
+                Utf8UnixPathBuf::from(expect_env(LOS_FOOTPRINTS_S3_PREFIX)),
+            ),
         ]);
 
         let bucket = expect_env(LOS_ASSET_S3_BUCKET);
@@ -91,13 +95,7 @@ impl Providers {
             elevation_tile_provider: Box::new(CachingElevationTileProvider::new(Arc::clone(
                 &asset_provider,
             ))),
-
-            // TODO: We probably don't want to bundle the 0.5-6.0 GB sqlite db with our builds
-            //       or dynamically fetch it at runtime either, this should probably get reworked
-            //       to use the asset-fetcher backend somehow
-            footprint_provider: Box::new(StringBackedFootprintProvider::new(Box::new(
-                NYCDOBSqliteStringProvider::new(&expect_env(NYC_DOB_SQLITE_DB_FILE)).await?,
-            ))),
+            footprint_provider: Box::new(CachingFootprintProvider::new(Arc::clone(&asset_provider))),
             obstruction_provider: Box::new(
                 CachingObstructionProvider::new(Arc::clone(&asset_provider))
                     .await
