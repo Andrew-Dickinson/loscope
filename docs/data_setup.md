@@ -111,9 +111,14 @@ rm -rf data/
 ## Hosted Preprocessing
 Another way to accomplish all of the above steps is to use the included `Dockerfile.preporcessing` 
 container image to run on a managed container hosting solution, such as AWS Fargate. This section is purely
-duplicative of everything outlined above, *there is no need to use AWS for this project to work*. However,
+duplicative of everything outlined above, **there is no need to use AWS for this project to work**. However,
 if you have an AWS account and want to use it complete the preprocessing steps, it can be more economical
 and convenient than running an EC2 instance manually.
+
+Following the instructions below will tack on about
+**$16** to your AWS bill, but the hourly cost for some of the resources is quite high, and it's always 
+possible something could deadlock and eat up resources unexpectedly. You should always keep an eye on your real-time
+spending reports to ensure it is in-line with your expectations.
 
 ### Prerequisites
 These steps assume you already have an S3 bucket to place the generated artifacts in. If not, create one now:
