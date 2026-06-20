@@ -8,7 +8,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use loscope::building::heightmap::get_intersecting_tiles;
 use loscope::types::coords::NYSCoords2;
 use loscope::types::obstructions::{AttributeValue, ObstructionRaster, ObstructionType};
-use loscope::types::tiles::LASTileId;
+use loscope::types::tiles::{LASTileId, TerrainClass};
 use loscope_preprocessing::nyc_tile_bounds::update_nyc_tiles_json;
 use loscope_preprocessing::database::{ingest, schema};
 use loscope_preprocessing::dem::preprocess::split_dem;
@@ -26,7 +26,6 @@ use loscope_preprocessing::preprocess::{
     classify::{
         build_class_grid, filter_polys_for_tile, load_building_footprints,
         load_osm_hydro_structures, load_osm_land_polys, load_planimetrics_csv, tile_bbox,
-        PixelClass,
     },
     gap_fill::fill_gaps,
     io::{write_class_tile, write_tile},
@@ -368,7 +367,7 @@ fn run_preprocess_tiles(
 
             if zero_water_elevation {
                 for (idx, &cls) in class_grid.iter().enumerate() {
-                    if cls == PixelClass::Water as u8 {
+                    if cls == TerrainClass::Water as u8 {
                         filled[idx] = 0;
                     }
                 }

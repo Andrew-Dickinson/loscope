@@ -6,20 +6,11 @@ use geo::{BooleanOps, BoundingRect, Contains, EuclideanDistance, MultiPolygon, P
 use loscope::types::coords::GPSCoords2;
 use loscope::util::coord_conversion::CoordinateConverter;
 use wkt::TryFromWkt;
-
+use loscope::types::tiles::TerrainClass;
 use crate::preprocess::rasterize::{HeightGrid, VegGrid, GRID_SIDE};
 
 const VEG_Z_TOLERANCE_USFT: f64 = 5.0;
 const BUFFER_USFT: f64 = 5.0;
-
-#[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PixelClass {
-    None = 0,
-    Vegetation = 1,
-    Building = 2,
-    Water = 3,
-}
 
 pub type ClassGrid = Vec<u8>;
 
@@ -214,7 +205,7 @@ pub fn build_class_grid(
     let (hydro_mask, hydro_buffer_mask) =
         build_poly_masks(hydro_polys, origin_e, origin_n, GRID_SIDE, BUFFER_USFT);
 
-    let mut class_grid = vec![PixelClass::None as u8; GRID_SIDE * GRID_SIDE];
+    let mut class_grid = vec![TerrainClass::None as u8; GRID_SIDE * GRID_SIDE];
 
     for x in 0..GRID_SIDE {
         for y in 0..GRID_SIDE {
@@ -222,13 +213,13 @@ pub fn build_class_grid(
 
             // Rule 1: building
             if building_mask[idx] {
-                class_grid[idx] = PixelClass::Building as u8;
+                class_grid[idx] = TerrainClass::Building as u8;
                 continue;
             }
 
             // Rule 2: water – outside all land polygons, and not inside a hydro structure
             if !land_mask[idx] && !hydro_mask[idx] {
-                class_grid[idx] = PixelClass::Water as u8;
+                class_grid[idx] = TerrainClass::Water as u8;
                 continue;
             }
 
@@ -238,7 +229,7 @@ pub fn build_class_grid(
                 let in_buffered_obstruction =
                     building_buffer_mask[idx] || misc_buffer_mask[idx] || hydro_buffer_mask[idx];
                 if !in_buffered_obstruction {
-                    class_grid[idx] = PixelClass::Vegetation as u8;
+                    class_grid[idx] = TerrainClass::Vegetation as u8;
                     continue;
                 }
             }
@@ -263,7 +254,7 @@ fn fill_veg_holes(class_grid: &mut ClassGrid) {
     for x in 0..side {
         for y in 0..side {
             let idx = x * side + y;
-            if snapshot[idx] != PixelClass::None as u8 {
+            if snapshot[idx] != TerrainClass::None as u8 {
                 continue;
             }
             let mut veg = 0u8;
@@ -274,13 +265,13 @@ fn fill_veg_holes(class_grid: &mut ClassGrid) {
                         continue;
                     }
                     total += 1;
-                    if snapshot[nx * side + ny] == PixelClass::Vegetation as u8 {
+                    if snapshot[nx * side + ny] == TerrainClass::Vegetation as u8 {
                         veg += 1;
                     }
                 }
             }
             if veg > total / 2 {
-                class_grid[idx] = PixelClass::Vegetation as u8;
+                class_grid[idx] = TerrainClass::Vegetation as u8;
             }
         }
     }
@@ -608,7 +599,7 @@ mod tests {
             las_id(),
         );
 
-        assert_eq!(grid[10 * GRID_SIDE + 10], PixelClass::Building as u8);
+        assert_eq!(grid[10 * GRID_SIDE + 10], TerrainClass::Building as u8);
     }
 
     #[test]
@@ -630,7 +621,7 @@ mod tests {
             las_id(),
         );
 
-        assert_ne!(grid[0], PixelClass::Building as u8);
+        assert_ne!(grid[0], TerrainClass::Building as u8);
     }
 
     #[test]
@@ -649,7 +640,7 @@ mod tests {
             las_id(),
         );
 
-        assert_eq!(grid[idx], PixelClass::Vegetation as u8);
+        assert_eq!(grid[idx], TerrainClass::Vegetation as u8);
     }
 
     #[test]
@@ -668,7 +659,7 @@ mod tests {
             las_id(),
         );
 
-        assert_ne!(grid[idx], PixelClass::Vegetation as u8);
+        assert_ne!(grid[idx], TerrainClass::Vegetation as u8);
     }
 
     #[test]
@@ -696,7 +687,7 @@ mod tests {
             las_id(),
         );
 
-        assert_ne!(grid[idx], PixelClass::Vegetation as u8);
+        assert_ne!(grid[idx], TerrainClass::Vegetation as u8);
     }
 
     #[test]
@@ -710,7 +701,7 @@ mod tests {
             las_id(),
         );
 
-        assert!(grid.iter().all(|&c| c == PixelClass::Water as u8));
+        assert!(grid.iter().all(|&c| c == TerrainClass::Water as u8));
     }
 
     #[test]
@@ -734,9 +725,9 @@ mod tests {
         );
 
         // Pixel inside the hydro structure should NOT be Water
-        assert_ne!(grid[7 * GRID_SIDE + 7], PixelClass::Water as u8);
+        assert_ne!(grid[7 * GRID_SIDE + 7], TerrainClass::Water as u8);
         // Pixel outside the hydro structure should still be Water
-        assert_eq!(grid[100 * GRID_SIDE + 100], PixelClass::Water as u8);
+        assert_eq!(grid[100 * GRID_SIDE + 100], TerrainClass::Water as u8);
     }
 
     #[test]
@@ -762,7 +753,7 @@ mod tests {
             las_id(),
         );
 
-        assert_ne!(grid[idx], PixelClass::Vegetation as u8);
+        assert_ne!(grid[idx], TerrainClass::Vegetation as u8);
     }
 
     #[test]
@@ -784,7 +775,7 @@ mod tests {
             las_id(),
         );
 
-        assert_eq!(grid[10 * GRID_SIDE + 10], PixelClass::Building as u8);
+        assert_eq!(grid[10 * GRID_SIDE + 10], TerrainClass::Building as u8);
     }
 
     #[test]
@@ -803,7 +794,7 @@ mod tests {
             las_id(),
         );
 
-        assert_eq!(grid[idx], PixelClass::Vegetation as u8);
+        assert_eq!(grid[idx], TerrainClass::Vegetation as u8);
     }
 
     #[test]
@@ -817,7 +808,7 @@ mod tests {
             las_id(),
         );
 
-        assert!(grid.iter().all(|&c| c == PixelClass::None as u8));
+        assert!(grid.iter().all(|&c| c == TerrainClass::None as u8));
     }
 
     #[test]
@@ -840,7 +831,7 @@ mod tests {
         );
 
         // The gap pixel (10,10) had no veg returns but should be filled in.
-        assert_eq!(grid[10 * GRID_SIDE + 10], PixelClass::Vegetation as u8);
+        assert_eq!(grid[10 * GRID_SIDE + 10], TerrainClass::Vegetation as u8);
     }
 
     #[test]
@@ -862,7 +853,7 @@ mod tests {
             las_id(),
         );
 
-        assert_ne!(grid[10 * GRID_SIDE + 10], PixelClass::Vegetation as u8);
+        assert_ne!(grid[10 * GRID_SIDE + 10], TerrainClass::Vegetation as u8);
     }
 
     #[test]

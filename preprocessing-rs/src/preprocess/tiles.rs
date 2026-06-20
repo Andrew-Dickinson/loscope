@@ -1,8 +1,8 @@
 use loscope::providers::elevation_tile_provider::ElevationTile;
-use loscope::types::tiles::{LASTileId, SubgridId, TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
+use loscope::types::tiles::{LASTileId, TerrainClass, SubgridId, TileId, SUBGRID_TILE_SIDE_LENGTH_USFT};
 use ndarray::Array2;
 
-use super::classify::{ClassGrid, PixelClass};
+use super::classify::ClassGrid;
 use super::rasterize::GRID_SIDE;
 
 pub const TILE_SIDE: usize = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
@@ -45,7 +45,7 @@ pub fn split_tiles_with_class(
                     if val != 0 {
                         all_zero_elev = false;
                     }
-                    if cls != PixelClass::Water as u8 {
+                    if cls != TerrainClass::Water as u8 {
                         all_water = false;
                     }
                 }
@@ -116,7 +116,7 @@ mod tests {
     }
 
     fn all_water_class() -> ClassGrid {
-        vec![PixelClass::Water as u8; GRID_SIDE * GRID_SIDE]
+        vec![TerrainClass::Water as u8; GRID_SIDE * GRID_SIDE]
     }
 
     #[test]
@@ -132,7 +132,7 @@ mod tests {
         let filled = vec![0u16; GRID_SIDE * GRID_SIDE];
         // One pixel classified as None means the tile is not pure water → keep it
         let mut class = all_water_class();
-        class[0] = PixelClass::None as u8;
+        class[0] = TerrainClass::None as u8;
         let pairs = split_tiles_with_class(&filled, &class, make_las_id());
         assert!(!pairs.is_empty());
     }

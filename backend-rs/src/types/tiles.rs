@@ -403,6 +403,14 @@ impl<'de> Deserialize<'de> for TileId {
     }
 }
 
+
+pub enum TerrainClass {
+    None = 0,
+    Vegetation = 1,
+    Building = 2,
+    Water = 3,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
