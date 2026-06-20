@@ -1,0 +1,23 @@
+{
+  "obstruction_id": "0020fb43-ffab-4083-9bc4-c60d97961d94",
+  "obstruction_type": "new_construction_footprints",
+  "attributes": {
+    "bbl": "3016220051",
+    "bin": "3044163",
+    "construction_year": 2023,
+    "height_roof": 63.0,
+    "ground_elevation": 53.0,
+    "geom_source": "Other (Manual)",
+    "last_status_type": "Constructed"
+  },
+  "tile_ids": [
+    "2190_31"
+  ],
+  "offset_nys": [
+    1004021.0,
+    190791.0
+  ],
+  "width": 182,
+  "height": 80,
+  "raster_file": "0020fb43-ffab-4083-9bc4-c60d97961d94.tif"
+}

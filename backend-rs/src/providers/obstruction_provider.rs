@@ -402,7 +402,7 @@ mod tests {
         let expected_asset_id = format!("new_construction_footprints/{}.json", id);
 
         let obstruction_metadata_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-            "tests/resources/new_construction_footprints/83167e5c-c108-4d85-905c-6dc3224cc367.json",
+            "tests/resources/new_construction_footprints/0020fb43-ffab-4083-9bc4-c60d97961d94.json",
         );
 
         let obstruction_meta_vec: Vec<u8> = fs::read(obstruction_metadata_path).unwrap();

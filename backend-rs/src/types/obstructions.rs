@@ -338,6 +338,72 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
+    const NEW_STYLE_PAYLOAD: &str = r#"{
+        "obstruction_id": "0020fb43-ffab-4083-9bc4-c60d97961d94",
+        "obstruction_type": "new_construction_footprints",
+        "attributes": {
+            "bbl": "3016220051",
+            "bin": "3044163",
+            "construction_year": 2023,
+            "height_roof": 63.0,
+            "ground_elevation": 53.0,
+            "geom_source": "Other (Manual)",
+            "last_status_type": "Constructed"
+        },
+        "tile_ids": ["2190_31"],
+        "offset_nys": [1004021.0, 190791.0],
+        "width": 182,
+        "height": 80,
+        "raster_file": "0020fb43-ffab-4083-9bc4-c60d97961d94.tif"
+    }"#;
+
+    #[test]
+    fn new_style_payload_deserializes_offset() {
+        let meta = ObstructionMeta::from_json(
+            Cursor::new(NEW_STYLE_PAYLOAD.as_bytes()),
+            ObstructionType::NewConstructionFootprints,
+        )
+        .unwrap();
+        assert_eq!(*meta.sw_offset.easting(), 1004021.0);
+        assert_eq!(*meta.sw_offset.northing(), 190791.0);
+    }
+
+    #[test]
+    fn new_style_payload_deserializes_attributes() {
+        let meta = ObstructionMeta::from_json(
+            Cursor::new(NEW_STYLE_PAYLOAD.as_bytes()),
+            ObstructionType::NewConstructionFootprints,
+        )
+        .unwrap();
+        assert_eq!(meta.attributes.len(), 7);
+        assert!(
+            matches!(meta.attributes.get("bbl"), Some(AttributeValue::String(s)) if s == "3016220051")
+        );
+        assert!(matches!(
+            meta.attributes.get("height_roof"),
+            Some(AttributeValue::Number(_))
+        ));
+        assert!(matches!(
+            meta.attributes.get("construction_year"),
+            Some(AttributeValue::Number(_))
+        ));
+    }
+
+    #[test]
+    fn new_style_payload_missing_offset_errors() {
+        let payload = r#"{
+            "obstruction_id": "0020fb43-ffab-4083-9bc4-c60d97961d94",
+            "obstruction_type": "new_construction_footprints",
+            "attributes": {},
+            "tile_ids": ["2190_31"]
+        }"#;
+        let result = ObstructionMeta::from_json(
+            Cursor::new(payload.as_bytes()),
+            ObstructionType::NewConstructionFootprints,
+        );
+        assert!(result.is_err());
+    }
+
     const LEGACY_PAYLOAD: &str = r#"{
         "obstruction_id": "83167e5c-c108-4d85-905c-6dc3224cc367",
         "obstruction_type": "new_construction_building_footprint",
