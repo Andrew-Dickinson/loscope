@@ -14,6 +14,7 @@ use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
 pub enum AssetType {
     OrthoImage,
     ElevationTile,
+    TerrainClassificationTile,
     ObstructionIndex,
     Obstruction,
     BuildingFootprintWKT,

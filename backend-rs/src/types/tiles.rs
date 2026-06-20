@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::iter::repeat_n;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use wincode::{SchemaRead, SchemaWrite};
 
 const TILE_ID_SEPARATOR: char = '_';
@@ -261,7 +262,11 @@ impl TileId {
     }
 
     pub fn tiff_fname(&self) -> String {
-        format!("{self}.tif")
+        self.tiff_fname_with_suffix("")
+    }
+
+    pub fn tiff_fname_with_suffix(&self, suffix: &str) -> String {
+        format!("{self}{suffix}.tif")
     }
 
     pub fn get_sw_corner(&self) -> NYSCoords2 {
@@ -404,11 +409,20 @@ impl<'de> Deserialize<'de> for TileId {
 }
 
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, TryFromPrimitive, IntoPrimitive)]
+#[repr(u8)]
 pub enum TerrainClass {
     None = 0,
     Vegetation = 1,
     Building = 2,
     Water = 3,
+}
+
+
+impl Default for TerrainClass {
+    fn default() -> Self {
+        TerrainClass::Water
+    }
 }
 
 #[cfg(test)]

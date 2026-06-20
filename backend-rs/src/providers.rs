@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 use typed_path::Utf8UnixPathBuf;
+use crate::providers::terrain_classification_tile_provider::{CachingTerrainClassificationTileProvider, TerrainClassificationTileProvider};
 
 pub mod backends;
 pub mod elevation_tile_provider;
@@ -26,12 +27,14 @@ pub mod footprint_provider;
 pub mod meshdb_provider;
 pub mod obstruction_provider;
 pub mod ortho_provider;
+pub mod terrain_classification_tile_provider;
 
 #[derive(Getters)]
 pub struct Providers {
     ortho_provider: Box<dyn OrthoProvider + Send + Sync>,
     footprint_provider: Box<dyn FootprintProvider + Send + Sync>,
     elevation_tile_provider: Box<dyn ElevationTileProvider + Send + Sync>,
+    terrain_classification_provider: Box<dyn TerrainClassificationTileProvider + Send + Sync>,
     obstruction_provider: Box<dyn ObstructionProvider + Send + Sync>,
 
     meshdb_provider: ProgenitorMeshDBProvider,
@@ -47,6 +50,10 @@ impl Providers {
             ),
             (
                 AssetType::ElevationTile,
+                Utf8UnixPathBuf::from(expect_env(LOS_TERRAIN_TILE_S3_PREFIX)),
+            ),
+            (
+                AssetType::TerrainClassificationTile,
                 Utf8UnixPathBuf::from(expect_env(LOS_TERRAIN_TILE_S3_PREFIX)),
             ),
             (
@@ -93,6 +100,9 @@ impl Providers {
         Ok(Self {
             ortho_provider: Box::new(CachingOrthoProvider::new(Arc::clone(&asset_provider))),
             elevation_tile_provider: Box::new(CachingElevationTileProvider::new(Arc::clone(
+                &asset_provider,
+            ))),
+            terrain_classification_provider: Box::new(CachingTerrainClassificationTileProvider::new(Arc::clone(
                 &asset_provider,
             ))),
             footprint_provider: Box::new(CachingFootprintProvider::new(Arc::clone(&asset_provider))),

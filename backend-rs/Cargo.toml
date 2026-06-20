@@ -47,6 +47,7 @@ chrono = { version = "0.4", features = ["serde"] }
 serde_json = "1.0"
 regress = "0.10"
 photon-rs = "0.3.2"
+num_enum = "0.7.6"
 
 [build-dependencies]
 progenitor = "0.14.0"
