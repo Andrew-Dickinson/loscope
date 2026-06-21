@@ -116,9 +116,10 @@ fn bilt_impl(
         let src_x_start = overlap_start.strict_sub(src_base.0);
         let src_x_end = overlap_end.strict_sub(src_base.0);
 
+        let src_slice = src.slice(s![src_x_start..src_x_end, src_y]);
         height_values
             .slice_mut(s![i, j_start..j_end])
-            .assign(&src.slice(s![src_x_start..src_x_end, src_y]));
+            .zip_mut_with(&src_slice, |dst, &s| *dst = (*dst).max(s));
     }
 }
 
@@ -729,6 +730,37 @@ mod test {
                 );
             }
         }
+    }
+
+    #[test]
+    fn bilt_obstruction_shorter_wide_does_not_overwrite_taller_narrow() {
+        // Bug: a short-but-wide obstruction blit'd after a tall narrow one overwrites the tall
+        // values wherever their footprints overlap, because bilt_impl uses assign rather than
+        // element-wise max. This produces a false negative: the Fresnel zone clears the short
+        // building but would be blocked by the tall one — except the tall one's height was
+        // silently replaced.
+        //
+        // Setup: tall building (10 000 in, ~833 ft) at (1_002_550, 235_050), 50×50 usft.
+        //        short building ( 100 in,   ~8 ft) at (1_002_500, 235_000), 200×200 usft.
+        // The short building's footprint fully contains the tall one.
+        // After blitting tall-first then short, the tall values must survive at their footprint.
+        let zone = flat_zone(NYSCoords2::new(1_002_500.0, 235_000.0), 300, 300, 300, 0);
+
+        // Tall narrow obstruction: zone rows 50..100, cols 50..100
+        let (meta_tall, raster_tall) = flat_obstruction(1_002_550.0, 235_050.0, 50, 50, 10_000);
+        // Short wide obstruction: zone rows 0..200, cols 0..200 — entirely contains the tall one
+        let (meta_short, raster_short) = flat_obstruction(1_002_500.0, 235_000.0, 200, 200, 100);
+
+        let mut hv = Array2::<u16>::zeros(zone.values().raw_dim());
+        bilt_obstruction(&meta_tall, &raster_tall, &mut hv, &zone);
+        bilt_obstruction(&meta_short, &raster_short, &mut hv, &zone);
+
+        // The tall building's footprint (zone rows 50..100, cols 50..100) must still show 10 000.
+        let tall_region_max = hv.slice(s![50..100, 50..100]).iter().copied().max().unwrap_or(0);
+        assert_eq!(
+            tall_region_max, 10_000,
+            "tall obstruction height must not be overwritten by the shorter surrounding one"
+        );
     }
 
     #[test]
