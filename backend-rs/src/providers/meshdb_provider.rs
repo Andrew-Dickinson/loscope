@@ -254,7 +254,7 @@ mod tests {
         let result = provider.resolve_nn_or_install_to_bin(1234).await.unwrap();
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["bin"], "1234567");
-        assert_eq!(json["source"], "NN");
+        assert_eq!(json["kind"], "nn");
     }
 
     #[tokio::test]
@@ -336,7 +336,7 @@ mod tests {
         let result = provider.resolve_nn_or_install_to_bin(1234).await.unwrap();
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["bin"], "2000000");
-        assert_eq!(json["source"], "NN");
+        assert_eq!(json["kind"], "nn");
     }
 
     // --- resolve_nn_or_install_to_bin: Install path ---
@@ -362,7 +362,7 @@ mod tests {
         let result = provider.resolve_nn_or_install_to_bin(100).await.unwrap();
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["bin"], "1234567");
-        assert_eq!(json["source"], "Install");
+        assert_eq!(json["kind"], "install");
     }
 
     #[tokio::test]

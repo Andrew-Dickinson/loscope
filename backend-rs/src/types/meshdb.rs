@@ -3,6 +3,7 @@ use derive_new::new;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, new, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MeshdbBINSource {
     NN,
     Install,
@@ -11,5 +12,5 @@ pub enum MeshdbBINSource {
 #[derive(Debug, new, Serialize, Deserialize)]
 pub struct NumberLookupResponse {
     bin: BINId,
-    source: MeshdbBINSource,
+    kind: MeshdbBINSource,
 }
