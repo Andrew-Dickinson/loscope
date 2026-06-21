@@ -37,6 +37,9 @@ pub fn get_intersecting_tiles(fresnel_zone: &FresnelZone) -> HashSet<TileId> {
         .zip(fresnel_zone.offsets())
         .enumerate()
         .for_each(|(i, (width, offset))| {
+            if *width == 0 {
+                return;
+            }
             let sample_point = NYSCoords2::new(
                 fresnel_zone.base_offset().easting() + *offset as f64,
                 fresnel_zone.base_offset().northing() + i as f64,

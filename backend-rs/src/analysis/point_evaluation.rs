@@ -360,6 +360,26 @@ mod tests {
     // --- valid_analysis_frequency ---
 
     #[test]
+    fn tiles_for_5ghz_link_exact_set() {
+        use std::collections::HashSet;
+        let input = make_input(
+            gps_to_nys(40.81259683109251, -73.94093789372974, 52.323958868316566),
+            gps_to_nys(40.81532838471962, -73.95031852433365, 88.50000003025532),
+            5_000_000_000.0,
+        );
+        let zone = compute_fresnel_zone(&input, ALPHA_ZONE_FULL);
+        let tiles = get_intersecting_tiles(&zone);
+        let expected: HashSet<TileId> = [
+            "997235_12", "997235_22", "997235_21", "997235_31", "997235_41",
+            "235_01", "235_00", "235_10",
+        ]
+        .iter()
+        .map(|s| TileId::parse(s).unwrap())
+        .collect();
+        assert_eq!(tiles, expected);
+    }
+
+    #[test]
     fn frequency_below_min_is_invalid() {
         assert!(!valid_analysis_frequency(MIN_ANALYSIS_FREQUENCY - 1.));
     }
