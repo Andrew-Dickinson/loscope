@@ -1,5 +1,5 @@
 use crate::analysis::fresnel_zone::{FresnelZone, FresnelZonePoint, compute_fresnel_zone};
-use crate::analysis::tiles::{TerrainFactory, get_intersecting_tiles};
+use crate::analysis::tiles::{TerrainFactory, TerrainGrid, get_intersecting_tiles};
 use crate::providers::elevation_tile_provider::{
     ElevationTileProvider,
 };
@@ -9,6 +9,7 @@ use crate::types::errors::AssetErr;
 use crate::types::obstructions::ObstructionTypesFilter;
 use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::TileId;
+use crate::util::env::{LOS_DEBUG_DUMP_DIR, get_env};
 use derive_getters::Getters;
 use derive_new::new;
 use geo::algorithm::line_measures::Distance;
@@ -16,6 +17,7 @@ use geo::{Euclidean, Point, point};
 use rocket::serde::{Deserialize};
 use serde::Serialize;
 use std::collections::HashSet;
+use std::path::Path;
 use typed_floats::tf64::PositiveFinite;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
@@ -136,6 +138,16 @@ pub async fn evaluate_points(
         ResultStatus::Obstructed
     };
 
+    debug_dump_matrices(
+        &analysis_id,
+        &zone_full,
+        &zone_inner,
+        &terrain_full,
+        &terrain_inner,
+        &intersection_full,
+        &intersection_inner,
+    );
+
     Ok(PointEvaluationOutcome {
         output: PointEvaluationOutput {
             id: analysis_id,
@@ -152,6 +164,44 @@ pub async fn evaluate_points(
         },
         tiles: tile_ids,
     })
+}
+
+fn write_debug_json(out_dir: &Path, name: &str, value: &impl Serialize) {
+    let path = out_dir.join(name);
+    let result = std::fs::File::create(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|f| serde_json::to_writer(f, value).map_err(|e| e.to_string()));
+    match result {
+        Ok(_) => eprintln!("debug dump: wrote {}", path.display()),
+        Err(e) => eprintln!("debug dump: failed to write {}: {}", path.display(), e),
+    }
+}
+
+fn debug_dump_matrices(
+    analysis_id: &Uuid,
+    zone_full: &FresnelZone,
+    zone_inner: &FresnelZone,
+    terrain_full: &TerrainGrid,
+    terrain_inner: &TerrainGrid,
+    intersection_full: &IntersectionResult,
+    intersection_inner: &IntersectionResult,
+) {
+    let Some(dump_dir) = get_env(LOS_DEBUG_DUMP_DIR) else {
+        return;
+    };
+
+    let out_dir = Path::new(&dump_dir).join(analysis_id.to_string());
+    if let Err(e) = std::fs::create_dir_all(&out_dir) {
+        eprintln!("debug dump: failed to create {}: {}", out_dir.display(), e);
+        return;
+    }
+
+    write_debug_json(&out_dir, "zone_full.json", zone_full);
+    write_debug_json(&out_dir, "zone_inner.json", zone_inner);
+    write_debug_json(&out_dir, "terrain_full.json", terrain_full);
+    write_debug_json(&out_dir, "terrain_inner.json", terrain_inner);
+    write_debug_json(&out_dir, "intersection_full.json", intersection_full);
+    write_debug_json(&out_dir, "intersection_inner.json", intersection_inner);
 }
 fn intersect_inner(
     endpoints: &(Point, Point),

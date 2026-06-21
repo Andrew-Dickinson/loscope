@@ -9,6 +9,8 @@ pub const MESHDB_API_TOKEN: &str = "MESHDB_API_TOKEN";
 
 pub const REDIS_URL: &str = "REDIS_URL";
 
+pub const LOS_DEBUG_DUMP_DIR: &str = "LOS_DEBUG_DUMP_DIR";
+
 pub fn expect_env(env_var_name: &str) -> String {
     get_env(env_var_name).unwrap_or_else(|| panic!("Please set env var {}", env_var_name))
 }
