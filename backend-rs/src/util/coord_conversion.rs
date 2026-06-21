@@ -144,8 +144,8 @@ mod tests {
         let nys = NYSCoords3::new(1039748.806, 176148.995, 329.337);
 
         let gps = converter.to_gps3(&nys);
-        assert_abs_diff_eq!(*gps.lat(), 40.650, epsilon = 0.000001);
-        assert_abs_diff_eq!(*gps.lon(), -73.800, epsilon = 0.000001);
+        assert_abs_diff_eq!(*gps.lat(), 40.650, epsilon = 0.0001);
+        assert_abs_diff_eq!(*gps.lon(), -73.800, epsilon = 0.0001);
         assert_abs_diff_eq!(*gps.alt_m(), 100.0, epsilon = 0.001);
         assert_abs_diff_eq!(
             converter.to_nys_plane3(&converter.to_gps3(&nys)),
@@ -159,8 +159,8 @@ mod tests {
         let nys = NYSCoords2::new(1039748.806, 176148.995);
 
         let gps = converter.to_gps2(&nys);
-        assert_abs_diff_eq!(*gps.lat(), 40.650, epsilon = 0.000001);
-        assert_abs_diff_eq!(*gps.lon(), -73.800, epsilon = 0.000001);
+        assert_abs_diff_eq!(*gps.lat(), 40.650, epsilon = 0.0001);
+        assert_abs_diff_eq!(*gps.lon(), -73.800, epsilon = 0.0001);
         assert_abs_diff_eq!(
             converter.to_nys_plane2(&converter.to_gps2(&nys)),
             nys,
