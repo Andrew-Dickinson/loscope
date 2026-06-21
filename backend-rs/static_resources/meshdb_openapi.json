@@ -4510,7 +4510,13 @@
           "NYCPlanningLabs",
           "PeliasStringParsing",
           "ReverseGeocodeFromCoordinates",
-          "HumanEntry"
+          "HumanEntry",
+          "AddressTruthSource.OSMNominatim",
+          "AddressTruthSource.OSMNominatimZIPOnly",
+          "AddressTruthSource.NYCPlanningLabs",
+          "AddressTruthSource.PeliasStringParsing",
+          "AddressTruthSource.ReverseGeocodeFromCoordinates",
+          "AddressTruthSource.HumanEntry"
         ],
         "type": "string",
         "description": "* `OSMNominatim` - OSMNominatim\n* `OSMNominatimZIPOnly` - OSMNominatimZIPOnly\n* `NYCPlanningLabs` - NYCPlanningLabs\n* `PeliasStringParsing` - PeliasStringParsing\n* `ReverseGeocodeFromCoordinates` - ReverseGeocodeFromCoordinates\n* `HumanEntry` - HumanEntry"
@@ -4790,6 +4796,7 @@
         "properties": {
           "resolved_node": {
             "type": "object",
+            "nullable": true,
             "description": "The node that we guess this number represents. This is an exact NN match if that node exists, otherwise we treat the input number as an install number and return the related node",
             "properties": {
               "id": {
