@@ -15,6 +15,11 @@ where
     T: Debug,
 {
     fn from(value: progenitor_client::Error<T>) -> Self {
+        if let progenitor_client::Error::ErrorResponse(ref rv) = value {
+            if rv.status() == reqwest::StatusCode::NOT_FOUND {
+                return MeshDBError::DataError(format!("Error calling MeshDB Api: {}", value));
+            }
+        }
         MeshDBError::ApiError(format!("Error calling MeshDB Api: {}", value))
     }
 }

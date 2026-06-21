@@ -13,6 +13,10 @@ pub async fn resolve_number(
     let Ok(parsed_number) = number.parse::<u32>() else {
         return Err(Status::BadRequest);
     };
+    
+    if parsed_number == 0 {
+        return Err(Status::BadRequest);
+    }
 
     providers
         .meshdb_provider()
