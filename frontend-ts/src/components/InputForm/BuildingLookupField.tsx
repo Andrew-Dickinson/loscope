@@ -105,7 +105,7 @@ export default function BuildingLookupField({ disabled, onBinResolved, onBinClea
             ? `NN ${query} (BIN ${data.bin})`
             : `Install ${query} (BIN ${data.bin})`
           onBinResolved(data.bin, label)
-        } else if (res.status === 404) {
+        } else if (res.status >= 400 && res.status < 500) {
           setNnError('Not a recognized NN or install number'); onBinCleared()
         } else {
           setNnError('Resolution failed — check server configuration'); onBinCleared()
