@@ -558,6 +558,9 @@ fn run_build_obstructions(
                 return Ok(false);
             }
 
+            // TODO: This non-determinism means the IDs rotate on every preprocessing run,
+            //  we might prefer a stable index somehow, since we will in theory want to re-run
+            //  preprocessing for obstructions on a recurring basis
             let uuid = Uuid::new_v4();
             let mut attributes: HashMap<String, AttributeValue> =
                 serde_json::from_str(&props_str).unwrap_or_default();

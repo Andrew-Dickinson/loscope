@@ -2,6 +2,10 @@
 
 set -ex
 
+# TODO: We need a better story about partial reprocessing so that we don't have to redo all the expensive LAS
+#   parsing just to update the classification tiffs, we probably want to save a "vegetation only" tiff or something
+#   that we can re-use without the full LAS tiles
+
 export PATH="$PATH:target/release/"
 
 echo "#### Converting DEM file into GeoTIFF..."
