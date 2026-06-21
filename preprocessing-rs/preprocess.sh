@@ -62,5 +62,6 @@ loscope-preprocessing preprocess-tiles --input ../data/denoised-las-tiles \
                                        --features-db ../data/nyc_dob.db \
                                        --planimetrics-misc-structures ../data/planimetrics/planimetrics-misc-structure-poly.csv \
                                        --planimetrics-hydro-structures ../data/planimetrics/planimetrics-hydro-structure.csv \
-                                       --output ../data/preprocessed-lidar-tiles
+                                       --output ../data/preprocessed-lidar-tiles \
+                                       --zero-water-elevation
 
