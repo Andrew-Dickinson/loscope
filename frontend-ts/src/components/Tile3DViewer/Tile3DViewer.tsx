@@ -200,9 +200,12 @@ function ZoneObj({ analysisId, tileId, onLoaded, visible }: { analysisId: string
     if (!obj) return
     obj.traverse(child => {
       if ((child as THREE.Mesh).isMesh) {
-        (child as THREE.Mesh).material = new THREE.MeshStandardMaterial({
+        const mesh = child as THREE.Mesh
+        mesh.renderOrder = 1
+        mesh.material = new THREE.MeshStandardMaterial({
           color: 0xcc44ff, transparent: true, opacity: 0.5,
           depthWrite: false, side: THREE.DoubleSide, roughness: 0.4,
+          polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -16,
         })
       }
     })
@@ -737,7 +740,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <div style={{ flex: 1, position: 'relative' }}>
         <Canvas
-          camera={{ fov: 50, near: 0.5, far: 200000 }}
+          camera={{ fov: 50, near: 1, far: 20000 }}
           gl={{ antialias: true }}
           style={{ background: '#0e1117' }}
           onPointerMissed={() => setActiveObs(null)}
