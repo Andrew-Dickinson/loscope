@@ -50,6 +50,8 @@ loscope-preprocessing build-obstruction-index \
     --obstructions "../data/obstructions/" \
     --output "../data/obstructions/_indexes/"
 
+ls "../data/obstructions/_indexes/" > "../data/obstructions/_indexes/_manifest.txt"
+
 echo "#### De-noising LAS tiles..."
 mkdir -p ../data/denoised-las-tiles/
 BASENAME='{/}'

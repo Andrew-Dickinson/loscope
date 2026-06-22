@@ -6,9 +6,12 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path};
+use aws_sdk_s3::primitives::ByteStream;
 use strum_macros::{AsRefStr, Display};
 use tokio::fs;
 use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
+
+const MANIFEST_FILE_NAME: &str = "_manifest.txt";
 
 #[derive(Debug, Hash, Eq, PartialEq, AsRefStr, Display, Copy, Clone)]
 pub enum AssetType {
@@ -33,11 +36,53 @@ pub trait AssetFetcher {
     async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr>;
 }
 
+fn parse_manifest(manifest_contents: Vec<u8>) -> Result<Vec<String>, AssetErr> {
+    let s = std::str::from_utf8(manifest_contents.as_ref())
+        .map_err(|err| AssetErr::AssetDownloadError(
+            format!("Failed to parse manifest file: {err:?}")
+        ))?;
+
+    Ok(
+        s.lines()
+        .filter(|&file_name| !file_name.eq(MANIFEST_FILE_NAME))
+        .map(String::from)
+        .collect()
+    )
+}
+
+
 #[derive(new)]
 pub struct S3AssetFetcher {
     client: aws_sdk_s3::Client,
     bucket_name: String,
     asset_type_prefixes: HashMap<AssetType, Utf8UnixPathBuf>,
+}
+
+impl S3AssetFetcher {
+    async fn get_object(&self, key: Utf8UnixPathBuf) -> Result<ByteStream, AssetErr> {
+        let bucket = self.bucket_name.as_str();
+        let mut result = self
+            .client
+            .get_object()
+            .bucket(bucket)
+            .key(key.as_str())
+            .send()
+            .await
+            .map_err(|err| match err {
+                SdkError::ServiceError(err_details)
+                if matches!(err_details.err(), GetObjectError::NoSuchKey(_)) =>
+                    {
+                        AssetErr::AssetNotFound(format!(
+                            "{key} key not found in bucket {bucket}, {err_details:?}"
+                        ))
+                    }
+                err_details => AssetErr::AssetDownloadError(format!(
+                    "Unable to download {key} from {bucket}: {err_details:?}"
+                )),
+            })?;
+
+        Ok(result.body)
+    }
 }
 
 #[async_trait]
@@ -72,30 +117,10 @@ impl AssetFetcher for S3AssetFetcher {
             AssetErr::LocalFileSystemError(format!("Error creating file {local_path:?}: {err:?}"))
         })?;
 
-        let bucket = self.bucket_name.as_str();
         let key = prefix.clone().join(remote_path);
 
-        let mut result = self
-            .client
-            .get_object()
-            .bucket(bucket)
-            .key(key.as_str())
-            .send()
-            .await
-            .map_err(|err| match err {
-                SdkError::ServiceError(err_details)
-                    if matches!(err_details.err(), GetObjectError::NoSuchKey(_)) =>
-                {
-                    AssetErr::AssetNotFound(format!(
-                        "{key} key not found in bucket {bucket}, {err_details:?}"
-                    ))
-                }
-                err_details => AssetErr::AssetDownloadError(format!(
-                    "Unable to download {key} from {bucket}: {err_details:?}"
-                )),
-            })?;
-
-        while let Some(bytes) = result.body.try_next().await.map_err(|err| {
+        let mut stream = self.get_object(key).await?;
+        while let Some(bytes) = stream.try_next().await.map_err(|err| {
             AssetErr::AssetDownloadError(format!("Failed to read from S3 download stream: {err:?}"))
         })? {
             temp_file.write_all(&bytes).map_err(|err| {
@@ -109,7 +134,6 @@ impl AssetFetcher for S3AssetFetcher {
     }
 
     async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
-        let bucket = self.bucket_name.as_str();
         let prefix =
             self.asset_type_prefixes
                 .get(&asset_type)
@@ -117,26 +141,19 @@ impl AssetFetcher for S3AssetFetcher {
                     "Unable to find {asset_type:?} prefix"
                 )))?;
 
-        Ok(self
-            .client
-            .list_objects_v2()
-            .bucket(bucket)
-            .prefix(prefix.as_str())
-            .into_paginator()
-            .send()
-            .try_collect()
-            .await
-            .map_err(|err| {
-                AssetErr::AssetDownloadError(format!(
-                    "Unable to list objects in prefix {prefix} from {bucket}: {err:?}"
-                ))
-            })?
-            .into_iter()
-            .flat_map(|o| o.contents.unwrap_or_default())
-            .filter_map(|obj| obj.key)
-            .map(Utf8UnixPathBuf::from)
-            .filter_map(|path| path.strip_prefix(prefix).ok().map(|p| p.to_string()))
-            .collect::<Vec<_>>())
+        let key = prefix.clone()
+            .join(Utf8UnixPathBuf::from(MANIFEST_FILE_NAME));
+
+        let mut stream = self.get_object(key).await?;
+
+        let mut manifest_contents: Vec<u8> = Vec::new();
+        while let Some(bytes) = stream.try_next().await.map_err(|err| {
+            AssetErr::AssetDownloadError(format!("Failed to read from S3 download stream: {err:?}"))
+        })? {
+            manifest_contents.extend_from_slice(bytes.as_ref());
+        }
+
+        parse_manifest(manifest_contents)
     }
 }
 
@@ -146,9 +163,7 @@ mod tests {
     use super::*;
     use crate::types::errors::AssetErr;
     use aws_sdk_s3::operation::get_object::{GetObjectError, GetObjectOutput};
-    use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Output;
     use aws_sdk_s3::primitives::ByteStream;
-    use aws_sdk_s3::types::Object;
     use aws_sdk_s3::types::error::NoSuchKey;
     use aws_smithy_mocks::{MockResponseInterceptor, Rule, RuleMode, mock};
     use test_temp_dir::{TestTempDir, test_temp_dir};
@@ -285,61 +300,70 @@ mod tests {
         }
     }
 
-    fn s3_object(key: &str) -> Object {
-        Object::builder().key(key).build()
+    fn manifest_output(contents: &'static str) -> Rule {
+        mock!(aws_sdk_s3::Client::get_object).then_output(move || {
+            GetObjectOutput::builder()
+                .body(ByteStream::from_static(contents.as_bytes()))
+                .build()
+        })
     }
 
     // --- list_assets ---
 
     #[tokio::test]
-    async fn test_list_assets_strips_prefix() {
-        let fetcher =
-            make_list_fetcher(mock!(aws_sdk_s3::Client::list_objects_v2).then_output(|| {
-                ListObjectsV2Output::builder()
-                    .contents(s3_object("prefix/ortho/a.tif"))
-                    .contents(s3_object("prefix/ortho/sub/b.tif"))
-                    .build()
-            }));
+    async fn test_list_assets_parses_manifest() {
+        let fetcher = make_list_fetcher(manifest_output("a.tif\nsub/b.tif\n"));
 
-        let mut keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
-        keys.sort();
+        let keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
         assert_eq!(keys, vec!["a.tif", "sub/b.tif"]);
     }
 
     #[tokio::test]
+    async fn test_list_assets_filters_manifest_file() {
+        // The manifest file itself should never be listed as an asset.
+        let fetcher = make_list_fetcher(manifest_output("a.tif\n_manifest.txt\nb.tif\n"));
+
+        let keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
+        assert_eq!(keys, vec!["a.tif", "b.tif"]);
+    }
+
+    #[tokio::test]
     async fn test_list_assets_empty() {
-        let fetcher = make_list_fetcher(
-            mock!(aws_sdk_s3::Client::list_objects_v2)
-                .then_output(|| ListObjectsV2Output::builder().build()),
-        );
+        let fetcher = make_list_fetcher(manifest_output(""));
 
         let keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
         assert!(keys.is_empty());
     }
 
     #[tokio::test]
-    async fn test_list_assets_filters_keys_outside_prefix() {
-        // Objects whose key doesn't start with the prefix should be silently dropped.
-        let fetcher =
-            make_list_fetcher(mock!(aws_sdk_s3::Client::list_objects_v2).then_output(|| {
-                ListObjectsV2Output::builder()
-                    .contents(s3_object("prefix/ortho/good.tif"))
-                    .contents(s3_object("other-prefix/bad.tif"))
-                    .build()
-            }));
+    async fn test_list_assets_manifest_not_found() {
+        let fetcher = make_list_fetcher(
+            mock!(aws_sdk_s3::Client::get_object)
+                .then_error(|| GetObjectError::NoSuchKey(NoSuchKey::builder().build())),
+        );
 
-        let keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
-        assert_eq!(keys, vec!["good.tif"]);
+        let result = fetcher.list_assets(AssetType::OrthoImage).await;
+        assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_list_assets_invalid_utf8() {
+        let fetcher = make_list_fetcher(mock!(aws_sdk_s3::Client::get_object).then_output(|| {
+            GetObjectOutput::builder()
+                .body(ByteStream::from_static(&[0xff, 0xfe]))
+                .build()
+        }));
+
+        let result = fetcher.list_assets(AssetType::OrthoImage).await;
+        assert!(matches!(result, Err(AssetErr::AssetDownloadError(_))));
     }
 
     #[tokio::test]
     async fn test_list_assets_s3_error() {
-        let fetcher =
-            make_list_fetcher(mock!(aws_sdk_s3::Client::list_objects_v2).then_error(|| {
-                aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error::unhandled(
-                    "simulated S3 error",
-                )
-            }));
+        let fetcher = make_list_fetcher(
+            mock!(aws_sdk_s3::Client::get_object)
+                .then_error(|| GetObjectError::unhandled("simulated S3 error")),
+        );
 
         let result = fetcher.list_assets(AssetType::OrthoImage).await;
         assert!(matches!(result, Err(AssetErr::AssetDownloadError(_))));
@@ -347,7 +371,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_assets_unsupported_asset_type() {
-        // ElevationTile has no prefix in the map — should fail before touching S3.
+        // No prefix in the map — should fail before touching S3.
         let fetcher = S3AssetFetcher {
             client: aws_sdk_s3::Client::from_conf(
                 aws_sdk_s3::Config::builder()
@@ -361,42 +385,5 @@ mod tests {
 
         let result = fetcher.list_assets(AssetType::OrthoImage).await;
         assert!(matches!(result, Err(AssetErr::UnsupportedAssetType(_))));
-    }
-
-    #[tokio::test]
-    async fn test_list_assets_multi_page() {
-        // Two pages: first has a continuation token, second does not.
-        let interceptor = MockResponseInterceptor::new()
-            .rule_mode(RuleMode::Sequential)
-            .with_rule(&mock!(aws_sdk_s3::Client::list_objects_v2).then_output(|| {
-                ListObjectsV2Output::builder()
-                    .contents(s3_object("prefix/ortho/page1.tif"))
-                    .next_continuation_token("token123")
-                    .build()
-            }))
-            .with_rule(&mock!(aws_sdk_s3::Client::list_objects_v2).then_output(|| {
-                ListObjectsV2Output::builder()
-                    .contents(s3_object("prefix/ortho/page2.tif"))
-                    .build()
-            }));
-
-        let config = aws_sdk_s3::Config::builder()
-            .with_test_defaults()
-            .interceptor(interceptor)
-            .region(aws_config::Region::new("us-east-1"))
-            .build();
-
-        let fetcher = S3AssetFetcher {
-            client: aws_sdk_s3::Client::from_conf(config),
-            bucket_name: String::from("test-bucket"),
-            asset_type_prefixes: HashMap::from([(
-                AssetType::OrthoImage,
-                Utf8UnixPathBuf::from("prefix/ortho"),
-            )]),
-        };
-
-        let mut keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
-        keys.sort();
-        assert_eq!(keys, vec!["page1.tif", "page2.tif"]);
     }
 }
