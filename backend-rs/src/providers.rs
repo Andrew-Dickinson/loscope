@@ -9,7 +9,7 @@ use crate::providers::meshdb_provider::ProgenitorMeshDBProvider;
 use crate::providers::obstruction_provider::{CachingObstructionProvider, ObstructionProvider};
 use crate::providers::ortho_provider::{CachingOrthoProvider, OrthoProvider};
 use crate::types::errors::ProviderInitErr;
-use crate::util::env::{LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, LOS_OBSTRUCTION_S3_PREFIX, LOS_ORTHOS_S3_PREFIX, LOS_TERRAIN_TILE_S3_PREFIX, MESHDB_API_TOKEN, expect_env, get_env, REDIS_URL, LOS_FOOTPRINTS_S3_PREFIX};
+use crate::util::env::{LOCAL_ASSET_CACHE_ROOT, LOS_ASSET_S3_BUCKET, MESHDB_API_TOKEN, expect_env, get_env, REDIS_URL, LOS_ORTHOS_PREFIX, LOS_TERRAIN_TILE_PREFIX, LOS_OBSTRUCTION_PREFIX, LOS_FOOTPRINTS_PREFIX, LOS_ASSET_HTTP_BASE_URL};
 use backends::asset_fetcher::{AssetType, S3AssetFetcher};
 use backends::fs_cache::{AssetProvider, CachingAssetProvider};
 use derive_getters::Getters;
@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 use typed_path::Utf8UnixPathBuf;
+use crate::providers::backends::asset_fetcher::{AssetFetcher, HttpAssetFetcher};
 use crate::providers::terrain_classification_tile_provider::{CachingTerrainClassificationTileProvider, TerrainClassificationTileProvider};
 
 pub mod backends;
@@ -46,43 +47,65 @@ impl Providers {
         let prefix_map = HashMap::from([
             (
                 AssetType::OrthoImage,
-                Utf8UnixPathBuf::from(expect_env(LOS_ORTHOS_S3_PREFIX)),
+                Utf8UnixPathBuf::from(expect_env(LOS_ORTHOS_PREFIX)?),
             ),
             (
                 AssetType::ElevationTile,
-                Utf8UnixPathBuf::from(expect_env(LOS_TERRAIN_TILE_S3_PREFIX)),
+                Utf8UnixPathBuf::from(expect_env(LOS_TERRAIN_TILE_PREFIX)?),
             ),
             (
                 AssetType::TerrainClassificationTile,
-                Utf8UnixPathBuf::from(expect_env(LOS_TERRAIN_TILE_S3_PREFIX)),
+                Utf8UnixPathBuf::from(expect_env(LOS_TERRAIN_TILE_PREFIX)?),
             ),
             (
                 AssetType::Obstruction,
-                Utf8UnixPathBuf::from(expect_env(LOS_OBSTRUCTION_S3_PREFIX)),
+                Utf8UnixPathBuf::from(expect_env(LOS_OBSTRUCTION_PREFIX)?),
             ),
             (
                 AssetType::ObstructionIndex,
-                Utf8UnixPathBuf::from(expect_env(LOS_OBSTRUCTION_S3_PREFIX) + "_indexes"),
+                Utf8UnixPathBuf::from(expect_env(LOS_OBSTRUCTION_PREFIX)? + "_indexes"),
             ),
             (
                 AssetType::BuildingFootprintWKT,
-                Utf8UnixPathBuf::from(expect_env(LOS_FOOTPRINTS_S3_PREFIX)),
+                Utf8UnixPathBuf::from(expect_env(LOS_FOOTPRINTS_PREFIX)?),
             ),
         ]);
 
-        let bucket = expect_env(LOS_ASSET_S3_BUCKET);
-        let cache_root = PathBuf::from(expect_env(LOCAL_ASSET_CACHE_ROOT));
+        let cache_root = PathBuf::from(expect_env(LOCAL_ASSET_CACHE_ROOT)?);
         fs::create_dir_all(&cache_root)
             .await
             .expect("Failed to create cache root");
 
-        let shared_config = aws_config::from_env().load().await;
-        let s3_client = aws_sdk_s3::Client::new(&shared_config);
+        let bucket = get_env(LOS_ASSET_S3_BUCKET);
+        let base_url = get_env(LOS_ASSET_HTTP_BASE_URL);
+        let asset_fetcher: Box<dyn AssetFetcher + Send + Sync> = if bucket.is_none() && let Some(base_url) = base_url {
+            Box::new(
+                HttpAssetFetcher::new(
+                    None,
+                    base_url
+                        .parse()
+                        .map_err(|err| ProviderInitErr::EnvVarError(
+                            format!("Invalid value {} for {}: {}", base_url, LOS_ASSET_HTTP_BASE_URL, err))
+                        )?,
+                    prefix_map
+                )
+            )
+        } else if base_url.is_none() && let Some(bucket) = bucket {
+            let shared_config = aws_config::from_env().load().await;
+            let s3_client = aws_sdk_s3::Client::new(&shared_config);
 
-        // TODO: This is loosely coupled to S3, which is intentional. We want to swap the asset
-        //       fetcher used in prod to something that uses generic HTTP, probably pointed at
-        //       something mesh-internal
-        let asset_fetcher = Box::new(S3AssetFetcher::new(s3_client.clone(), bucket, prefix_map));
+            Box::new(
+                S3AssetFetcher::new(s3_client.clone(), bucket, prefix_map)
+            )
+        } else {
+            return Err(ProviderInitErr::EnvVarError(
+                format!(
+                    "You must set exactly one of the {} or {} env vars",
+                    LOS_ASSET_HTTP_BASE_URL,
+                    LOS_ASSET_S3_BUCKET
+                ))
+            );
+        };
 
         let asset_provider: Arc<dyn AssetProvider + Send + Sync> =
             Arc::new(CachingAssetProvider::new(asset_fetcher, cache_root));
@@ -112,7 +135,7 @@ impl Providers {
                     .map_err(ProviderInitErr::AssetPrefetchError)?,
             ),
             point_eval_result_provider: PointEvaluationResultProvider::new(value_store),
-            meshdb_provider: ProgenitorMeshDBProvider::new(expect_env(MESHDB_API_TOKEN)),
+            meshdb_provider: ProgenitorMeshDBProvider::new(expect_env(MESHDB_API_TOKEN)?),
         })
     }
 }

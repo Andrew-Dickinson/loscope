@@ -7,6 +7,8 @@ use std::fs::File;
 use std::io::Write;
 use std::path::{Path};
 use aws_sdk_s3::primitives::ByteStream;
+use futures_util::{Stream, StreamExt};
+use reqwest::Url;
 use strum_macros::{AsRefStr, Display};
 use tokio::fs;
 use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
@@ -157,6 +159,118 @@ impl AssetFetcher for S3AssetFetcher {
     }
 }
 
+pub struct HttpAssetFetcher {
+    client: reqwest::Client,
+    base_url: Url,
+    asset_type_prefixes: HashMap<AssetType, Utf8UnixPathBuf>,
+}
+
+impl HttpAssetFetcher {
+    pub fn new(client: Option<reqwest::Client>, base_url: Url, asset_type_prefixes: HashMap<AssetType, Utf8UnixPathBuf>) -> Self {
+        HttpAssetFetcher {
+            client: client.unwrap_or_default(),
+            base_url,
+            asset_type_prefixes,
+        }
+    }
+
+    async fn get_asset(&self, asset_path: Utf8UnixPathBuf) -> Result<impl Stream<Item = reqwest::Result<bytes::Bytes>>, AssetErr> {
+        let full_url = self.base_url.join(asset_path.as_str()).unwrap();
+        let res = self.client
+            .get(full_url.clone())
+            .send()
+            .await
+            .map_err(|err| AssetErr::AssetDownloadError(format!(
+                "Request to {full_url} failed: {err:?}"
+            )))?;
+
+        if res.status() == 404 {
+            return Err(AssetErr::AssetNotFound(format!(
+                "{asset_path} not found at {full_url}"
+            )));
+        }
+        if !res.status().is_success() {
+            return Err(AssetErr::AssetDownloadError(format!(
+                "Request to {full_url} failed with status {}", res.status()
+            )));
+        }
+
+        Ok(res.bytes_stream())
+    }
+}
+
+
+#[async_trait]
+impl AssetFetcher for HttpAssetFetcher {
+    async fn fetch_asset(
+        &self,
+        asset_type: AssetType,
+        remote_path: &Utf8UnixPath,
+        local_path: &Path,
+    ) -> Result<(), AssetErr> {
+        let local_path_parent =
+            local_path
+                .parent()
+                .ok_or(AssetErr::LocalFileSystemError(format!(
+                    "Expected {local_path:?} to have valid parent"
+                )))?;
+
+        fs::create_dir_all(local_path_parent).await.map_err(|err| {
+            AssetErr::LocalFileSystemError(format!(
+                "Error creating directories for path {local_path_parent:?}: {err:?}"
+            ))
+        })?;
+
+        let prefix =
+            self.asset_type_prefixes
+                .get(&asset_type)
+                .ok_or(AssetErr::UnsupportedAssetType(format!(
+                    "Unable to find {asset_type:?} prefix"
+                )))?;
+
+        let mut temp_file = File::create(local_path).map_err(|err| {
+            AssetErr::LocalFileSystemError(format!("Error creating file {local_path:?}: {err:?}"))
+        })?;
+
+        let asset_path = prefix.clone().join(remote_path);
+
+        let mut stream = self.get_asset(asset_path).await?;
+        while let Some(bytes) = stream.next().await {
+            let bytes = bytes.map_err(|err| {
+                AssetErr::AssetDownloadError(format!("Failed to read from HTTP download stream: {err:?}"))
+            })?;
+
+            temp_file.write_all(&bytes).map_err(|err| {
+                AssetErr::LocalFileSystemError(format!(
+                    "Failed to write from HTTP download stream to local file: {err:?}"
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr> {
+        let prefix =
+            self.asset_type_prefixes
+                .get(&asset_type)
+                .ok_or(AssetErr::UnsupportedAssetType(format!(
+                    "Unable to find {asset_type:?} prefix"
+                )))?;
+
+        let mut manifest_stream = self.get_asset(prefix.join(MANIFEST_FILE_NAME)).await?;
+        let mut manifest_contents: Vec<u8> = Vec::new();
+        while let Some(bytes) = manifest_stream.next().await {
+            let bytes = bytes.map_err(|err| {
+                AssetErr::AssetDownloadError(format!("Failed to read from HTTP download stream: {err:?}"))
+            })?;
+            manifest_contents.extend_from_slice(bytes.as_ref());
+        }
+
+        parse_manifest(manifest_contents)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -168,6 +282,8 @@ mod tests {
     use aws_smithy_mocks::{MockResponseInterceptor, Rule, RuleMode, mock};
     use test_temp_dir::{TestTempDir, test_temp_dir};
     use typed_path::Utf8UnixPath;
+    use wiremock::{MockServer, Mock, ResponseTemplate};
+    use wiremock::matchers::{method, path};
 
     fn setup(rule: Rule) -> (S3AssetFetcher, TestTempDir) {
         let interceptor = MockResponseInterceptor::new()
@@ -382,6 +498,186 @@ mod tests {
             bucket_name: String::from("test-bucket"),
             asset_type_prefixes: HashMap::new(),
         };
+
+        let result = fetcher.list_assets(AssetType::OrthoImage).await;
+        assert!(matches!(result, Err(AssetErr::UnsupportedAssetType(_))));
+    }
+
+    // --- HttpAssetFetcher helpers ---
+
+    fn make_http_fetcher(base_url: &str) -> HttpAssetFetcher {
+        HttpAssetFetcher::new(
+            None,
+            Url::parse(base_url).unwrap(),
+            HashMap::from([(
+                AssetType::OrthoImage,
+                Utf8UnixPathBuf::from("prefix/ortho/"),
+            )]),
+        )
+    }
+
+    // --- HttpAssetFetcher::fetch_asset ---
+
+    #[tokio::test]
+    async fn http_fetch_asset_good_download() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/prefix/ortho/photo.jpg"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"mock-image-bytes"))
+            .mount(&server)
+            .await;
+
+        let fetcher = make_http_fetcher(&server.uri());
+        let temp_dir = test_temp_dir!();
+        let local_path = temp_dir.used_by(|p| p.join("photo.jpg").to_path_buf());
+
+        let result = fetcher
+            .fetch_asset(AssetType::OrthoImage, Utf8UnixPath::new("photo.jpg"), &local_path)
+            .await;
+
+        assert!(matches!(result, Ok(())));
+        assert_eq!(std::fs::read_to_string(&*local_path).unwrap(), "mock-image-bytes");
+    }
+
+    #[tokio::test]
+    async fn http_fetch_asset_not_found() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/prefix/ortho/missing.jpg"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let fetcher = make_http_fetcher(&server.uri());
+        let temp_dir = test_temp_dir!();
+        let local_path = temp_dir.used_by(|p| p.join("missing.jpg").to_path_buf());
+
+        let result = fetcher
+            .fetch_asset(AssetType::OrthoImage, Utf8UnixPath::new("missing.jpg"), &local_path)
+            .await;
+
+        assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn http_fetch_asset_local_file_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"data"))
+            .mount(&server)
+            .await;
+
+        let fetcher = make_http_fetcher(&server.uri());
+
+        let result = fetcher
+            .fetch_asset(
+                AssetType::OrthoImage,
+                Utf8UnixPath::new("photo.jpg"),
+                &PathBuf::from("/nonexistent-not-a-real-directory-dont-create-me/photo.jpg"),
+            )
+            .await;
+
+        assert!(matches!(result, Err(AssetErr::LocalFileSystemError(_))));
+    }
+
+    #[tokio::test]
+    async fn http_fetch_asset_unsupported_asset_type() {
+        let server = MockServer::start().await;
+        let fetcher = HttpAssetFetcher::new(
+            None,
+            Url::parse(&server.uri()).unwrap(),
+            HashMap::new(),
+        );
+        let temp_dir = test_temp_dir!();
+        let local_path = temp_dir.used_by(|p| p.join("photo.jpg").to_path_buf());
+
+        let result = fetcher
+            .fetch_asset(AssetType::OrthoImage, Utf8UnixPath::new("photo.jpg"), &local_path)
+            .await;
+
+        assert!(matches!(result, Err(AssetErr::UnsupportedAssetType(_))));
+    }
+
+    // --- HttpAssetFetcher::list_assets ---
+
+    #[tokio::test]
+    async fn http_list_assets_parses_manifest() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/prefix/ortho/_manifest.txt"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"a.tif\nsub/b.tif\n"))
+            .mount(&server)
+            .await;
+
+        let fetcher = make_http_fetcher(&server.uri());
+        let keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
+        assert_eq!(keys, vec!["a.tif", "sub/b.tif"]);
+    }
+
+    #[tokio::test]
+    async fn http_list_assets_filters_manifest_file() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/prefix/ortho/_manifest.txt"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"a.tif\n_manifest.txt\nb.tif\n"))
+            .mount(&server)
+            .await;
+
+        let fetcher = make_http_fetcher(&server.uri());
+        let keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
+        assert_eq!(keys, vec!["a.tif", "b.tif"]);
+    }
+
+    #[tokio::test]
+    async fn http_list_assets_empty_manifest() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/prefix/ortho/_manifest.txt"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b""))
+            .mount(&server)
+            .await;
+
+        let fetcher = make_http_fetcher(&server.uri());
+        let keys = fetcher.list_assets(AssetType::OrthoImage).await.unwrap();
+        assert!(keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn http_list_assets_manifest_not_found() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/prefix/ortho/_manifest.txt"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let fetcher = make_http_fetcher(&server.uri());
+        let result = fetcher.list_assets(AssetType::OrthoImage).await;
+        assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn http_list_assets_invalid_utf8() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/prefix/ortho/_manifest.txt"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(&[0xff, 0xfe]))
+            .mount(&server)
+            .await;
+
+        let fetcher = make_http_fetcher(&server.uri());
+        let result = fetcher.list_assets(AssetType::OrthoImage).await;
+        assert!(matches!(result, Err(AssetErr::AssetDownloadError(_))));
+    }
+
+    #[tokio::test]
+    async fn http_list_assets_unsupported_asset_type() {
+        let server = MockServer::start().await;
+        let fetcher = HttpAssetFetcher::new(
+            None,
+            Url::parse(&server.uri()).unwrap(),
+            HashMap::new(),
+        );
 
         let result = fetcher.list_assets(AssetType::OrthoImage).await;
         assert!(matches!(result, Err(AssetErr::UnsupportedAssetType(_))));

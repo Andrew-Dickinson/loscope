@@ -46,6 +46,7 @@ pub enum AssetErr {
 
 #[derive(Debug)]
 pub enum ProviderInitErr {
+    EnvVarError(String),
     RusqliteError(tokio_rusqlite::Error),
     RedisError(RedisError),
     AssetPrefetchError(AssetErr),

@@ -3371,6 +3371,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "aws-smithy-mocks",
+ "bytes",
  "chrono",
  "derive-getters",
  "derive-new",
