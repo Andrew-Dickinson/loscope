@@ -174,7 +174,6 @@ mod tests {
         let gps = GPSCoords3::new(40.7850341, -73.9633981, 55.0);
 
         let nys = converter.to_nys_plane3(&gps);
-        // TODO: Tighten up this epsilon by validating that our conversion is actually high precision
         assert_abs_diff_eq!(
             nys,
             NYSCoords3::new(994386.443, 225285.050, 181.446),
