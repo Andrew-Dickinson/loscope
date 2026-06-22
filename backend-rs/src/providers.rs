@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 use typed_path::Utf8UnixPathBuf;
-use crate::providers::backends::asset_fetcher::{AssetFetcher, HttpAssetFetcher};
+use crate::providers::backends::asset_fetcher::{AssetFetcher, HttpAssetFetcher, ASSET_FETCH_TIMEOUT};
 use crate::providers::terrain_classification_tile_provider::{CachingTerrainClassificationTileProvider, TerrainClassificationTileProvider};
 
 pub mod backends;
@@ -91,7 +91,14 @@ impl Providers {
                 )
             )
         } else if base_url.is_none() && let Some(bucket) = bucket {
-            let shared_config = aws_config::from_env().load().await;
+            let shared_config = aws_config::from_env()
+                .timeout_config(
+                    aws_config::timeout::TimeoutConfig::builder()
+                        .read_timeout(ASSET_FETCH_TIMEOUT)
+                        .build()
+                )
+                .load()
+                .await;
             let s3_client = aws_sdk_s3::Client::new(&shared_config);
 
             Box::new(

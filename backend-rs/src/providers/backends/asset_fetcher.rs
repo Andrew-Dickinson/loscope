@@ -3,17 +3,18 @@ use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use derive_new::new;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::Write;
-use std::path::{Path};
+use std::path::Path;
 use aws_sdk_s3::primitives::ByteStream;
 use futures_util::{Stream, StreamExt};
 use reqwest::Url;
+use std::time::Duration;
 use strum_macros::{AsRefStr, Display};
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
 
 const MANIFEST_FILE_NAME: &str = "_manifest.txt";
+pub const ASSET_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Hash, Eq, PartialEq, AsRefStr, Display, Copy, Clone)]
 pub enum AssetType {
@@ -115,7 +116,7 @@ impl AssetFetcher for S3AssetFetcher {
                     "Unable to find {asset_type:?} prefix"
                 )))?;
 
-        let mut temp_file = File::create(local_path).map_err(|err| {
+        let mut temp_file = fs::File::create(local_path).await.map_err(|err| {
             AssetErr::LocalFileSystemError(format!("Error creating file {local_path:?}: {err:?}"))
         })?;
 
@@ -125,12 +126,16 @@ impl AssetFetcher for S3AssetFetcher {
         while let Some(bytes) = stream.try_next().await.map_err(|err| {
             AssetErr::AssetDownloadError(format!("Failed to read from S3 download stream: {err:?}"))
         })? {
-            temp_file.write_all(&bytes).map_err(|err| {
+            temp_file.write_all(&bytes).await.map_err(|err| {
                 AssetErr::LocalFileSystemError(format!(
                     "Failed to write from S3 download stream to local file: {err:?}"
                 ))
             })?;
         }
+
+        temp_file.flush().await.map_err(|err| {
+            AssetErr::LocalFileSystemError(format!("Failed to flush file {local_path:?}: {err:?}"))
+        })?;
 
         Ok(())
     }
@@ -168,7 +173,12 @@ pub struct HttpAssetFetcher {
 impl HttpAssetFetcher {
     pub fn new(client: Option<reqwest::Client>, base_url: Url, asset_type_prefixes: HashMap<AssetType, Utf8UnixPathBuf>) -> Self {
         HttpAssetFetcher {
-            client: client.unwrap_or_default(),
+            client: client.unwrap_or_else(|| {
+                reqwest::Client::builder()
+                    .timeout(ASSET_FETCH_TIMEOUT)
+                    .build()
+                    .expect("Failed to build reqwest client")
+            }),
             base_url,
             asset_type_prefixes,
         }
@@ -228,7 +238,7 @@ impl AssetFetcher for HttpAssetFetcher {
                     "Unable to find {asset_type:?} prefix"
                 )))?;
 
-        let mut temp_file = File::create(local_path).map_err(|err| {
+        let mut temp_file = fs::File::create(local_path).await.map_err(|err| {
             AssetErr::LocalFileSystemError(format!("Error creating file {local_path:?}: {err:?}"))
         })?;
 
@@ -240,12 +250,16 @@ impl AssetFetcher for HttpAssetFetcher {
                 AssetErr::AssetDownloadError(format!("Failed to read from HTTP download stream: {err:?}"))
             })?;
 
-            temp_file.write_all(&bytes).map_err(|err| {
+            temp_file.write_all(&bytes).await.map_err(|err| {
                 AssetErr::LocalFileSystemError(format!(
                     "Failed to write from HTTP download stream to local file: {err:?}"
                 ))
             })?;
         }
+
+        temp_file.flush().await.map_err(|err| {
+            AssetErr::LocalFileSystemError(format!("Failed to flush file {local_path:?}: {err:?}"))
+        })?;
 
         Ok(())
     }
