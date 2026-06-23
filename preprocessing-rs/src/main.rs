@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use geo::Polygon;
+use geo::{Coord, LineString, Polygon};
 use indicatif::{ProgressBar, ProgressStyle};
 use loscope::building::heightmap::get_intersecting_tiles;
-use loscope::types::coords::NYSCoords2;
+use loscope::types::coords::{GPSCoords2, NYSCoords2};
+use loscope::util::coord_conversion::CoordinateConverter;
 use loscope::types::obstructions::{AttributeValue, ObstructionRaster, ObstructionType};
 use loscope::types::tiles::{LASTileId, TerrainClass};
 use loscope_preprocessing::nyc_tile_bounds::update_nyc_tiles_json;
@@ -195,6 +196,36 @@ enum Command {
         chunk: usize,
     },
 
+    /// Import a GeoJSON FeatureCollection as obstruction tif+json pairs.
+    ///
+    /// Each feature's geometry is converted from WGS84 to NYS Long Island state plane and
+    /// rasterized at 1 usft/pixel.  The feature's "name" property is stored as an attribute;
+    /// its "height" property (in US survey feet) sets the raster value.  By default the height
+    /// is treated as an absolute elevation above the datum.  Pass --dem-cache to instead
+    /// treat it as a height-above-ground, with the ground elevation looked up from local DEM tiles.
+    ImportGeoJson {
+        /// Path to the input GeoJSON file
+        input: PathBuf,
+
+        /// Obstruction type for all features in this file (e.g. bridge_obstructions)
+        #[arg(long)]
+        r#type: ObstructionType,
+
+        /// Output directory for tif+json pairs (organised as {type}/{uuid}.*)
+        #[arg(long)]
+        output: PathBuf,
+
+        /// Optional DEM tile cache directory; when supplied the feature height is treated as
+        /// height-above-ground and the DEM ground elevation is added before rasterizing
+        #[arg(long)]
+        dem_cache: Option<PathBuf>,
+
+        /// Convert GeoJSON coordinates from WGS84 to NYS Long Island state plane (EPSG:6539).
+        /// Omit this flag when the GeoJSON is already in NYS state plane coordinates.
+        #[arg(long, default_value_t = false)]
+        convert_wgs84: bool,
+    },
+
     /// Split a citywide DEM GeoTIFF into canonical 500-usft elevation tiles
     PreprocessDem {
         /// Path to the input DEM GeoTIFF (EPSG:6539+6360, 1 usft/pixel, heights in usft)
@@ -258,12 +289,218 @@ fn main() -> Result<()> {
                 None => planimetrics::download_all(&output, chunk)?,
             }
         }
+        Command::ImportGeoJson { input, r#type, output, dem_cache, convert_wgs84 } => {
+            run_import_geojson(&input, r#type, &output, dem_cache.as_deref(), convert_wgs84)?;
+        }
         Command::PreprocessDem { dem_tif, output } => {
             split_dem(&dem_tif, &output)?;
         }
     }
 
     Ok(())
+}
+
+fn run_import_geojson(
+    input: &Path,
+    obs_type: ObstructionType,
+    out_dir: &Path,
+    dem_cache: Option<&Path>,
+    convert_wgs84: bool,
+) -> Result<()> {
+    use geojson::{GeoJson, GeometryValue};
+    use serde_json::Number;
+
+    std::fs::create_dir_all(out_dir)?;
+
+    let raw = std::fs::read_to_string(input)
+        .with_context(|| format!("Cannot read {}", input.display()))?;
+
+    let geojson: GeoJson = raw
+        .parse()
+        .with_context(|| format!("Cannot parse {} as GeoJSON", input.display()))?;
+
+    let fc = match geojson {
+        GeoJson::FeatureCollection(fc) => fc,
+        _ => anyhow::bail!("{} is not a GeoJSON FeatureCollection", input.display()),
+    };
+
+    let pb = ProgressBar::new(fc.features.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{bar:40} {pos}/{len} features | {per_sec} | eta: {eta}")
+            .unwrap(),
+    );
+
+    let written = AtomicUsize::new(0);
+    let skipped = AtomicUsize::new(0);
+
+    fc.features.into_par_iter().for_each(|feature| {
+        pb.inc(1);
+
+        let result: anyhow::Result<(usize, usize)> = (|| {
+            let props = feature
+                .properties
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("missing properties"))?;
+
+            let name = props
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing or non-string 'name' property"))?
+                .to_string();
+
+            let height_usft: f64 = {
+                let v = props
+                    .get("height")
+                    .ok_or_else(|| anyhow::anyhow!("'{name}': missing 'height' property"))?;
+                v.as_str()
+                    .and_then(|s| s.parse().ok())
+                    .or_else(|| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("'{name}': 'height' is not a valid number"))?
+            };
+
+            let geometry = feature
+                .geometry
+                .ok_or_else(|| anyhow::anyhow!("'{name}': missing geometry"))?;
+
+            let poly_coords_list = match geometry.value {
+                GeometryValue::Polygon { coordinates } => vec![coordinates],
+                GeometryValue::MultiPolygon { coordinates } => coordinates,
+                other => {
+                    anyhow::bail!("'{name}': unsupported geometry type {}", other.type_name())
+                }
+            };
+
+            let converter = CoordinateConverter::new();
+            let mut feat_written = 0usize;
+            let mut feat_skipped = 0usize;
+
+            for poly_coords in poly_coords_list {
+                let poly_nys = if convert_wgs84 {
+                    geojson_polygon_to_nys(&poly_coords, &converter)
+                } else {
+                    geojson_polygon_passthrough(&poly_coords)
+                };
+
+                let total_height_usft = match dem_cache {
+                    Some(cache) => {
+                        max_ground_elevation_from_dem(&poly_nys, cache).unwrap_or(0.0)
+                            + height_usft
+                    }
+                    None => height_usft,
+                };
+
+                let height_inches = (total_height_usft * 12.0).round() as u16;
+
+                let tile_ids = match get_intersecting_tiles(&poly_nys) {
+                    Ok((tiles, _)) => tiles,
+                    Err(e) => {
+                        eprintln!(
+                            "Skipping polygon in '{name}': cannot get intersecting tiles: {e:?}"
+                        );
+                        feat_skipped += 1;
+                        continue;
+                    }
+                };
+
+                let (x_sw, y_sw, w, h, flat_raster) = rasterize_polygon(&poly_nys, height_inches);
+
+                if flat_raster.iter().all(|&v| v == 0) {
+                    eprintln!("Skipping empty raster for '{name}'");
+                    feat_skipped += 1;
+                    continue;
+                }
+
+                let uuid = Uuid::new_v4();
+                let mut attributes: HashMap<String, AttributeValue> = HashMap::new();
+                attributes.insert("name".to_string(), AttributeValue::String(name.clone()));
+                attributes.insert(
+                    "height_usft".to_string(),
+                    AttributeValue::Number(Number::from_f64(height_usft).unwrap_or(0.into())),
+                );
+
+                let raster = ObstructionRaster::new(
+                    Array2::from_shape_vec((w as usize, h as usize), flat_raster).unwrap(),
+                );
+                let meta = ObstructionMetaOutput {
+                    obstruction_id: uuid,
+                    obstruction_type: obs_type.clone(),
+                    attributes,
+                    tile_ids,
+                    offset_nys: NYSCoords2::new(x_sw as f64, y_sw as f64),
+                    width: w as usize,
+                    height: h as usize,
+                    raster_file: format!("{uuid}.tif"),
+                };
+
+                write_obstruction(&meta, &raster, out_dir)
+                    .with_context(|| format!("Failed to write obstruction for '{name}'"))?;
+
+                feat_written += 1;
+            }
+
+            Ok((feat_written, feat_skipped))
+        })();
+
+        match result {
+            Ok((w, s)) => {
+                written.fetch_add(w, Ordering::Relaxed);
+                skipped.fetch_add(s, Ordering::Relaxed);
+            }
+            Err(e) => {
+                eprintln!("Error: {e}");
+                skipped.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    });
+
+    pb.finish_and_clear();
+    let written = written.load(Ordering::Relaxed);
+    let skipped = skipped.load(Ordering::Relaxed);
+
+    if skipped > 0 {
+        eprintln!("Skipped {skipped} polygon(s) with missing/invalid data");
+    }
+    println!("Done. {written} obstruction(s) written.");
+    Ok(())
+}
+
+
+/// Build a `geo::Polygon` from a GeoJSON polygon whose coordinates are already in NYS-LI (easting, northing).
+fn geojson_polygon_passthrough(coords: &geojson::PolygonType) -> Polygon<f64> {
+    let convert_ring = |ring: &geojson::LineStringType| -> LineString<f64> {
+        LineString(
+            ring.iter()
+                .map(|pt| Coord { x: pt[0], y: pt[1] })
+                .collect(),
+        )
+    };
+
+    let exterior = convert_ring(&coords[0]);
+    let interiors: Vec<LineString<f64>> = coords[1..].iter().map(convert_ring).collect();
+    Polygon::new(exterior, interiors)
+}
+
+/// Convert a GeoJSON polygon (rings of [lon, lat] positions) to a `geo::Polygon` in NYS-LI coordinates.
+fn geojson_polygon_to_nys(
+    coords: &geojson::PolygonType,
+    converter: &CoordinateConverter,
+) -> Polygon<f64> {
+    let convert_ring = |ring: &geojson::LineStringType| -> LineString<f64> {
+        LineString(
+            ring.iter()
+                .map(|pt| {
+                    let gps = GPSCoords2::new(pt[1], pt[0]); // GeoJSON is [lon, lat]
+                    let nys = converter.to_nys_plane2(&gps);
+                    Coord { x: *nys.easting(), y: *nys.northing() }
+                })
+                .collect(),
+        )
+    };
+
+    let exterior = convert_ring(&coords[0]);
+    let interiors: Vec<LineString<f64>> = coords[1..].iter().map(convert_ring).collect();
+    Polygon::new(exterior, interiors)
 }
 
 fn run_preprocess_tiles(
