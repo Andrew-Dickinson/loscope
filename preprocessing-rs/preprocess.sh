@@ -45,6 +45,11 @@ for query_file in ./queries/*.sql; do
     --dem-cache ../data/dem-tiles
 done
 
+loscope-preprocessing import-geo-json ../bundled_geo_data/BridgeObstructions.geojson \
+  --type non_surveyed_bridge \
+  --output ../data/obstructions \
+  --convert-wgs84
+
 echo "#### Writing obstruction index..."
 loscope-preprocessing build-obstruction-index \
     --obstructions "../data/obstructions/" \

@@ -35,9 +35,7 @@ pub async fn get_terrain_tile_overview(
     };
 
     // TODO: Fetch street geometry and use it to label street names in the 3d view?
-
-    // TODO: Add obstructions for bridge tiles/outlines
-
+    
     // TODO: Obstructions for active waterways and rail lines?
 
     Ok(Json(TerrainTileOverview {

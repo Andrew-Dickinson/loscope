@@ -110,6 +110,7 @@ impl<'de> Deserialize<'de> for ObstructionTypesFilter {
 pub enum ObstructionType {
     ActivePermits,
     ApprovedJobApplications,
+    NonSurveyedBridge,
     NewConstructionCo,
     NewConstructionFootprints,
     RecentJobApplications,
