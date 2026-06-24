@@ -115,6 +115,16 @@ pub struct CachingElevationTileProvider {
 #[async_trait]
 impl ElevationTileProvider for CachingElevationTileProvider {
     async fn get_elevation_tile(&self, tile_id: TileId) -> Result<ElevationTile, AssetErr> {
+        // As an optimization, we do the fast local lookup to validate that the requested tile
+        // is within the city, before making an expensive network call
+        if !tile_id.is_in_nyc() {
+            return Err(
+                AssetErr::AssetNotFound(
+                    format!("Requested tile {} is outside of NYC, no elevation data is available", tile_id)
+                )
+            );
+        }
+
         let asset_id = &tile_id.tiff_fname();
         let asset_res = self
             .asset_provider
@@ -125,9 +135,8 @@ impl ElevationTileProvider for CachingElevationTileProvider {
             Ok(asset) => ElevationTile::read_from_tiff(tile_id, asset),
             Err(err) => {
                 if let AssetErr::AssetNotFound(_) = err {
-                    // As an optimization, we chose not to store tiles which are all zeros, but analyses may request these
-                    // TODO: Warn the user for the case where their analysis is trying to query a tile outside the city
-                    //     (might require an extra lookup here to see if the tile ID falls outside some kind of index)
+                    // As an optimization, we chose not to store tiles which are all zeros, but
+                    // analyses may request these, so we generate them on the fly
                     let path = self
                         .asset_provider
                         .get_local_asset_path(AssetType::ElevationTile, asset_id);
@@ -419,5 +428,19 @@ mod tests {
             )));
         let result = provider.get_elevation_tile(sample_tile_id()).await;
         assert!(matches!(result, Err(AssetErr::LocalFileSystemError(_))));
+    }
+
+    #[tokio::test]
+    async fn get_elevation_tile_returns_not_found_for_tile_outside_nyc() {
+        let outside_nyc = TileId::parse("972200_00").unwrap();
+        assert!(!outside_nyc.is_in_nyc(), "precondition: tile must be outside NYC");
+
+        // AssetDownloadError would surface as LocalFileSystemError if get_asset were called,
+        // so seeing AssetNotFound proves the NYC guard fired before any provider call
+        let provider = CachingElevationTileProvider::new(Arc::new(MockAssetProvider::returning_err(
+            AssetErr::AssetDownloadError("should not be reached".into()),
+        )));
+        let result = provider.get_elevation_tile(outside_nyc).await;
+        assert!(matches!(result, Err(AssetErr::AssetNotFound(_))));
     }
 }
