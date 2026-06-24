@@ -22,6 +22,8 @@ const STATUS_INT: Record<string, number> = {
   partially_obstructed: 1,
   obstructed: 2,
   __pending__: 3,
+  error: 3,
+  error_fatal: 3,
 }
 
 // ShaderMaterial auto-injects: position, normal, modelMatrix, viewMatrix,

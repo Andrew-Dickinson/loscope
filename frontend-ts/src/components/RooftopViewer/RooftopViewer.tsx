@@ -27,7 +27,8 @@ export interface BackendSamplePoint {
 
 export interface PointAnalysis {
   id: string
-  result: string  // 'unobstructed' | 'partially_obstructed' | 'obstructed'
+  result: string  // 'unobstructed' | 'partially_obstructed' | 'obstructed' | 'error' | 'error_fatal'
+  errorMessage?: string  // populated for 'error_fatal'
 }
 
 interface RooftopViewerProps {
@@ -645,7 +646,7 @@ const OVERLAY_FRAG = /* glsl */`
     if (s == 0) return vec3(0.000, 0.800, 0.533);  // unobstructed  teal-green
     if (s == 1) return vec3(1.000, 0.800, 0.000);  // partial       yellow
     if (s == 2) return vec3(1.000, 0.102, 0.000);  // obstructed    red
-    return       vec3(0.580, 0.640, 0.720);         // pending       grey
+    return       vec3(0.580, 0.640, 0.720);         // pending / error / not-yet-requested  grey
   }
 
   void main() {
@@ -675,6 +676,7 @@ const OVERLAY_FRAG = /* glsl */`
       else if (status == 2) symA = sdfStroke(sdCross(ps), 0.06);
       else if (status == 3) symA = spinnerAlpha(ps, uTime);
       // status 4: not yet requested — plain grey circle, no symbol
+      else if (status == 5) symA = sdfStroke(sdCross(ps), 0.06);  // error: X in grey circle
     }
 
     float alpha = max(fill, ring);
@@ -745,11 +747,12 @@ function SphereOverlay({ samplePoints, analyses, hoveredSphereRef }: {
       const a = analyses[i]
       const r = a?.result
       statusAttr.setX(i,
-        r === 'unobstructed'         ? 0 :
-        r === 'partially_obstructed' ? 1 :
-        r === 'obstructed'           ? 2 :
-        a === null                   ? 3 :  // null = request in flight
-                                       4    // undefined = not yet requested
+        r === 'unobstructed'                          ? 0 :
+        r === 'partially_obstructed'                  ? 1 :
+        r === 'obstructed'                            ? 2 :
+        (r === 'error' || r === 'error_fatal')        ? 5 :  // analysis failed: X in grey circle
+        a === null                                    ? 3 :  // null = request in flight: spinner
+                                                        4    // undefined = not yet requested: plain grey circle
       )
     }
     statusAttr.needsUpdate = true
@@ -906,6 +909,7 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
   const n_clear   = analyses.filter(a => a?.result === 'unobstructed').length
   const n_partial = analyses.filter(a => a?.result === 'partially_obstructed').length
   const n_full    = analyses.filter(a => a?.result === 'obstructed').length
+  const n_error   = analyses.filter(a => a?.result === 'error' || a?.result === 'error_fatal').length
   const pending   = analyses.filter(a => a === null).length
 
   const [placementMode,   setPlacementMode]   = useState(false)
@@ -977,6 +981,7 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
         <LegendRow color="#ffcc00" label={`Partial (${n_partial})`} />
         <LegendRow color="#ff1a00" label={`Obstructed (${n_full})`} />
         {pending > 0 && <LegendRow color="#94a3b8" label={`Pending (${pending})`} />}
+        {n_error > 0 && <LegendRow color="#94a3b8" label={`Error (${n_error})`} />}
       </div>
 
       <div style={styles.placementPanel}>

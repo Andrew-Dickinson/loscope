@@ -49,21 +49,35 @@ async function getSamplePoints(
   return res.json() as Promise<SamplePointsResponse>
 }
 
+class AnalysisError extends Error {
+  constructor(message: string, readonly retryable: boolean) {
+    super(message)
+    this.name = 'AnalysisError'
+  }
+}
+
 async function analyzePoint(
   pt: BackendSamplePoint,
   nysB: [number, number, number],
   freqGhz: number,
 ): Promise<PointAnalysis> {
-  const res = await fetch('/api/analysis/analyzePointPair', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      point_a_nys: pt.sample_point.nys,
-      point_b_nys: nysB,
-      frequency_hz: freqGhz * 1e9,
-    }),
-  })
-  if (!res.ok) throw new Error(`Analysis failed: HTTP ${res.status}`)
+  let res: Response
+  try {
+    res = await fetch('/api/analysis/analyzePointPair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        point_a_nys: pt.sample_point.nys,
+        point_b_nys: nysB,
+        frequency_hz: freqGhz * 1e9,
+      }),
+    })
+  } catch (err) {
+    throw new AnalysisError(String(err), true)  // network error / timeout → retryable
+  }
+  if (!res.ok) {
+    throw new AnalysisError(`HTTP ${res.status}`, res.status >= 500)
+  }
   const d = await res.json() as { id: string; result: string }
   const resultMap: Record<string, string> = {
     Unobstructed:        'unobstructed',
@@ -71,6 +85,12 @@ async function analyzePoint(
     Obstructed:          'obstructed',
   }
   return { id: d.id, result: resultMap[d.result] ?? d.result.toLowerCase() } as PointAnalysis
+}
+
+function toErrorAnalysis(err: unknown): PointAnalysis {
+  if (err instanceof AnalysisError && !err.retryable)
+    return { id: '', result: 'error_fatal', errorMessage: err.message }
+  return { id: '', result: 'error' }
 }
 
 async function runConcurrent<T>(
@@ -106,6 +126,8 @@ export default function App() {
 
   // Map state
   const [activeMap, setActiveMap] = useState<ActiveMap | null>(null)
+
+  const [errorPopup, setErrorPopup] = useState<string | null>(null)
 
   // Abort ref — set to true to stop the analysis loop between requests
   const abortRef = useRef(false)
@@ -167,8 +189,9 @@ export default function App() {
           const result = await analyzePoint(points[ptIdx], nysBPoint, values.frequency_ghz)
           if (abortRef.current) return
           setAnalyses(prev => { const next = [...prev]; next[ptIdx] = result; return next })
-        } catch {
-          // Leave analysis[ptIdx] as null on error; counting as done anyway
+        } catch (err) {
+          if (!abortRef.current)
+            setAnalyses(prev => { const next = [...prev]; next[ptIdx] = toErrorAnalysis(err); return next })
         }
         done++
         setLoading({
@@ -187,20 +210,25 @@ export default function App() {
   const handlePointClick = useCallback(async (idx: number) => {
     const analysis = analyses[idx]
 
-    if (analysis === undefined) {
-      // Not yet requested — fire immediately, jumping the queue
+    if (analysis === undefined || analysis?.result === 'error') {
+      // Not yet requested, or retryable error — retry immediately, jumping the queue
       if (!nysB) return
       setAnalyses(prev => { const next = [...prev]; next[idx] = null; return next })
       try {
         const result = await analyzePoint(samplePoints[idx], nysB, freqGhz)
         setAnalyses(prev => { const next = [...prev]; next[idx] = result; return next })
-      } catch {
-        setAnalyses(prev => { const next = [...prev]; next[idx] = undefined; return next })
+      } catch (err) {
+        setAnalyses(prev => { const next = [...prev]; next[idx] = toErrorAnalysis(err); return next })
       }
       return
     }
 
     if (analysis === null) return  // already in flight
+
+    if (analysis.result === 'error_fatal') {
+      setErrorPopup(analysis.errorMessage ?? 'Analysis failed')
+      return
+    }
 
     setActiveMap(null)
     setAppState('map')
@@ -225,8 +253,8 @@ export default function App() {
     try {
       const result = await analyzePoint(point, nysB, freqGhz)
       setAnalyses(prev => { const next = [...prev]; next[newIdx] = result; return next })
-    } catch {
-      setAnalyses(prev => { const next = [...prev]; next[newIdx] = undefined; return next })
+    } catch (err) {
+      setAnalyses(prev => { const next = [...prev]; next[newIdx] = toErrorAnalysis(err); return next })
     }
   }, [samplePoints, nysB, freqGhz])
 
@@ -264,6 +292,15 @@ export default function App() {
             <WaitingScreen label={
               loading?.isError ? `Error: ${loading.message}` : 'Loading rooftop…'
             } />
+          )}
+          {errorPopup !== null && (
+            <div style={styles.popupBackdrop}>
+              <div style={styles.errorPopup}>
+                <div style={styles.popupTitle}>Analysis failed</div>
+                <div style={styles.popupMessage}>{errorPopup}</div>
+                <button style={styles.popupDismiss} onClick={() => setErrorPopup(null)}>Dismiss</button>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -366,6 +403,44 @@ function WaitingScreen({ label }: { label: string }) {
 
 const BAR_H = 42
 const styles: Record<string, React.CSSProperties> = {
+  popupBackdrop: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 200,
+  },
+  errorPopup: {
+    background: 'rgba(13, 17, 23, 0.97)',
+    border: '1px solid rgba(255, 68, 68, 0.4)',
+    borderRadius: 8,
+    padding: '18px 22px',
+    fontFamily: 'monospace',
+    fontSize: 12,
+    maxWidth: 320,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+  },
+  popupTitle: {
+    color: '#ff4444',
+    fontWeight: 600,
+    marginBottom: 8,
+  },
+  popupMessage: {
+    color: '#8b949e',
+    marginBottom: 16,
+    lineHeight: 1.5,
+  },
+  popupDismiss: {
+    background: 'rgba(255,255,255,0.06)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: 4,
+    color: '#8b949e',
+    fontSize: 12,
+    fontFamily: 'monospace',
+    padding: '3px 12px',
+    cursor: 'pointer',
+  },
   topBarAbs: {
     position: 'absolute',
     top: 0, left: 0, right: 0,
