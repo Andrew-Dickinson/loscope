@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN cargo chef cook --release -p loscope-preprocessing --recipe-path recipe.json
 
 COPY Cargo.toml ./
 COPY backend-rs ./backend-rs
