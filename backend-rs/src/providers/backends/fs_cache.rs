@@ -177,8 +177,6 @@ impl AssetProvider for CachingAssetProvider {
             }
         }
 
-        // TODO: Expire cache so we don't leak and fill the disk
-
         println!("Calling upstream fetcher for {asset_type:?} {asset_id:?}");
 
         let asset_type_dir = self.cache_root.join(asset_type.as_ref());

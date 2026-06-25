@@ -43,6 +43,17 @@ services:
       backend:
         condition: service_healthy
 
+  cache-janitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.cache-janitor
+    environment:
+      SCAN_INTERVAL_MINUTES: ${CACHE_SCAN_INTERVAL_MINUTES:-60}
+      MAX_AGE_HOURS: ${CACHE_MAX_AGE_HOURS:-24}
+    volumes:
+      - asset-cache:/cache
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     ports:

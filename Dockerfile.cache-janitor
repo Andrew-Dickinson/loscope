@@ -1,0 +1,17 @@
+FROM alpine:3.20
+
+ENV SCAN_INTERVAL_MINUTES=60
+ENV MAX_AGE_HOURS=24
+
+CMD sh -c 'while true; do \
+  echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Scanning /cache for files older than ${MAX_AGE_HOURS}h..."; \
+  deleted=$(find /cache -type f -mmin +$((MAX_AGE_HOURS * 60)) -print -delete); \
+  if [ -n "$deleted" ]; then \
+    echo "$deleted" | while IFS= read -r f; do echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Deleted: $f"; done; \
+  else \
+    echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] No expired files found."; \
+  fi; \
+  find /cache -mindepth 1 -type d -empty -delete; \
+  echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Done. Next scan in ${SCAN_INTERVAL_MINUTES}m."; \
+  sleep $((SCAN_INTERVAL_MINUTES * 60)); \
+done'
