@@ -16,9 +16,11 @@ use derive_getters::Getters;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use rslock::LockManager;
 use tokio::fs;
 use typed_path::Utf8UnixPathBuf;
 use crate::providers::backends::asset_fetcher::{AssetFetcher, HttpAssetFetcher, ASSET_FETCH_TIMEOUT};
+use crate::providers::backends::distributed_mutex::{DistributedMutexManager, InMemoryMutexManager, RedisDistributedMutexManager};
 use crate::providers::terrain_classification_tile_provider::{CachingTerrainClassificationTileProvider, TerrainClassificationTileProvider};
 
 pub mod backends;
@@ -114,8 +116,6 @@ impl Providers {
             );
         };
 
-        let asset_provider: Arc<dyn AssetProvider + Send + Sync> =
-            Arc::new(CachingAssetProvider::new(asset_fetcher, cache_root));
 
         let value_store: Box<dyn ValueStore + Send + Sync> =
             if let Some(redis_url) = get_env(REDIS_URL) {
@@ -126,6 +126,26 @@ impl Providers {
                 println!("{} not set, using process memory for analysis state backend", REDIS_URL);
                 Box::new(InMemoryValueStore::new())
             };
+
+        let mutex_manager: Arc<dyn DistributedMutexManager> =
+            if let Some(redis_url) = get_env(REDIS_URL) {
+                println!("Found {} of {}, using for mutex management", REDIS_URL, redis_url);
+                Arc::new(RedisDistributedMutexManager::new(LockManager::new(vec![redis_url])))
+            } else {
+                println!("WARN: {} not set, using process memory for mutex management, this is\
+                 unsafe if you are trying to share {} across multiple loscope processes",
+                         REDIS_URL, cache_root.to_str().unwrap());
+                Arc::new(InMemoryMutexManager::default())
+            };
+
+
+        let asset_provider: Arc<dyn AssetProvider + Send + Sync> = Arc::new(
+        CachingAssetProvider::new(
+                asset_fetcher,
+                mutex_manager,
+                cache_root,
+            ).map_err(|asset_err| ProviderInitErr::AssetPrefetchError(asset_err))?
+        );
 
         Ok(Self {
             ortho_provider: Box::new(CachingOrthoProvider::new(Arc::clone(&asset_provider))),

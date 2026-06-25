@@ -49,6 +49,9 @@ regress = "0.10"
 photon-rs = "0.3.2"
 num_enum = "0.7.6"
 bytes = "1.11.1"
+renamore = "0.3.2"
+rslock = "~0.7.2"
+tempfile = "3.27.0"
 
 [build-dependencies]
 progenitor = "0.14.0"
@@ -60,4 +63,5 @@ prettyplease = "0.2"
 aws-smithy-mocks = "0.2.6"
 aws-sdk-s3 = { version = "1", features = ["test-util"] }
 wiremock = "0.6"
+tokio = { version = "1", features = ["test-util"] }
 

@@ -13,7 +13,7 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
 
-const MANIFEST_FILE_NAME: &str = "_manifest.txt";
+pub const MANIFEST_FILE_NAME: &str = "_manifest.txt";
 pub const ASSET_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Hash, Eq, PartialEq, AsRefStr, Display, Copy, Clone)]
@@ -39,7 +39,7 @@ pub trait AssetFetcher {
     async fn list_assets(&self, asset_type: AssetType) -> Result<Vec<String>, AssetErr>;
 }
 
-fn parse_manifest(manifest_contents: Vec<u8>) -> Result<Vec<String>, AssetErr> {
+pub fn parse_manifest(manifest_contents: Vec<u8>) -> Result<Vec<String>, AssetErr> {
     let s = std::str::from_utf8(manifest_contents.as_ref())
         .map_err(|err| AssetErr::AssetDownloadError(
             format!("Failed to parse manifest file: {err:?}")
