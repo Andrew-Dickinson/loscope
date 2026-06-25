@@ -22,7 +22,8 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY Cargo.toml ./
-COPY backend-rs/Cargo.toml backend-rs/build.rs backend-rs/meshdb_openapi.json ./backend-rs/
+COPY backend-rs/Cargo.toml backend-rs/build.rs ./backend-rs/
+COPY backend-rs/static_resources ./backend-rs/static_resources
 COPY backend-rs/src ./backend-rs/src
 
 RUN cargo build --release -p loscope
