@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y \
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY backend-rs/Cargo.toml backend-rs/build.rs ./backend-rs/
 COPY backend-rs/static_resources ./backend-rs/static_resources
 COPY backend-rs/src ./backend-rs/src
