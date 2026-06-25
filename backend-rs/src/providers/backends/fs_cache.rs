@@ -179,12 +179,13 @@ impl AssetProvider for CachingAssetProvider {
 
         println!("Calling upstream fetcher for {asset_type:?} {asset_id:?}");
 
-        let asset_type_dir = self.cache_root.join(asset_type.as_ref());
-        fs::create_dir_all(&asset_type_dir).map_err(|err| AssetErr::LocalFileSystemError(
-            format!("Error creating cache directory {:?}: {}", asset_type_dir, err)
+        let item_dir = item_path_buf.parent().unwrap();
+        fs::create_dir_all(item_dir).map_err(|err| AssetErr::LocalFileSystemError(
+            format!("Error creating cache directory {:?}: {}", item_dir, err)
         ))?;
 
-        let temp_file = NamedTempFile::with_prefix_in(asset_id, &asset_type_dir)
+        let item_file_prefix = item_path_buf.file_name().unwrap_or_default();
+        let temp_file = NamedTempFile::with_prefix_in(item_file_prefix, item_dir)
             .map_err(|err| AssetErr::LocalFileSystemError(
                 format!("Error creating cache file {}", err))
             )?;
@@ -699,6 +700,30 @@ mod tests {
         assert!(h1.await.unwrap().is_ok(), "h1 should succeed");
         assert!(h2.await.unwrap().is_ok(), "h2 should succeed");
         assert_eq!(counter.load(Ordering::SeqCst), 1, "upstream should be called exactly once");
+    }
+
+    #[tokio::test]
+    async fn asset_id_with_subdirectory_creates_parent_dirs_and_caches() {
+        // Regression: asset_id values like "subdir/file.tif" must succeed even though
+        // only the asset-type directory exists before the fetch. Previously, passing the
+        // full asset_id as the NamedTempFile prefix caused ENOENT when the subdirectory
+        // did not yet exist.
+        let temp_dir = test_temp_dir!();
+        let cache_root = temp_dir.as_path_untracked().to_path_buf();
+
+        let provider = CachingAssetProvider::new(
+            Box::new(MockAssetFetcher { should_succeed: true }),
+            in_memory_lock_manager(),
+            cache_root.clone(),
+        ).unwrap();
+
+        let asset_id = "new_construction_co/8c30d86f-dbe1-4efa-80f5-f4767ce66fc2.tif";
+        let mut file = provider
+            .get_asset(AssetType::Obstruction, asset_id)
+            .await
+            .unwrap();
+        assert_eq!(read_file_contents(&mut file), "fetched-content");
+        assert!(cache_root.join("Obstruction").join(asset_id).exists());
     }
 
     // --- cache ID generation ---
