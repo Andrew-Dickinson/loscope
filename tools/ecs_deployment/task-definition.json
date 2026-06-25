@@ -1,0 +1,185 @@
+{
+    "family": "loscope",
+    "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT}:role/ecsTaskExecutionRole",
+    "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT}:role/loscopeEcsTaskExecutionRole",
+    "networkMode": "bridge",
+    "requiresCompatibilities": ["EC2"],
+    "runtimePlatform": {
+        "cpuArchitecture": "X86_64",
+        "operatingSystemFamily": "LINUX"
+    },
+    "placementConstraints": [],
+    "volumes": [
+        {
+            "name": "asset-cache",
+            "host": {
+                "sourcePath": "/mnt/loscope-asset-cache"
+            }
+        }
+    ],
+    "containerDefinitions": [
+        {
+            "name": "redis",
+            "image": "redis:7-alpine",
+            "cpu": 128,
+            "memory": 256,
+            "memoryReservation": 128,
+            "portMappings": [],
+            "essential": true,
+            "environment": [],
+            "mountPoints": [],
+            "volumesFrom": [],
+            "healthCheck": {
+                "command": ["CMD-SHELL", "redis-cli ping || exit 1"],
+                "interval": 5,
+                "timeout": 3,
+                "retries": 5
+            },
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/loscope",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "redis"
+                },
+                "secretOptions": []
+            },
+            "systemControls": []
+        },
+        {
+            "name": "backend",
+            "image": "${AWS_ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/loscope-backend:latest",
+            "cpu": 512,
+            "memory": 1024,
+            "memoryReservation": 512,
+            "portMappings": [
+                {
+                    "containerPort": 8000,
+                    "hostPort": 8000,
+                    "protocol": "tcp",
+                    "name": "loscope-backend-8000-tcp",
+                    "appProtocol": "http"
+                }
+            ],
+            "essential": true,
+            "links": ["redis:redis"],
+            "dependsOn": [
+                {
+                    "containerName": "redis",
+                    "condition": "HEALTHY"
+                }
+            ],
+            "environment": [
+                {"name": "ROCKET_ADDRESS", "value": "0.0.0.0"},
+                {"name": "ROCKET_PORT", "value": "8000"},
+                {"name": "LOCAL_ASSET_CACHE_ROOT", "value": "/cache"},
+                {"name": "REDIS_URL", "value": "redis://redis:6379"},
+                {"name": "LOS_ASSET_HTTP_BASE_URL", "value": "https://los-analysis-data-${AWS_ACCOUNT}-us-east-1.s3.us-east-1.amazonaws.com/"},
+                {"name": "LOS_ORTHOS_PREFIX", "value": "2026-06-21/ortho-photos/"},
+                {"name": "LOS_TERRAIN_TILE_PREFIX", "value": "2026-06-21/preprocessed-lidar-tiles/"},
+                {"name": "LOS_OBSTRUCTION_PREFIX", "value": "2026-06-21/simulated-obstructions/"},
+                {"name": "LOS_FOOTPRINTS_PREFIX", "value": "2026-06-21/building-footprints/"}
+            ],
+            "secrets": [
+                {
+                    "name": "MESHDB_API_TOKEN",
+                    "valueFrom": "arn:aws:secretsmanager:us-east-1:${AWS_ACCOUNT}:secret:loscope:MESHDB_API_TOKEN::"
+                }
+            ],
+            "mountPoints": [
+                {
+                    "sourceVolume": "asset-cache",
+                    "containerPath": "/cache"
+                }
+            ],
+            "volumesFrom": [],
+            "healthCheck": {
+                "command": ["CMD-SHELL", "curl -f http://localhost:8000/api/healthcheck || exit 1"],
+                "interval": 10,
+                "timeout": 5,
+                "retries": 5,
+                "startPeriod": 10
+            },
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/loscope",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "backend"
+                },
+                "secretOptions": []
+            },
+            "systemControls": []
+        },
+        {
+            "name": "frontend",
+            "image": "${AWS_ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/loscope-frontend:latest",
+            "cpu": 256,
+            "memory": 512,
+            "memoryReservation": 256,
+            "portMappings": [
+                {
+                    "containerPort": 80,
+                    "hostPort": 80,
+                    "protocol": "tcp",
+                    "name": "loscope-frontend-80-tcp",
+                    "appProtocol": "http"
+                }
+            ],
+            "essential": true,
+            "dependsOn": [
+                {
+                    "containerName": "backend",
+                    "condition": "HEALTHY"
+                }
+            ],
+            "environment": [],
+            "mountPoints": [],
+            "volumesFrom": [],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/loscope",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "frontend"
+                },
+                "secretOptions": []
+            },
+            "systemControls": []
+        },
+        {
+            "name": "cache-janitor",
+            "image": "${AWS_ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/loscope-cache-janitor:latest",
+            "cpu": 64,
+            "memory": 128,
+            "memoryReservation": 64,
+            "portMappings": [],
+            "essential": false,
+            "environment": [
+                {"name": "SCAN_INTERVAL_MINUTES", "value": "60"},
+                {"name": "MAX_AGE_HOURS", "value": "24"}
+            ],
+            "mountPoints": [
+                {
+                    "sourceVolume": "asset-cache",
+                    "containerPath": "/cache"
+                }
+            ],
+            "volumesFrom": [],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/loscope",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "cache-janitor"
+                },
+                "secretOptions": []
+            },
+            "systemControls": []
+        }
+    ]
+}
