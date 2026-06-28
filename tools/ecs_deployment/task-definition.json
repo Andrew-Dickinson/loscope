@@ -21,9 +21,10 @@
         {
             "name": "redis",
             "image": "redis:7-alpine",
+            "command": ["redis-server", "--maxmemory", "700mb", "--maxmemory-policy", "allkeys-lru"],
             "cpu": 128,
-            "memory": 256,
-            "memoryReservation": 128,
+            "memory": 768,
+            "memoryReservation": 512,
             "portMappings": [],
             "essential": true,
             "environment": [],
@@ -129,6 +130,7 @@
                 }
             ],
             "essential": true,
+            "links": ["backend:backend"],
             "dependsOn": [
                 {
                     "containerName": "backend",
