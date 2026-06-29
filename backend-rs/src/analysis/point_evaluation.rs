@@ -45,7 +45,7 @@ pub struct ZoneEvaluation {
     intersection: IntersectionResult,
 }
 
-#[derive(new, Serialize, Deserialize, SchemaWrite, SchemaRead, Getters)]
+#[derive(new, Serialize, Deserialize, SchemaWrite, SchemaRead, Getters, Clone)]
 pub struct PointEvaluationInput {
     #[serde(rename = "point_a_nys")]
     point_a: NYSCoords3,
@@ -68,7 +68,7 @@ pub struct PointEvaluationOutput {
 }
 
 #[derive(new, Getters, Serialize, Deserialize, SchemaWrite, SchemaRead)]
-pub struct PointEvaluationOutcome {
+pub struct PointEvaluationOutcomeFull {
     output: PointEvaluationOutput,
 
     result_full: ZoneEvaluation,
@@ -77,17 +77,69 @@ pub struct PointEvaluationOutcome {
     tiles: HashSet<TileId>,
 }
 
+/// A `PointEvaluationOutcomeFull` object can easily be over 4MB (depending on the position
+/// of the analysis endpoints). Under some circumstances we'd rather cache a lighter version
+/// that includes just metadata instead of the full results, and then recompute the missing
+/// values as needed
+#[derive(new, Getters, Serialize, Deserialize, SchemaWrite, SchemaRead)]
+pub struct PointEvaluationOutcomeLite {
+    output: PointEvaluationOutput,
+    tiles: HashSet<TileId>,
+}
+
+
+#[derive(Serialize, Deserialize, SchemaWrite, SchemaRead)]
+pub enum PointEvaluationOutcome {
+    Full(Box<PointEvaluationOutcomeFull>),
+    Lite(PointEvaluationOutcomeLite),
+}
+impl PointEvaluationOutcome {
+    pub fn output(&self) -> &PointEvaluationOutput {
+        match self {
+            PointEvaluationOutcome::Lite(lite) => lite.output(),
+            PointEvaluationOutcome::Full(full) => full.output(),
+        }
+    }
+}
+
+impl From<PointEvaluationOutcomeFull> for PointEvaluationOutcomeLite {
+    fn from(other: PointEvaluationOutcomeFull) -> Self {
+        PointEvaluationOutcomeLite {
+            output: other.output,
+            tiles: other.tiles
+        }
+    }
+}
+
+
+
+impl PointEvaluationOutcomeLite {
+    /// Recompute the results discarded by remove_large_results(), if needed. Returns an updated
+    /// version of self with the recomputed values (if the recomputation was successful, otherwise
+    /// AssetErr)
+    pub async fn to_full(self,
+         tile_provider: &(dyn ElevationTileProvider + Send + Sync),
+         obstruction_provider: &(dyn ObstructionProvider + Send + Sync)
+    ) -> Result<PointEvaluationOutcomeFull, AssetErr>  {
+        evaluate_points(
+            self.output.id,
+            self.output.input,
+            tile_provider,
+            obstruction_provider,
+        ).await
+    }
+}
+
 pub fn valid_analysis_frequency(frequency_hz: f64) -> bool {
     (MIN_ANALYSIS_FREQUENCY..=MAX_ANALYSIS_FREQUENCY).contains(&frequency_hz)
 }
 
 pub async fn evaluate_points(
+    analysis_id: Uuid,
     eval_input: PointEvaluationInput,
     tile_provider: &(dyn ElevationTileProvider + Send + Sync),
     obstruction_provider: &(dyn ObstructionProvider + Send + Sync),
-) -> Result<PointEvaluationOutcome, AssetErr> {
-    let analysis_id = Uuid::new_v4();
-
+) -> Result<PointEvaluationOutcomeFull, AssetErr> {
     let terrain_factory = TerrainFactory::new(tile_provider, obstruction_provider);
 
     let endpoints: (Point<f64>, Point<f64>) =
@@ -148,7 +200,7 @@ pub async fn evaluate_points(
         &intersection_inner,
     );
 
-    Ok(PointEvaluationOutcome {
+    Ok(PointEvaluationOutcomeFull {
         output: PointEvaluationOutput {
             id: analysis_id,
             input: eval_input,
@@ -242,9 +294,23 @@ fn intersect_inner(
     }
 }
 
-impl PointEvaluationOutcome {
-    pub fn into_output(self) -> PointEvaluationOutput {
-        self.output
+impl From<PointEvaluationOutcomeFull> for PointEvaluationOutput {
+    fn from(outcome: PointEvaluationOutcomeFull) -> PointEvaluationOutput {
+        outcome.output
+    }
+}
+impl From<PointEvaluationOutcomeLite> for PointEvaluationOutput {
+    fn from(outcome: PointEvaluationOutcomeLite) -> PointEvaluationOutput {
+        outcome.output
+    }
+}
+
+impl From<PointEvaluationOutcome> for PointEvaluationOutput {
+    fn from(outcome: PointEvaluationOutcome) -> PointEvaluationOutput {
+        match outcome {
+            PointEvaluationOutcome::Full(full) => (*full).into(),
+            PointEvaluationOutcome::Lite(lite) => lite.into(),
+        }
     }
 }
 
@@ -327,7 +393,7 @@ mod tests {
             gps_to_nys(40.705, -73.950, 30.0),
             5_000_000_000.0,
         );
-        let outcome = evaluate_points(input, &provider, &EmptyObstructionProvider)
+        let outcome = evaluate_points(Uuid::new_v4(), input, &provider, &EmptyObstructionProvider)
             .await
             .unwrap();
         assert!(matches!(
@@ -348,7 +414,7 @@ mod tests {
             gps_to_nys(40.705, -73.950, 30.0),
             5_000_000_000.0,
         );
-        let outcome = evaluate_points(input, &provider, &EmptyObstructionProvider)
+        let outcome = evaluate_points(Uuid::new_v4(), input, &provider, &EmptyObstructionProvider)
             .await
             .unwrap();
         assert!(matches!(

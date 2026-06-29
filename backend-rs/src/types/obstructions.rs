@@ -23,7 +23,7 @@ use tiff::encoder::{TiffEncoder, colortype};
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
 
-#[derive(SchemaWrite, SchemaRead,Default)]
+#[derive(SchemaWrite, SchemaRead,Default, Clone)]
 pub enum ObstructionTypesFilter {
     #[default]
     All,

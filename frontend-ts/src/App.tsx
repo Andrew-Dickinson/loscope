@@ -235,7 +235,7 @@ export default function App() {
     setLoading({ message: 'Loading map overview…' })
 
     try {
-      const res = await fetch(`/api/analysis/overview/${analysis.id}`)
+      const res = await fetch(`/api/analysis/overview/${analysis.id}`, { method: 'POST' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const overview = await res.json() as AnalysisOverview
       setActiveMap({ analysisId: analysis.id, overview })
@@ -338,7 +338,7 @@ function KmlDownloadButton({ analysisId }: { analysisId: string }) {
     if (loading) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/analysis/fresnelKml/${analysisId}`)
+      const res = await fetch(`/api/analysis/fresnelKml/${analysisId}`, { method: 'POST' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)

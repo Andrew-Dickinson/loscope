@@ -77,7 +77,7 @@ function useTileData(tileId: string | null, analysisId: string | null): TileData
         // 2. Check if Fresnel zone OBJ is available (204 = not in this tile)
         const zoneRes = await fetch(
           `/api/analysis/fresnelSliceObj/${analysisId}/${tileId}`,
-          { method: 'HEAD' }
+          { method: 'POST' }
         )
         const zoneAvailable = zoneRes.ok && zoneRes.status !== 204
         if (cancelled) return
@@ -180,20 +180,35 @@ function TerrainMesh({ heightmap, orthoUrl, showOrtho, onReady, onLoaded, onOrth
 }
 
 // ── Imperative OBJ loader (avoids useLoader's global Suspense cache) ──────────
-function useObjLoader(url: string): THREE.Group | null {
+function useObjLoader(url: string, method = 'GET'): THREE.Group | null {
   const [obj, setObj] = useState<THREE.Group | null>(null)
   useEffect(() => {
     let cancelled = false
+    let blobUrl: string | null = null
     setObj(null)
-    new OBJLoader().load(url, loaded => { if (!cancelled) setObj(loaded) })
-    return () => { cancelled = true }
-  }, [url])
+    if (method === 'GET') {
+      new OBJLoader().load(url, loaded => { if (!cancelled) setObj(loaded) })
+    } else {
+      fetch(url, { method })
+        .then(res => res.ok ? res.blob() : null)
+        .then(blob => {
+          if (!blob || cancelled) return
+          blobUrl = URL.createObjectURL(blob)
+          new OBJLoader().load(blobUrl, loaded => { if (!cancelled) setObj(loaded) })
+        })
+        .catch(() => {})
+    }
+    return () => {
+      cancelled = true
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+    }
+  }, [url, method])
   return obj
 }
 
 // ── Zone OBJ ──────────────────────────────────────────────────────────────────
 function ZoneObj({ analysisId, tileId, onLoaded, visible }: { analysisId: string; tileId: string; onLoaded: () => void; visible: boolean }) {
-  const obj = useObjLoader(`/api/analysis/fresnelSliceObj/${analysisId}/${tileId}`)
+  const obj = useObjLoader(`/api/analysis/fresnelSliceObj/${analysisId}/${tileId}`, 'POST')
   const onLoadedRef = useRef(onLoaded)
   onLoadedRef.current = onLoaded
   useEffect(() => {

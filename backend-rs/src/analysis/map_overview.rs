@@ -1,4 +1,4 @@
-use crate::analysis::point_evaluation::{PointEvaluationOutcome, ResultStatus};
+use crate::analysis::point_evaluation::{PointEvaluationOutcome, PointEvaluationOutcomeFull, ResultStatus};
 use crate::types::coords::{GPSCoords2, GPSCoords3, NYSCoords2, NYSCoords3};
 use crate::types::tiles::TileId;
 use crate::util::coord_conversion::with_coord_converter;
@@ -20,8 +20,8 @@ pub struct PointEvaluationOverview {
     overhead_ellipse_poly: Vec<GPSCoords2>,
 }
 
-impl From<&PointEvaluationOutcome> for PointEvaluationOverview {
-    fn from(value: &PointEvaluationOutcome) -> Self {
+impl From<&PointEvaluationOutcomeFull> for PointEvaluationOverview {
+    fn from(value: &PointEvaluationOutcomeFull) -> Self {
         with_coord_converter(|converter| {
             let input = value.output().input();
             PointEvaluationOverview {
@@ -110,7 +110,7 @@ pub fn generate_ellipse_poly(
 mod tests {
     use super::*;
     use crate::analysis::point_evaluation::{
-        IntersectionResult, PointEvaluationInput, PointEvaluationOutcome, PointEvaluationOutput,
+        IntersectionResult, PointEvaluationInput, PointEvaluationOutcomeFull, PointEvaluationOutput,
         ResultStatus, ZoneEvaluation,
     };
     use crate::types::obstructions::ObstructionTypesFilter;
@@ -152,7 +152,7 @@ mod tests {
         point_a: NYSCoords3,
         point_b: NYSCoords3,
         tiles: HashSet<TileId>,
-    ) -> PointEvaluationOutcome {
+    ) -> PointEvaluationOutcomeFull {
         let input = PointEvaluationInput::new(
             point_a,
             point_b,
@@ -160,7 +160,7 @@ mod tests {
             ObstructionTypesFilter::All,
         );
         let output = PointEvaluationOutput::new(Uuid::new_v4(), input, ResultStatus::Unobstructed);
-        PointEvaluationOutcome::new(output, empty_zone(), empty_zone(), tiles)
+        PointEvaluationOutcomeFull::new(output, empty_zone(), empty_zone(), tiles)
     }
 
     #[test]

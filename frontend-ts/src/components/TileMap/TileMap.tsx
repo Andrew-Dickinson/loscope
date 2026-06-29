@@ -8,6 +8,29 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, GeoJSON, ImageOverlay, useMap } from 'react-leaflet'
+
+function PostImageOverlay({ url, bounds, opacity, zIndex }: {
+  url: string
+  bounds: [[number, number], [number, number]]
+  opacity?: number
+  zIndex?: number
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  useEffect(() => {
+    let objectUrl: string | null = null
+    fetch(url, { method: 'POST' })
+      .then(r => r.ok ? r.blob() : null)
+      .then(blob => {
+        if (!blob) return
+        objectUrl = URL.createObjectURL(blob)
+        setBlobUrl(objectUrl)
+      })
+      .catch(() => {})
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [url])
+  if (!blobUrl) return null
+  return <ImageOverlay url={blobUrl} bounds={bounds} opacity={opacity} zIndex={zIndex} />
+}
 import L from 'leaflet'
 import type { Layer, PathOptions, CircleMarkerOptions } from 'leaflet'
 import Tile3DViewer from '../Tile3DViewer/Tile3DViewer'
@@ -183,7 +206,7 @@ export default function TileMap({ overview, analysisId }: TileMapProps) {
           {overview.tiles.filter(t => t.intersection_detected).map(tile => {
             const [[lat_sw, lon_sw], [lat_ne, lon_ne]] = tile.bounds
             return (
-              <ImageOverlay
+              <PostImageOverlay
                 key={`overlay-${tile.id}`}
                 url={`/api/analysis/intersectionVisualization/${analysisId}/${tile.id}`}
                 bounds={[[lat_sw, lon_sw], [lat_ne, lon_ne]]}
