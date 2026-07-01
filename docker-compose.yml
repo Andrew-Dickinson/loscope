@@ -54,13 +54,13 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory 700mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 700mb --maxmemory-policy allkeys-lrm
     ports:
       - "6379:6379"
     deploy:
       resources:
         limits:
-          memory: 768m
+          memory: 512m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
