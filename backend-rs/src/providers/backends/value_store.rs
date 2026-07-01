@@ -1,10 +1,10 @@
 use crate::types::errors::AssetErr;
-use redis::{Commands, RedisError};
+use redis::{Commands, RedisError, SetExpiry, SetOptions};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 pub trait ValueStore {
-    fn put(&self, key: String, value: Vec<u8>) -> Result<(), AssetErr>;
+    fn put(&self, key: String, value: Vec<u8>, ttl: Option<u64>) -> Result<(), AssetErr>;
     fn get(&self, key: String) -> Result<Vec<u8>, AssetErr>;
 }
 
@@ -24,11 +24,19 @@ impl RedisValueStore {
 }
 
 impl ValueStore for RedisValueStore {
-    fn put(&self, key: String, value: Vec<u8>) -> Result<(), AssetErr> {
+    fn put(&self, key: String, value: Vec<u8>, ttl: Option<u64>) -> Result<(), AssetErr> {
+        let options = SetOptions::default();
+
+        let options = if let Some(ttl) = ttl {
+            options.with_expiration(SetExpiry::EX(ttl))
+        } else {
+            options
+        };
+
         self.conn
             .lock()
             .map_err(|e| AssetErr::AssetDownloadError(format!("Redis lock error: {e}")))?
-            .set(key, value)
+            .set_options(key, value, options)
             .map_err(|e| AssetErr::AssetDownloadError(format!("Redis SET error: {e}")))
     }
 
@@ -62,7 +70,12 @@ impl InMemoryValueStore {
 }
 
 impl ValueStore for InMemoryValueStore {
-    fn put(&self, key: String, value: Vec<u8>) -> Result<(), AssetErr> {
+    fn put(&self, key: String, value: Vec<u8>, ttl: Option<u64>) -> Result<(), AssetErr> {
+        if let Some(ttl) = ttl {
+            eprintln!("Warning, ttl of {} specified for key {} in InMemoryValueStore, \
+            but InMemoryValueStore does not honor TTLs, these \
+            keys will be stored until process terminates.", ttl, key);
+        }
         self.map
             .lock()
             .map_err(|e| {
@@ -98,7 +111,7 @@ mod tests {
     #[test]
     fn get_after_put_returns_value() {
         let store = InMemoryValueStore::new();
-        store.put("k".into(), b"hello".to_vec()).unwrap();
+        store.put("k".into(), b"hello".to_vec(), None).unwrap();
         assert_eq!(store.get("k".into()).unwrap(), b"hello");
     }
 
@@ -114,16 +127,16 @@ mod tests {
     #[test]
     fn put_overwrites_existing_key() {
         let store = InMemoryValueStore::new();
-        store.put("k".into(), b"first".to_vec()).unwrap();
-        store.put("k".into(), b"second".to_vec()).unwrap();
+        store.put("k".into(), b"first".to_vec(), None).unwrap();
+        store.put("k".into(), b"second".to_vec(), None).unwrap();
         assert_eq!(store.get("k".into()).unwrap(), b"second");
     }
 
     #[test]
     fn keys_are_independent() {
         let store = InMemoryValueStore::new();
-        store.put("a".into(), b"1".to_vec()).unwrap();
-        store.put("b".into(), b"2".to_vec()).unwrap();
+        store.put("a".into(), b"1".to_vec(), None).unwrap();
+        store.put("b".into(), b"2".to_vec(), None).unwrap();
         assert_eq!(store.get("a".into()).unwrap(), b"1");
         assert_eq!(store.get("b".into()).unwrap(), b"2");
     }
@@ -131,7 +144,7 @@ mod tests {
     #[test]
     fn get_returns_cloned_value() {
         let store = InMemoryValueStore::new();
-        store.put("k".into(), b"data".to_vec()).unwrap();
+        store.put("k".into(), b"data".to_vec(), None).unwrap();
         let v1 = store.get("k".into()).unwrap();
         let v2 = store.get("k".into()).unwrap();
         assert_eq!(v1, v2);

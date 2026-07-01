@@ -1,14 +1,25 @@
+use std::convert::Into;
+use chrono::Duration;
 use crate::analysis::point_evaluation::{PointEvaluationOutcome, PointEvaluationOutcomeFull, PointEvaluationOutcomeType, PointEvaluationOutput};
 use crate::providers::backends::value_store::ValueStore;
 use crate::types::errors::AssetErr;
 use derive_new::new;
-use rocket::http::Status;
 use uuid::Uuid;
-use crate::analysis::map_overview::PointEvaluationOverview;
 use crate::providers::elevation_tile_provider::ElevationTileProvider;
 use crate::providers::obstruction_provider::ObstructionProvider;
 
 const KEY_PREFIX: &str = "PointEvaluationResult";
+
+// Full results are relatively cheap to recompute, we mostly store them in the backend to prevent
+// an extremely inefficient multi-recomputation on the burst of requests for various little parts
+// of the analysis when its details are first loaded by a UI click on its data point.
+const FULL_RESULT_TTL: u64 = Duration::seconds(30).num_seconds() as u64;
+
+// We keep the Lite results much longer, since they are orders of magnitude smaller and impossible
+// to recompute. This time represents the longest possible duration that a user could return to
+// a previously generated analysis after and not recieve "not found" errors. It might be reasonable
+// to increase this by up to ~10 times in the future for UX comfort
+const LITE_RESULT_TTL: u64 = Duration::hours(3).num_seconds() as u64;
 
 #[derive(new)]
 pub struct PointEvaluationResultProvider {
@@ -33,6 +44,10 @@ impl PointEvaluationResultProvider {
                     result.output().id()
                 ))
             })?,
+            match result {
+                PointEvaluationOutcome::Full(_) => Option::from(FULL_RESULT_TTL),
+                PointEvaluationOutcome::Lite(_) => Option::from(LITE_RESULT_TTL),
+            }
         )
     }
 
@@ -272,9 +287,9 @@ mod tests {
     }
 
     impl ValueStore for KeyCapturingStore {
-        fn put(&self, key: String, value: Vec<u8>) -> Result<(), AssetErr> {
+        fn put(&self, key: String, value: Vec<u8>, ttl: Option<u64>) -> Result<(), AssetErr> {
             *self.last_put_key.lock().unwrap() = Some(key.clone());
-            self.inner.put(key, value)
+            self.inner.put(key, value, ttl)
         }
         fn get(&self, key: String) -> Result<Vec<u8>, AssetErr> {
             self.inner.get(key)
@@ -298,7 +313,7 @@ mod tests {
     struct CorruptedValueStore;
 
     impl ValueStore for CorruptedValueStore {
-        fn put(&self, _: String, _: Vec<u8>) -> Result<(), AssetErr> { Ok(()) }
+        fn put(&self, _: String, _: Vec<u8>, _: Option<u64>) -> Result<(), AssetErr> { Ok(()) }
         fn get(&self, _: String) -> Result<Vec<u8>, AssetErr> {
             Ok(vec![0xFF, 0xFF, 0xFF])
         }
