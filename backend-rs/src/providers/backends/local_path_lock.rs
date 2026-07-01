@@ -3,6 +3,8 @@ use std::time::Duration;
 use tokio::time::sleep;
 use crate::providers::backends::distributed_mutex::{AcquiredLock, DistributedMutexManager, LockError};
 
+const MUTEX_KEY_PREFIX: &str = "LocalPathLock";
+
 const MUTEX_TTL: Duration = Duration::from_secs(60);
 pub(crate) const MAX_LOCK_AQUIRE_ATTEMPTS: usize = 5;
 pub(crate) const LOCK_AQUIRE_SLEEP_WAIT: Duration = Duration::from_secs(5);
@@ -27,7 +29,7 @@ impl<'a> LocalPathLock<'a> {
     pub async fn aquire(&mut self) -> Result<(), LockError> {
         self.lock = Some(
             self.lock_manager.lock(
-                format!("{}_{}", self.local_cache_id, self.intra_cache_path).as_str(),
+                format!("{}/{}_{}", MUTEX_KEY_PREFIX, self.local_cache_id, self.intra_cache_path).as_str(),
                 MUTEX_TTL,
             ).await?
         );
