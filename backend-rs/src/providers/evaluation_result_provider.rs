@@ -1,4 +1,4 @@
-use crate::analysis::point_evaluation::{PointEvaluationOutcome, PointEvaluationOutcomeFull, PointEvaluationOutput};
+use crate::analysis::point_evaluation::{PointEvaluationOutcome, PointEvaluationOutcomeFull, PointEvaluationOutcomeType, PointEvaluationOutput};
 use crate::providers::backends::value_store::ValueStore;
 use crate::types::errors::AssetErr;
 use derive_new::new;
@@ -16,13 +16,13 @@ pub struct PointEvaluationResultProvider {
 }
 
 impl PointEvaluationResultProvider {
-    fn key(result_id: &Uuid) -> String {
-        format!("{KEY_PREFIX}/{result_id}")
+    fn key(result_id: &Uuid, type_: PointEvaluationOutcomeType) -> String {
+        format!("{KEY_PREFIX}/{result_id}/{type_}")
     }
 
     pub fn put(&self, result: &PointEvaluationOutcome) -> Result<(), AssetErr> {
         self.value_store.put(
-            PointEvaluationResultProvider::key(result.output().id()),
+            PointEvaluationResultProvider::key(result.output().id(), result.into()),
             wincode::config::serialize(
                 result,
                 wincode::config::Configuration::default().disable_preallocation_size_limit(),
@@ -37,11 +37,23 @@ impl PointEvaluationResultProvider {
     }
 
     pub fn get(&self, result_id: &Uuid) -> Result<PointEvaluationOutcome, AssetErr> {
-        let resp = self
+        // First try to get the full result if it exists, otherwise get the lite version -- Callers
+        // that require the full version must use get_full() instead, to utilize the fallback logic
+        // which generates the Full version from this Lite one
+
+        let full_resp = self
             .value_store
-            .get(PointEvaluationResultProvider::key(result_id))?;
+            .get(PointEvaluationResultProvider::key(result_id, PointEvaluationOutcomeType::Full));
+
+        let final_response = if let Err(AssetErr::AssetNotFound(_)) = full_resp {
+            self.value_store
+              .get(PointEvaluationResultProvider::key(result_id, PointEvaluationOutcomeType::Lite))
+        } else {
+            full_resp
+        };
+
         wincode::config::deserialize::<PointEvaluationOutcome, _>(
-            &resp,
+            &final_response?,
             wincode::config::Configuration::default().disable_preallocation_size_limit(),
         )
         .map_err(|e| {
@@ -277,7 +289,7 @@ mod tests {
         p.put(&make_lite_outcome(id)).unwrap();
         assert_eq!(
             captured.lock().unwrap().as_deref(),
-            Some(format!("PointEvaluationResult/{id}").as_str()),
+            Some(format!("PointEvaluationResult/{id}/Lite").as_str()),
         );
     }
 

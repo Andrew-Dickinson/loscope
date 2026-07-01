@@ -18,6 +18,8 @@ use rocket::serde::{Deserialize};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::Path;
+use derive_more::Display;
+use strum_macros::EnumDiscriminants;
 use typed_floats::tf64::PositiveFinite;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
@@ -88,7 +90,9 @@ pub struct PointEvaluationOutcomeLite {
 }
 
 
-#[derive(Serialize, Deserialize, SchemaWrite, SchemaRead)]
+#[derive(Serialize, Deserialize, SchemaWrite, SchemaRead, EnumDiscriminants)]
+#[strum_discriminants(name(PointEvaluationOutcomeType))]
+#[strum_discriminants(derive(Display))]
 pub enum PointEvaluationOutcome {
     Full(Box<PointEvaluationOutcomeFull>),
     Lite(PointEvaluationOutcomeLite),
