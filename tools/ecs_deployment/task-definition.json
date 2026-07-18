@@ -19,12 +19,50 @@
     ],
     "containerDefinitions": [
         {
+            "name": "frontend",
+            "image": "${AWS_ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/loscope-frontend:latest",
+            "cpu": 256,
+            "memory": 512,
+            "memoryReservation": 256,
+            "portMappings": [
+                {
+                    "containerPort": 80,
+                    "hostPort": 80,
+                    "protocol": "tcp",
+                    "name": "loscope-frontend-80-tcp",
+                    "appProtocol": "http"
+                }
+            ],
+            "essential": true,
+            "links": ["backend:backend"],
+            "dependsOn": [
+                {
+                    "containerName": "backend",
+                    "condition": "HEALTHY"
+                }
+            ],
+            "environment": [],
+            "mountPoints": [],
+            "volumesFrom": [],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/loscope",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "frontend"
+                },
+                "secretOptions": []
+            },
+            "systemControls": []
+        },
+        {
             "name": "redis",
             "image": "redis:8-alpine",
-            "command": ["redis-server", "--maxmemory", "300mb", "--maxmemory-policy", "allkeys-lrm"],
+            "command": ["redis-server", "--maxmemory", "700mb", "--maxmemory-policy", "allkeys-lrm"],
             "cpu": 128,
-            "memory": 512,
-            "memoryReservation": 368,
+            "memory": 1280,
+            "memoryReservation": 1024,
             "portMappings": [],
             "essential": true,
             "environment": [],
@@ -54,15 +92,7 @@
             "cpu": 512,
             "memory": 1024,
             "memoryReservation": 512,
-            "portMappings": [
-                {
-                    "containerPort": 8000,
-                    "hostPort": 8000,
-                    "protocol": "tcp",
-                    "name": "loscope-backend-8000-tcp",
-                    "appProtocol": "http"
-                }
-            ],
+            "portMappings": [],
             "essential": true,
             "links": ["redis:redis"],
             "dependsOn": [
@@ -109,44 +139,6 @@
                     "awslogs-create-group": "true",
                     "awslogs-region": "us-east-1",
                     "awslogs-stream-prefix": "backend"
-                },
-                "secretOptions": []
-            },
-            "systemControls": []
-        },
-        {
-            "name": "frontend",
-            "image": "${AWS_ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/loscope-frontend:latest",
-            "cpu": 256,
-            "memory": 512,
-            "memoryReservation": 256,
-            "portMappings": [
-                {
-                    "containerPort": 80,
-                    "hostPort": 80,
-                    "protocol": "tcp",
-                    "name": "loscope-frontend-80-tcp",
-                    "appProtocol": "http"
-                }
-            ],
-            "essential": true,
-            "links": ["backend:backend"],
-            "dependsOn": [
-                {
-                    "containerName": "backend",
-                    "condition": "HEALTHY"
-                }
-            ],
-            "environment": [],
-            "mountPoints": [],
-            "volumesFrom": [],
-            "logConfiguration": {
-                "logDriver": "awslogs",
-                "options": {
-                    "awslogs-group": "/ecs/loscope",
-                    "awslogs-create-group": "true",
-                    "awslogs-region": "us-east-1",
-                    "awslogs-stream-prefix": "frontend"
                 },
                 "secretOptions": []
             },
