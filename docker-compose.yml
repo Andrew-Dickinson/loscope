@@ -53,7 +53,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     command: redis-server --maxmemory 700mb --maxmemory-policy allkeys-lrm
     ports:
       - "6379:6379"

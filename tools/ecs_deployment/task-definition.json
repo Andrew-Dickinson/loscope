@@ -20,7 +20,7 @@
     "containerDefinitions": [
         {
             "name": "redis",
-            "image": "redis:7-alpine",
+            "image": "redis:8-alpine",
             "command": ["redis-server", "--maxmemory", "300mb", "--maxmemory-policy", "allkeys-lrm"],
             "cpu": 128,
             "memory": 512,
