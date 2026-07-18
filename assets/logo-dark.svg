@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 180" role="img" aria-label="LOScope">
+  <text x="24" y="130" font-family="Arial Black, Arial, Helvetica Neue, Helvetica, sans-serif" font-weight="900"
+        font-size="120" textLength="304" lengthAdjust="spacingAndGlyphs" fill="#E8ECEF">LOSc</text>
+
+  <g stroke="#E8ECEF" stroke-linecap="round" fill="none">
+    <circle cx="366" cy="98" r="26" stroke-width="7"/>
+    <line x1="366" y1="62" x2="366" y2="72" stroke-width="6"/>
+    <line x1="366" y1="124" x2="366" y2="134" stroke-width="6"/>
+    <line x1="330" y1="98" x2="340" y2="98" stroke-width="6"/>
+    <line x1="392" y1="98" x2="402" y2="98" stroke-width="6"/>
+  </g>
+
+  <text x="404" y="130" font-family="Arial Black, Arial, Helvetica Neue, Helvetica, sans-serif" font-weight="900"
+        font-size="120" textLength="152" lengthAdjust="spacingAndGlyphs" fill="#E8ECEF">pe</text>
+</svg>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ChangeEvent, FormEvent, ReactNode } from 'react'
 import BuildingLookupField from './BuildingLookupField'
 import FarEndPicker from '../FarEndPicker/FarEndPicker'
+import logo from '../../assets/logo.svg'
 
 export interface RooftopSubmitValues {
   bin_id: string
@@ -27,9 +28,9 @@ interface FormFieldValues {
 }
 
 const DEFAULT_VALUES: FormFieldValues = {
-  lat: '40.815328384719656',
-  lon: '-73.95031852433306',
-  alt_m: '88.5',
+  lat: '',
+  lon: '',
+  alt_m: '',
   frequency_ghz: '5',
   mast_offset_ft: '4',
   sample_spacing: '15',
@@ -95,8 +96,7 @@ export default function InputForm({ onSubmit }: InputFormProps) {
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h1 style={styles.title}>LOS Analyzer</h1>
-        <p style={styles.subtitle}>Line-of-sight analysis for NYC rooftop antennas</p>
+        <img src={logo} alt="LOScope" style={styles.logo} />
 
         <form onSubmit={handleSubmit} style={styles.form}>
 
@@ -309,8 +309,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'rgba(22,27,34,0.9)', border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: 10, padding: '32px 36px',
   },
-  title:    { fontSize: 22, fontWeight: 600, color: '#e6edf3', marginBottom: 6, letterSpacing: '-0.01em' },
-  subtitle: { fontSize: 13, color: '#484f58', fontFamily: 'monospace', marginBottom: 28 },
+  logo:     { height: 64, marginBottom: 28, display: 'block' },
   form:     { display: 'flex', flexDirection: 'column' },
   row:      { display: 'flex', gap: 12 },
   input: {

@@ -8,6 +8,7 @@ import TileMap from './components/TileMap/TileMap'
 import type { AnalysisOverview } from './components/TileMap/TileMap'
 import LoadingToast from './components/ui/LoadingToast'
 import type { LoadingState } from './components/ui/LoadingToast'
+import logo from './assets/logo.svg'
 
 type AppState = 'input' | 'rooftop' | 'map'
 
@@ -272,7 +273,10 @@ export default function App() {
       {appState === 'rooftop' && (
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           <TopBar
-            left={<BackButton onClick={() => { setAppState('input'); setLoading(null) }} />}
+            left={<>
+              <img src={logo} alt="LOScope" style={styles.barLogo} />
+              <BackButton onClick={() => { setAppState('input'); setLoading(null) }} />
+            </>}
             center={binId && <RooftopHUD binId={binId} label={buildingLabel} />}
             right={<Hint>Click a point to view tile map</Hint>}
           />
@@ -309,6 +313,7 @@ export default function App() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={styles.topBarFlat}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <img src={logo} alt="LOScope" style={styles.barLogo} />
               <BackButton onClick={() => { setAppState('rooftop'); setLoading(null) }} />
               {activeMap && <KmlDownloadButton analysisId={activeMap.analysisId} />}
             </div>
@@ -463,6 +468,10 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '0 14px',
     background: 'rgba(13,17,23,0.95)',
     borderBottom: '1px solid rgba(255,255,255,0.07)',
+  },
+  barLogo: {
+    height: 22,
+    display: 'block',
   },
   backBtn: {
     color: '#8b949e',
