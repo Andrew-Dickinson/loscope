@@ -18,15 +18,6 @@ LOScope (pronounced "Lo-scope") is a line-of-sight analyzer for [NYC Mesh](https
 new construction) along with user-supplied high-precision antenna placement information 
 to give high-confidence answers about whether a potential new link radio is viable.
 
-### Built With
-
-* [Rust](https://www.rust-lang.org/) / [Rocket](https://rocket.rs/)
-* [React](https://react.dev/) / [Three.js](https://threejs.org/) via [react-three-fiber](https://github.com/pmndrs/react-three-fiber)
-* [Leaflet](https://leafletjs.com/)
-* [PDAL](https://pdal.io/) / [GDAL](https://gdal.org/)
-* [Redis](https://redis.io/)
-* [Docker Compose](https://docs.docker.com/compose/)
-
 ## Screenshots
 
 <table>
@@ -149,6 +140,15 @@ resolution to work.
    docker compose up
    ```
 3. Open `http://localhost` in a browser
+
+### Built With
+
+* [Rust](https://www.rust-lang.org/) / [Rocket](https://rocket.rs/)
+* [React](https://react.dev/) / [Three.js](https://threejs.org/) via [react-three-fiber](https://github.com/pmndrs/react-three-fiber)
+* [Leaflet](https://leafletjs.com/)
+* [PDAL](https://pdal.io/) / [GDAL](https://gdal.org/)
+* [Redis](https://redis.io/)
+* [Docker Compose](https://docs.docker.com/compose/)
 
 ## Contributing
 
