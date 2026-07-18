@@ -27,6 +27,35 @@ to give high-confidence answers about whether a potential new link radio is viab
 * [Redis](https://redis.io/)
 * [Docker Compose](https://docs.docker.com/compose/)
 
+## Screenshots
+
+<table>
+<tr>
+<td width="50%">
+<img src="screenshots/Screenshot%202026-07-18%20at%204.28.25%E2%80%AFPM.png" alt="Rooftop 3D view with per-point LOS status">
+<br>
+Rooftop scan showing per-point LOS status (unobstructed / partial / obstructed) for candidate antenna positions.
+</td>
+<td width="50%">
+<img src="screenshots/Screenshot%202026-07-18%20at%204.30.31%E2%80%AFPM.png" alt="Tile map overview alongside the 3D terrain/obstruction view">
+<br>
+Tile map overview of the Fresnel zone between two points, alongside the corresponding 3D terrain/obstruction tile.
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="screenshots/Screenshot%202026-07-18%20at%204.31.30%E2%80%AFPM.png" alt="3D tile view with an obstruction's metadata panel open">
+<br>
+3D tile view with an obstruction's metadata (permit filing details, height, BIN) shown on click.
+</td>
+<td width="50%">
+<img src="screenshots/Screenshot%202026-07-18%20at%204.35.29%E2%80%AFPM.png" alt="Fresnel zone intersecting a building in the 3D tile view">
+<br>
+Fresnel zone intersecting a building rooftop in the 3D tile view.
+</td>
+</tr>
+</table>
+
 ## Architecture
 
 ### Components
