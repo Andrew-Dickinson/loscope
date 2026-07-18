@@ -1,7 +1,6 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
 
-# TODO: Test me
+set -euo pipefail
 
 usage() {
     echo "Usage: $0 <destination-path>" >&2
@@ -15,7 +14,5 @@ fi
 
 DESTINATION_PATH=$1
 
-scp -r ../data/preprocessed-lidar-tiles/ "${DESTINATION_PATH}/preprocessed-lidar-tiles/"
-scp -r ../data/orthos/ "${DESTINATION_PATH}/ortho-photos/"
-
-./incremental-upload-scp.sh $DESTINATION_PATH
+scp -r ../data/footprint-wkt/ "${DESTINATION_PATH}/building-footprints/"
+scp -r ../data/obstructions/ "${DESTINATION_PATH}/simulated-obstructions/"

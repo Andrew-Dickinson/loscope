@@ -29,20 +29,13 @@ rm -rf ../data/orthos/zipped/
 mv ../data/orthos/flat/* ../data/orthos/
 rmdir ../data/orthos/flat/
 
-echo "#### Downloading city data..."
-loscope-preprocessing download-city-data --output ../data/input-csvs
+./incremental-download.sh
 
 echo "#### Downloading planimetrics data..."
 loscope-preprocessing download-planimetrics --output ../data/planimetrics \
  --layer misc-structure-poly
 loscope-preprocessing download-planimetrics --output ../data/planimetrics \
  --layer hydro-structure
-
-echo "#### Downloading monolithic dem file..."
-mkdir -p ../data/dem-raw/unpacked
-wget --no-verbose https://sa-static-customer-assets-us-east-1-fedramp-prod.s3.amazonaws.com/data.cityofnewyork.us/NYC_DEM_1ft_Float_2.zip \
-      -O ../data/dem-raw/NYC_DEM_1ft_Float_2.zip
-unzip ../data/dem-raw/NYC_DEM_1ft_Float_2.zip -d ../data/dem-raw/unpacked
 
 echo "#### Downloading OSM land boundaries polygon..."
 mkdir -p ../data/osm/land-polygons/

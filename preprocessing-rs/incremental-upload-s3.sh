@@ -1,5 +1,6 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+
+set -exuo pipefail
 
 usage() {
     echo "Usage: $0 <destination-bucket> <destination-prefix>" >&2
@@ -22,7 +23,5 @@ aws configure set default.s3.max_queue_size 10000
 aws configure set default.s3.multipart_threshold 64MB
 aws configure set default.s3.multipart_chunksize 16MB
 
-aws s3 cp --recursive --cli-read-timeout 0 ../data/preprocessed-lidar-tiles/ "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/preprocessed-lidar-tiles/"
-aws s3 cp --recursive --cli-read-timeout 0 ../data/orthos/                   "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/ortho-photos/"
-
-./incremental-upload-s3.sh $DESTINATION_BUCKET $DESTINATION_PREFIX
+aws s3 cp --recursive --cli-read-timeout 0 ../data/footprint-wkt/            "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/building-footprints/"
+aws s3 cp --recursive --cli-read-timeout 0 ../data/obstructions/             "s3://${DESTINATION_BUCKET}/${DESTINATION_PREFIX}/simulated-obstructions/"

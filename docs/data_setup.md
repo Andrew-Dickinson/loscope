@@ -297,6 +297,50 @@ This should run for ~10 hours, and when it's completed, the specified S3 bucket 
 artifacts. You can follow along with the progress by viewing the `/ecs/loscope-preprocessing` log group in the
 CloudWatch console.
 
+### Incremental Preprocessing
+
+Most of the data handled by this application does not change very quickly. For example, Lidar surveys are typically 
+only performed once or twice a decade. However, some data, such as building permits, changes quite frequently. To
+allow updating only the high-change-frequency data the preprocessing scripts support an incremental mode, which only
+updates the obstruction files, without needing to reprocess all the lidar tiles, etc
+
+To perform incremental preprocessing, the steps are the same as above, except change the task inputs file to include
+the argument `incremental` in the input CLI args:
+
+```
+  "containerOverrides": [                                                                                                                                                            
+      {                                                                                                                                                                              
+          "name": "loscope-preprocessing",                                                                                                                                           
+          "command": ["incremental"],                                                                                                                                                
+          "environment": [...]                                                                                                                                                       
+      }                                                                                                                                                                              
+  ]
+```
+
+Incremental preprocessing needs less storage than a full preprocessing run, but still requires ~200GB of free disk
+space, because it needs to pull down the full city DEM to have precise ground elevation data. You probably want to 
+adjust the volume size down too:
+```
+    "volumeConfigurations": [
+        {
+            "name": "working-storage",
+            "managedEBSVolume": {
+                "roleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ECSServiceRoleForVolumes",
+                "volumeType": "gp3",
+                "sizeInGiB": 200,
+                "iops": 3000,
+                "throughput": 400,
+                "filesystemType": "xfs",
+                "encrypted": false,
+                "terminationPolicy": {"deleteOnTermination": true}
+            }
+        }
+    ]
+```
+
+You may also want to change the value of `OUTPUT_S3_PREFIX`, so that it doesn't collide with the original preprocessing
+run. 
+
 ### Cleanup
 There is an ongoing cost associated with storing the generated artifacts in S3 (approximately $2.30 / month plus 
 $0.40 per million HTTP GET requests). We assume you don't want to clean this up since you just spent a bunch of effort
