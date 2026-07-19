@@ -6,7 +6,7 @@
  */
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
 import { Canvas, useLoader, useThree } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls, Html, useProgress } from '@react-three/drei'
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import type { ThreeEvent } from '@react-three/fiber'
@@ -212,6 +212,20 @@ function CameraChangeTracker({ defaultCamRef, onCameraChange }: {
   return null
 }
 
+// ── Suspense loading fallback (shown while the building OBJ streams in) ───────
+function SceneLoadingFallback() {
+  const { progress } = useProgress()
+  return (
+    <Html center>
+      <style>{`@keyframes farend-spin { to { transform: rotate(360deg); } }`}</style>
+      <div style={st.loadingFallback}>
+        <span style={st.loadingSpinner} />
+        <span>Loading building{progress > 0 ? ` — ${Math.round(progress)}%` : '…'}</span>
+      </div>
+    </Html>
+  )
+}
+
 // ── Scene ─────────────────────────────────────────────────────────────────────
 
 function Scene({ binId, pendingWorldPos, onTerrainClick, buildingOffset, defaultCamRef, resetCamFnRef, onCameraChange }: {
@@ -289,7 +303,7 @@ function Scene({ binId, pendingWorldPos, onTerrainClick, buildingOffset, default
       <directionalLight position={[1, 3, 2]} intensity={1.8} color={0xffeedd} />
       <directionalLight position={[-2, 2, -3]} intensity={0.5} color={0xddeeff} />
       <CameraChangeTracker defaultCamRef={defaultCamRef} onCameraChange={onCameraChange} />
-      <Suspense fallback={null}>
+      <Suspense fallback={<SceneLoadingFallback />}>
         <BackgroundTiles binId={binId} buildingOffset={buildingOffset} />
         <TerrainMesh objUrl={objUrl} onPlacementClick={onTerrainClick} onLoaded={handleLoaded} />
         {pendingWorldPos && (
@@ -391,6 +405,29 @@ export default function FarEndPicker({ binId, label, onConfirm, onCancel }: FarE
 
 const BAR_H = 42
 const st: Record<string, React.CSSProperties> = {
+  loadingFallback: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    whiteSpace: 'nowrap',
+    fontSize: 13,
+    fontFamily: 'monospace',
+    color: '#8b949e',
+    background: 'rgba(0,0,0,0.65)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: 6,
+    padding: '8px 14px',
+  },
+  loadingSpinner: {
+    display: 'inline-block',
+    width: 13,
+    height: 13,
+    borderRadius: '50%',
+    border: '2px solid rgba(255,255,255,0.15)',
+    borderTopColor: '#4d9fff',
+    animation: 'farend-spin 0.7s linear infinite',
+    flexShrink: 0,
+  },
   overlay: {
     position: 'fixed', inset: 0, zIndex: 200,
     display: 'flex', flexDirection: 'column',

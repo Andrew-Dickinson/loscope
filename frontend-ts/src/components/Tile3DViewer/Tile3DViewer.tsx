@@ -742,9 +742,15 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
   if (tileData === 'loading' || tileData === null) {
     return (
       <div style={styles.placeholder}>
-        <span style={{ color: '#484f58', fontFamily: 'monospace', fontSize: 12 }}>
+        <style>{`@keyframes tile3d-load-spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#484f58', fontFamily: 'monospace', fontSize: 12 }}>
+          <span style={{
+            display: 'inline-block', width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
+            border: '2px solid rgba(255,255,255,0.1)', borderTopColor: '#8b949e',
+            animation: 'tile3d-load-spin 0.7s linear infinite',
+          }} />
           Loading tile data…
-        </span>
+        </div>
       </div>
     )
   }

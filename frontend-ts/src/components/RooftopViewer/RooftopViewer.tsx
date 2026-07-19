@@ -8,7 +8,7 @@
  */
 import { useRef, useMemo, useEffect, useState, Suspense, useCallback } from 'react'
 import { Canvas, useLoader, useThree, useFrame } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls, Html, useProgress } from '@react-three/drei'
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { buildVoronoiMaterial } from './VoronoiMaterial'
@@ -417,6 +417,20 @@ function SphereGroup({ idxs, samplePoints, analyses, dummy, placementMode, onPoi
         }}
       />
     </>
+  )
+}
+
+// ── Suspense loading fallback (shown while the building OBJ streams in) ───────
+function SceneLoadingFallback() {
+  const { progress } = useProgress()
+  return (
+    <Html center>
+      <style>{`@keyframes rooftop-spin { to { transform: rotate(360deg); } }`}</style>
+      <div style={styles.loadingFallback}>
+        <span style={styles.loadingSpinner} />
+        <span>Loading building{progress > 0 ? ` — ${Math.round(progress)}%` : '…'}</span>
+      </div>
+    </Html>
   )
 }
 
@@ -872,7 +886,7 @@ function Scene({ binId, samplePoints, analyses, cameraStateRef, defaultCamRef, r
       <ambientLight intensity={0.6} />
       <directionalLight position={[1, 3, 2]} intensity={1.0} color={0xffeedd} />
       <CameraSync binId={binId} stateRef={cameraStateRef} defaultCamRef={defaultCamRef} onCameraChange={onCameraChange} />
-      <Suspense fallback={null}>
+      <Suspense fallback={<SceneLoadingFallback />}>
         <BackgroundTiles binId={binId} buildingOffset={buildingOffset} />
         <TerrainMesh
           objUrl={objUrl}
@@ -1023,6 +1037,29 @@ function LegendRow({ color, label }: { color: string; label: string }) {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  loadingFallback: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    whiteSpace: 'nowrap',
+    fontSize: 13,
+    fontFamily: 'monospace',
+    color: '#8b949e',
+    background: 'rgba(0,0,0,0.65)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: 6,
+    padding: '8px 14px',
+  },
+  loadingSpinner: {
+    display: 'inline-block',
+    width: 13,
+    height: 13,
+    borderRadius: '50%',
+    border: '2px solid rgba(255,255,255,0.15)',
+    borderTopColor: '#4d9fff',
+    animation: 'rooftop-spin 0.7s linear infinite',
+    flexShrink: 0,
+  },
   resetCamBtn: {
     position: 'absolute',
     top: 14,

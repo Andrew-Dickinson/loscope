@@ -28,6 +28,7 @@ export default function BuildingLookupField({ disabled, onBinResolved, onBinClea
   const [suggestions, setSuggestions]       = useState<GeoFeature[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [binFromAddress, setBinFromAddress] = useState<string | null>(null)
+  const [addressLoading, setAddressLoading] = useState(false)
 
   const [nnQuery, setNnQuery]       = useState('')
   const [nnResolved, setNnResolved] = useState<{ bin: string; kind: 'nn' | 'install' } | null>(null)
@@ -64,7 +65,8 @@ export default function BuildingLookupField({ disabled, onBinResolved, onBinClea
     setAddressQuery(query)
     if (binFromAddress) { setBinFromAddress(null); onBinCleared() }
     if (addressDebounce.current) clearTimeout(addressDebounce.current)
-    if (query.length < 3) { setSuggestions([]); setShowSuggestions(false); return }
+    if (query.length < 3) { setSuggestions([]); setShowSuggestions(false); setAddressLoading(false); return }
+    setAddressLoading(true)
     addressDebounce.current = setTimeout(async () => {
       try {
         const res  = await fetch(`https://geosearch.planninglabs.nyc/v2/autocomplete?text=${encodeURIComponent(query)}`)
@@ -75,6 +77,7 @@ export default function BuildingLookupField({ disabled, onBinResolved, onBinClea
         setSuggestions(features)
         setShowSuggestions(features.length > 0)
       } catch { /* ignore */ }
+      finally { setAddressLoading(false) }
     }, 250)
   }
 
@@ -162,6 +165,9 @@ export default function BuildingLookupField({ disabled, onBinResolved, onBinClea
               </div>
             )}
           </div>
+          {addressLoading && !showSuggestions && (
+            <div style={s.resolvedBadge}>Searching…</div>
+          )}
           {binFromAddress && (
             <div style={s.resolvedBadge}>
               BIN <span style={s.resolvedValue}>{binFromAddress}</span>
