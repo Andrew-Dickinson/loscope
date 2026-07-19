@@ -52,5 +52,6 @@ WORKDIR /app
 COPY preprocessing-rs/*.sh .
 COPY preprocessing-rs/queries ./queries
 COPY preprocessing-rs/pdal-config ./pdal-config
+COPY bundled_geo_data /bundled_geo_data
 
 ENTRYPOINT ["./entrypoint.sh"]
