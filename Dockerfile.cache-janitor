@@ -3,7 +3,9 @@ FROM alpine:3.20
 ENV SCAN_INTERVAL_MINUTES=60
 ENV MAX_AGE_HOURS=24
 
-CMD sh -c 'while true; do \
+CMD sh -c 'echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Clearing /cache/ObstructionIndex on startup..."; \
+  rm -rf /cache/ObstructionIndex; \
+  while true; do \
   echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Scanning /cache for files older than ${MAX_AGE_HOURS}h..."; \
   deleted=$(find /cache -type f -mmin +$((MAX_AGE_HOURS * 60)) -print -delete); \
   if [ -n "$deleted" ]; then \
