@@ -14,6 +14,7 @@ use loscope::endpoints::tileview::{
 };
 use loscope::providers::Providers;
 use loscope::util::coord_conversion::{CoordinateConverter, init_coord_converter_factory};
+use loscope::util::memory_profiler;
 
 #[rocket::get("/healthcheck")]
 fn health_check() -> &'static str {
@@ -23,9 +24,11 @@ fn health_check() -> &'static str {
 #[rocket::launch]
 async fn rocket() -> _ {
     init_coord_converter_factory(CoordinateConverter::new);
+    let memory_budget = MemoryBudget::new_from_env();
+    memory_profiler::start_if_configured(memory_budget.clone());
     rocket::build()
         .manage(Providers::new_from_env().await.unwrap())
-        .manage(MemoryBudget::new_from_env())
+        .manage(memory_budget)
         .mount("/api", rocket::routes![health_check])
         .mount(
             "/api/rooftop",

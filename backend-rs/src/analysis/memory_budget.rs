@@ -19,7 +19,12 @@ const DEFAULT_MAX_ANALYSIS_MEMORY_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
 /// reservation to outlive the handler function itself — it has to stay alive until the response
 /// stream finishes — and Rocket's stream types can't capture a borrow of `&State<MemoryBudget>`
 /// into that opaque future. An owned `Arc` clone sidesteps the borrow entirely.
-#[derive(Debug)]
+///
+/// That same `Arc` is what makes `MemoryBudget` itself cheap to `Clone` (both fields are: `u64`
+/// is `Copy`, `Arc<AtomicU64>` is a refcount bump) — used by `util::memory_profiler` to hold an
+/// independent handle to the live counter from a background sampling thread, outside of any
+/// request's `&State<MemoryBudget>` borrow.
+#[derive(Debug, Clone)]
 pub struct MemoryBudget {
     limit_bytes: u64,
     reserved_bytes: Arc<AtomicU64>,
@@ -90,6 +95,20 @@ impl MemoryBudget {
         Self { limit_bytes, reserved_bytes: Arc::new(AtomicU64::new(0)) }
     }
 
+    /// A snapshot of currently-reserved bytes across all in-flight requests. Read-only — this
+    /// doesn't reserve or release anything, just observes the live counter. Intended for
+    /// diagnostics/profiling (see `util::memory_profiler`), not for admission decisions (those go
+    /// through `try_reserve`, which needs the compare-and-swap to be race-free).
+    pub fn reserved_bytes(&self) -> u64 {
+        self.reserved_bytes.load(Ordering::SeqCst)
+    }
+
+    /// The configured ceiling `try_reserve` admits requests against. Exposed for the same
+    /// diagnostics/profiling purposes as `reserved_bytes`.
+    pub fn limit_bytes(&self) -> u64 {
+        self.limit_bytes
+    }
+
     pub fn try_reserve(&self, estimate_bytes: u64) -> Result<Reservation, ReservationErr> {
         if estimate_bytes > self.limit_bytes {
             return Err(ReservationErr::ExceedsLimit { estimate_bytes, limit_bytes: self.limit_bytes });
@@ -124,6 +143,26 @@ mod tests {
             assert_eq!(budget.reserved_bytes.load(Ordering::SeqCst), 400);
         }
         assert_eq!(budget.reserved_bytes.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn reserved_bytes_and_limit_bytes_are_observable() {
+        let budget = MemoryBudget::new(1000);
+        assert_eq!(budget.limit_bytes(), 1000);
+        assert_eq!(budget.reserved_bytes(), 0);
+        let _r = budget.try_reserve(400).unwrap();
+        assert_eq!(budget.reserved_bytes(), 400);
+    }
+
+    #[test]
+    fn cloned_budget_shares_the_same_underlying_counter() {
+        let budget = MemoryBudget::new(1000);
+        let clone = budget.clone();
+        let _r = budget.try_reserve(400).unwrap();
+        // The clone observes reservations made through the original, and vice versa -- they
+        // share the same Arc<AtomicU64>, which is exactly what lets a background profiler thread
+        // hold an independent handle to the live counter.
+        assert_eq!(clone.reserved_bytes(), 400);
     }
 
     #[test]

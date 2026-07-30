@@ -51,6 +51,10 @@ bytes = "1.11.1"
 renamore = "0.3.2"
 rslock = "~0.7.2"
 tempfile = "3.27.0"
+# default-features off + "system" only: we just need current-process RSS (util::memory_profiler),
+# not sysinfo's disk/network/gpu/component/user querying -- keeps the transitive dependency
+# footprint (and binary size) down.
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 
 [build-dependencies]
 progenitor = "0.14.0"
