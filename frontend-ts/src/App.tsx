@@ -112,9 +112,25 @@ function backoffDelayMs(attempt: number, retryAfterMs?: number): number {
   return retryAfterMs !== undefined ? Math.max(retryAfterMs, jittered) : jittered
 }
 
+// Sleeps in short increments so an abort can interrupt a long backoff wait (up to 30s) almost
+// immediately, instead of the caller having to wait out the full delay before noticing.
+const ABORT_POLL_MS = 100
+async function sleepAbortable(ms: number, isAborted: () => boolean): Promise<void> {
+  let waited = 0
+  while (waited < ms) {
+    if (isAborted()) return
+    const step = Math.min(ABORT_POLL_MS, ms - waited)
+    await new Promise(resolve => setTimeout(resolve, step))
+    waited += step
+  }
+}
+
 // Wraps analyzePoint with exponential-backoff retry for throttled (retryable) failures, e.g.
 // the server rejecting a request because it doesn't currently have enough memory headroom.
-// Permanent failures (bad input, link too long to ever fit) are thrown immediately.
+// Permanent failures (bad input, link too long to ever fit) are thrown immediately. Checks
+// isAborted() before every attempt and during backoff waits so cancellation (the "Stop" button,
+// or navigating away) takes effect within ABORT_POLL_MS rather than after the current attempt's
+// full backoff delay elapses.
 async function analyzePointWithRetry(
   pt: BackendSamplePoint,
   nysB: [number, number, number],
@@ -122,12 +138,13 @@ async function analyzePointWithRetry(
   isAborted: () => boolean,
 ): Promise<PointAnalysis> {
   for (let attempt = 0; ; attempt++) {
+    if (isAborted()) throw new AnalysisError('Aborted', false)
     try {
       return await analyzePoint(pt, nysB, freqGhz)
     } catch (err) {
       if (isAborted()) throw err
       if (!(err instanceof AnalysisError) || !err.retryable || attempt >= MAX_ANALYSIS_RETRIES) throw err
-      await new Promise(resolve => setTimeout(resolve, backoffDelayMs(attempt, err.retryAfterMs)))
+      await sleepAbortable(backoffDelayMs(attempt, err.retryAfterMs), isAborted)
     }
   }
 }
@@ -177,6 +194,16 @@ export default function App() {
   // Abort ref — set to true to stop the analysis loop between requests
   const abortRef = useRef(false)
   const [analyzing, setAnalyzing] = useState(false)
+
+  // Stops any in-flight bulk analysis. Must be called both from the explicit "Stop" button and
+  // from any navigation away from the rooftop view — otherwise the analysis loop (and its
+  // still-pending handleSubmit promise, which InputForm's submit button stays disabled until it
+  // resolves) keeps running invisibly in the background after the user navigates away.
+  const cancelAnalysis = useCallback(() => {
+    abortRef.current = true
+    setAnalyzing(false)
+    setLoading(null)
+  }, [])
 
   // Persists rooftop camera across map view navigation
   const rooftopCameraRef = useRef<RooftopCameraState | null>(null)
@@ -307,7 +334,7 @@ export default function App() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <LoadingToast
         loading={loading}
-        onAbort={analyzing ? () => { abortRef.current = true; setAnalyzing(false); setLoading(null) } : undefined}
+        onAbort={analyzing ? cancelAnalysis : undefined}
       />
 
       <div style={{ display: appState === 'input' ? 'flex' : 'none', flex: 1 }}>
@@ -319,7 +346,7 @@ export default function App() {
           <TopBar
             left={<>
               <img src={logo} alt="LOScope" style={styles.barLogo} />
-              <BackButton onClick={() => { setAppState('input'); setLoading(null) }} />
+              <BackButton onClick={() => { cancelAnalysis(); setAppState('input') }} />
             </>}
             center={binId && <RooftopHUD binId={binId} label={buildingLabel} />}
             right={<Hint>Click a point to view tile map</Hint>}
