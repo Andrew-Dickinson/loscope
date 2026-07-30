@@ -16,6 +16,11 @@ services:
       MESHDB_API_TOKEN: ${MESHDB_API_TOKEN}
       AWS_PROFILE: ${AWS_PROFILE}
       REDIS_URL: redis://redis:6379
+      # Ceiling on estimated in-flight analysis memory before requests get throttled (503 +
+      # Retry-After). Kept well under the container's hard memory limit below to leave headroom
+      # for the process baseline, asset caches, and other memory-heavy endpoints (rooftop,
+      # tileview) that this budget doesn't cover. Keep this aligned with `limits.memory` below.
+      LOS_MAX_ANALYSIS_MEMORY_BYTES: "536870912" # 512m
     volumes:
       - ~/.aws:/root/.aws
       - asset-cache:/cache

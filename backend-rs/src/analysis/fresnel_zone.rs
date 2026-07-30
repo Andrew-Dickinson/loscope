@@ -160,6 +160,44 @@ fn sample_conic<I: Iterator<Item = f64>>(
     })
 }
 
+/// Computes just the (rows, max_width) that `compute_fresnel_zone` would allocate for its
+/// `values` array, without building any arrays. This lets callers estimate the memory cost of
+/// an analysis before running it. Must be kept in sync with `compute_fresnel_zone` — the
+/// `fresnel_zone_dims_matches_compute_fresnel_zone` test below is a tripwire against drift.
+/// Semi-major/semi-minor axis lengths (usft) of the Fresnel ellipsoid for a link of this
+/// distance/frequency/alpha, without building any matrices or arrays. Exposed so pre-flight
+/// memory estimation can get a cheap worst-case cross-section width for the zone.
+pub fn fresnel_semi_axes(dist: f64, freq_hz: f64, alpha: f64) -> (f64, f64) {
+    let (_, semi_major, semi_minor) = construct_fresnel_quadratic(dist, freq_hz, alpha);
+    (semi_major, semi_minor)
+}
+
+pub fn fresnel_zone_dims(point_evaluation_input: &PointEvaluationInput, alpha: f64) -> (usize, usize) {
+    let pa: (f64, f64, f64) = point_evaluation_input.point_a().into();
+    let mut pb: (f64, f64, f64) = point_evaluation_input.point_b().into();
+    let mut delta = (pb.0 - pa.0, pb.1 - pa.1, pb.2 - pa.2);
+
+    if delta.0 == 0.0 {
+        pb.0 += 0.1;
+        delta.0 = 0.1;
+    }
+
+    let dist = (delta.0 * delta.0 + delta.1 * delta.1 + delta.2 * delta.2).sqrt();
+    let mid_y = (pa.1 + pb.1) / 2.0;
+
+    let ctx = AngleContext::from_delta(delta);
+    let (_, semi_major, semi_minor) =
+        construct_fresnel_quadratic(dist, *point_evaluation_input.frequency_hz(), alpha);
+
+    let max_t =
+        ((semi_minor * ctx.sin_omega).powi(2) + (semi_major * ctx.cos_omega).powi(2)).sqrt();
+    let y_vals = integer_grid(mid_y - max_t, mid_y + max_t);
+    let output_height = usize::try_from(y_vals.end() - y_vals.start() + 1).unwrap_or(0);
+    let max_width = (2.0 * semi_minor / ctx.sin_theta).ceil().abs() as usize + 1;
+
+    (output_height, max_width)
+}
+
 pub fn compute_fresnel_zone(
     point_evaluation_input: &PointEvaluationInput,
     alpha: f64,
@@ -299,6 +337,8 @@ pub fn compute_fresnel_zone(
 mod tests {
     use super::*;
     use crate::analysis::point_evaluation::PointEvaluationInput;
+    const ALPHA_ZONE_FULL: f64 = 1.0;
+    const ALPHA_ZONE_INNER: f64 = 0.6;
     use crate::types::coords::{GPSCoords3, NYSCoords3};
     use crate::types::obstructions::ObstructionTypesFilter;
     use crate::util::coord_conversion::CoordinateConverter;
@@ -559,6 +599,78 @@ mod tests {
             24_000_000_000.0,
         );
         let _zone: FresnelZone = compute_fresnel_zone(&input, 1.0);
+    }
+
+    #[test]
+
+    fn fresnel_zone_dims_matches_compute_fresnel_zone() {
+        // Deliberately excludes long-distance/low-frequency inputs: those are the OOM-prone
+        // case this whole module exists to catch, and compute_fresnel_zone will actually try
+        // to allocate & fill a multi-gigabyte array for them. fresnel_zone_dims must stay cheap
+        // for exactly those inputs — see fresnel_zone_dims_grows_with_distance_and_shrinks_with_frequency
+        // below, which checks the same growth behavior without ever calling compute_fresnel_zone.
+        let cases = [
+            make_input(
+                gps_to_nys(40.650, -73.800, 100.0),
+                gps_to_nys(40.7173, -74.0060, 10000.0),
+                5_000_000_000.0,
+            ),
+            make_input(
+                gps_to_nys(40.650, -73.979, 100.0),
+                gps_to_nys(40.7173, -74.0060, 100.0),
+                2_400_000_000.0,
+            ),
+            make_input(
+                gps_to_nys(40.650, -73.800, 100.0),
+                gps_to_nys(40.650, -74.000, 100.0),
+                5_000_000_000.0,
+            ),
+            make_input(
+                gps_to_nys(40.650, -73.800, 100.0),
+                gps_to_nys(40.8, -73.800, 100.0),
+                5_000_000_000.0,
+            ),
+        ];
+
+        for alpha in [ALPHA_ZONE_FULL, ALPHA_ZONE_INNER] {
+            for input in &cases {
+                let (rows, cols) = fresnel_zone_dims(input, alpha);
+                let zone = compute_fresnel_zone(input, alpha);
+                assert_eq!(rows, zone.values().nrows(), "row mismatch at alpha={alpha}");
+                assert_eq!(cols, zone.values().ncols(), "col mismatch at alpha={alpha}");
+            }
+        }
+    }
+
+    #[test]
+    fn fresnel_zone_dims_grows_with_distance_and_shrinks_with_frequency() {
+        let short = make_input(
+            gps_to_nys(40.700, -73.960, 30.0),
+            gps_to_nys(40.705, -73.950, 30.0),
+            5_000_000_000.0,
+        );
+        let long = make_input(
+            gps_to_nys(40.500, -74.200, 200.0),
+            gps_to_nys(41.200, -73.200, 200.0),
+            5_000_000_000.0,
+        );
+        let long_low_freq = make_input(
+            gps_to_nys(40.500, -74.200, 200.0),
+            gps_to_nys(41.200, -73.200, 200.0),
+            1_000_000.0,
+        );
+
+        let (short_rows, short_cols) = fresnel_zone_dims(&short, ALPHA_ZONE_FULL);
+        let (long_rows, long_cols) = fresnel_zone_dims(&long, ALPHA_ZONE_FULL);
+        let (llf_rows, llf_cols) = fresnel_zone_dims(&long_low_freq, ALPHA_ZONE_FULL);
+
+        assert!(long_rows * long_cols > short_rows * short_cols);
+        // Lowering frequency (raising wavelength) grows semi_minor, which widens the ellipse
+        // cross-section (cols) substantially. Rows are dominated by distance (via semi_major)
+        // but aren't fully independent of semi_minor — max_t mixes both semi axes through
+        // sin_omega/cos_omega — so rows may shift slightly too; cols must dominate the change.
+        assert!(llf_cols > long_cols);
+        assert!(llf_cols - long_cols > (llf_rows as i64 - long_rows as i64).unsigned_abs() as usize);
     }
 
     #[test]

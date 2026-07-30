@@ -1,7 +1,10 @@
 use std::collections::HashSet;
+use crate::analysis::memory_budget::MemoryBudget;
+use crate::analysis::memory_estimate::{elevation_tile_endpoint_bytes, estimate_heightmap_bytes};
 use crate::building::background_tiles::zero_footprint_pixels;
 use crate::building::bin_id::BINId;
-use crate::building::heightmap::{RooftopHeightMapFactory, get_intersecting_tiles};
+use crate::building::heightmap::{RooftopHeightMapFactory, get_intersecting_tiles, heightmap_pixel_dims};
+use crate::endpoints::api_error::ApiError;
 use crate::providers::Providers;
 use crate::sample_points::point::SamplePoints;
 use crate::sample_points::sample_grid::sample_points_for_rooftop;
@@ -22,10 +25,22 @@ const BACKGROUND_TILE_BUFFER_ZONE_USFT: f64 = 250.0;
 pub async fn render_rooftop(
     bin_id: &str,
     providers: &State<Providers>,
-) -> Result<(ContentType, TextStream![String]), Status> {
+    memory_budget: &State<MemoryBudget>,
+) -> Result<(ContentType, TextStream![String]), ApiError> {
     let Ok(bin_id) = BINId::parse(bin_id) else {
-        return Err(Status::BadRequest);
+        return Err(Status::BadRequest.into());
     };
+
+    // Fetch the (WKT of the) footprint up front (cheap — cached) so we can size-check before
+    // the heavy heightmap allocation. The factory below re-fetches it, which hits the same cache.
+    let footprint = providers.footprint_provider().get_footprint(bin_id).await?;
+    let (_, poly_bounds) = get_intersecting_tiles(&footprint)?;
+    let (w, h) = heightmap_pixel_dims(&poly_bounds);
+
+    // Held until the response stream (which owns the heightmap data) finishes, not just until
+    // this handler returns — released early would let the budget think this memory is free
+    // while it's still resident and being streamed to the client.
+    let reservation = memory_budget.try_reserve(estimate_heightmap_bytes(w, h))?;
 
     let factory = RooftopHeightMapFactory::new(
         providers.footprint_provider().as_ref(),
@@ -37,6 +52,7 @@ pub async fn render_rooftop(
     })?;
 
     let obj_stream = TextStream! {
+        let _reservation = reservation;
         let mut stream = std::pin::pin!(heightmap.to_rooftop_obj_stream());
         while let Some(chunk) = stream.next().await {
             yield chunk;
@@ -57,17 +73,25 @@ pub async fn sample_points(
     bin_id: &str,
     sample_config: Json<SampleConfig>,
     providers: &State<Providers>,
-) -> Result<Json<SamplePoints>, Status> {
+    memory_budget: &State<MemoryBudget>,
+) -> Result<Json<SamplePoints>, ApiError> {
     let Ok(bin_id) = BINId::parse(bin_id) else {
-        return Err(Status::BadRequest);
+        return Err(Status::BadRequest.into());
     };
 
     if sample_config
         .sample_spacing
         .is_some_and(|spacing| spacing < 1.0)
     {
-        return Err(Status::BadRequest);
+        return Err(Status::BadRequest.into());
     }
+
+    let footprint = providers.footprint_provider().get_footprint(bin_id).await?;
+    let (_, poly_bounds) = get_intersecting_tiles(&footprint)?;
+    let (w, h) = heightmap_pixel_dims(&poly_bounds);
+    // Released when this function returns, which is after the heightmap has already been
+    // consumed into the (much smaller) sample point list below — no streaming to worry about.
+    let _reservation = memory_budget.try_reserve(estimate_heightmap_bytes(w, h))?;
 
     let factory = RooftopHeightMapFactory::new(
         providers.footprint_provider().as_ref(),
@@ -149,13 +173,18 @@ pub async fn background_tile_raster(
     bin_id: &str,
     tile_id: &str,
     providers: &State<Providers>,
-) -> Result<TiffImage, Status> {
+    memory_budget: &State<MemoryBudget>,
+) -> Result<TiffImage, ApiError> {
     let Ok(bin_id) = BINId::parse(bin_id) else {
-        return Err(Status::BadRequest);
+        return Err(Status::BadRequest.into());
     };
     let Ok(tile_id) = TileId::parse(tile_id) else {
-        return Err(Status::BadRequest);
+        return Err(Status::BadRequest.into());
     };
+
+    // One footprint (small) + one fixed-size elevation tile — bounded, so a flat reservation
+    // covers this regardless of which building/tile is requested.
+    let _reservation = memory_budget.try_reserve(elevation_tile_endpoint_bytes())?;
 
     let (footprint, mut tile) = tokio::try_join!(
         async {
@@ -165,7 +194,7 @@ pub async fn background_tile_raster(
                 .await
                 .map_err(|e| {
                     eprintln!("{:?}", e);
-                    Status::from(e)
+                    ApiError::from(e)
                 })
         },
         async {
@@ -175,7 +204,7 @@ pub async fn background_tile_raster(
                 .await
                 .map_err(|e| {
                     eprintln!("{:?}", e);
-                    Status::from(e)
+                    ApiError::from(e)
                 })
         },
     )?;
@@ -188,7 +217,7 @@ pub async fn background_tile_raster(
 
     let mut tiff_bytes = Vec::<u8>::new();
     tile.write_to_tiff(Cursor::new(&mut tiff_bytes))
-        .map_err(|_| Status::InternalServerError)?;
+        .map_err(|_| ApiError::new(Status::InternalServerError))?;
 
     Ok(TiffImage(tiff_bytes))
 }

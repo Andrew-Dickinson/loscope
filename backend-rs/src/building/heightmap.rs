@@ -213,6 +213,20 @@ fn filter_heightmap_outliers(heightmap: &mut Array2<u16>, mask: &Array2<bool>) {
     }
 }
 
+/// Computes the (width, height) in pixels of the heightmap that `RooftopHeightMapFactory::create`
+/// will allocate for a footprint with these bounds, without fetching any tile data. Used for
+/// pre-flight memory estimation. Must be kept in sync with `create` — the
+/// `heightmap_pixel_dims_matches_create` test below is a tripwire against drift. Bounded by
+/// `MAX_TILES_PER_BUILDING_FOOTPRINT` (enforced in `get_intersecting_tiles`), so this can never
+/// be arbitrarily large.
+pub fn heightmap_pixel_dims(poly_bounds: &Rect) -> (usize, usize) {
+    let (poly_w, poly_s) = poly_bounds.min().x_y();
+    let (poly_e, poly_n) = poly_bounds.max().x_y();
+    let output_w = (poly_e.ceil() - poly_w.floor()) as usize;
+    let output_h = (poly_n.ceil() - poly_s.floor()) as usize;
+    (output_w, output_h)
+}
+
 pub fn get_intersecting_tiles(
     poly_nys: &Polygon,
 ) -> Result<(Vec<TileId>, Rect), HeightMapCreateErr> {
@@ -765,6 +779,20 @@ mod tests {
         assert_eq!(hm.heightmap()[[149, 150]], Q2, "just inside Q2 at boundary");
         assert_eq!(hm.heightmap()[[150, 149]], Q3, "just inside Q3 at boundary");
         assert_eq!(hm.heightmap()[[150, 150]], Q4, "just inside Q4 at boundary");
+    }
+
+    #[tokio::test]
+    async fn heightmap_pixel_dims_matches_create() {
+        let cases = [test_poly(), rect_poly(500100.0, 300100.0, 500400.0, 300400.0)];
+        let fp_provider_result = |poly: &Polygon| MockFootprintProvider { result: Ok(poly.clone()) };
+        let et = MockElevationTileProvider { result: Ok(()) };
+
+        for poly in &cases {
+            let fp = fp_provider_result(poly);
+            let hm = factory(&fp, &et).create(test_bin()).await.unwrap();
+            let (_, bounds) = get_intersecting_tiles(poly).unwrap();
+            assert_eq!(heightmap_pixel_dims(&bounds), hm.heightmap().dim());
+        }
     }
 
     #[tokio::test]

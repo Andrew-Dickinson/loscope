@@ -1,3 +1,6 @@
+use crate::analysis::memory_budget::MemoryBudget;
+use crate::analysis::memory_estimate::{elevation_tile_endpoint_bytes, obstruction_obj_endpoint_bytes, ortho_tile_endpoint_bytes};
+use crate::endpoints::api_error::ApiError;
 use crate::providers::Providers;
 use crate::types::obstructions::{ObstructionId, ObstructionMeta, ObstructionType};
 use crate::types::tiles::{SUBGRID_TILE_SIDE_LENGTH_USFT, TileId};
@@ -50,10 +53,15 @@ pub async fn get_terrain_tile_overview(
 pub async fn get_terrain_raster(
     tile_id: &str,
     providers: &State<Providers>,
-) -> Result<TiffImage, Status> {
+    memory_budget: &State<MemoryBudget>,
+) -> Result<TiffImage, ApiError> {
     let Ok(tile_id) = TileId::parse(tile_id) else {
-        return Err(Status::BadRequest);
+        return Err(Status::BadRequest.into());
     };
+
+    // One fixed-size elevation tile — bounded, so a flat reservation covers any tile.
+    let _reservation = memory_budget.try_reserve(elevation_tile_endpoint_bytes())?;
+
     // TODO: Would it be better to use a CDN style direct browser file access for this?
     let tile = providers
         .elevation_tile_provider()
@@ -63,7 +71,7 @@ pub async fn get_terrain_raster(
     let width = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
     let mut tiff_bytes = Vec::<u8>::with_capacity(2 * width * width);
     tile.write_to_tiff(Cursor::new(&mut tiff_bytes))
-        .map_err(|_| Status::InternalServerError)?;
+        .map_err(|_| ApiError::new(Status::InternalServerError))?;
     Ok(TiffImage(tiff_bytes))
 }
 
@@ -91,18 +99,25 @@ pub async fn get_terrain_obstruction_obj(
     obstruction_id: &str,
     tile_id: &str,
     providers: &State<Providers>,
-) -> Result<(ContentType, TextStream![String]), Status> {
+    memory_budget: &State<MemoryBudget>,
+) -> Result<(ContentType, TextStream![String]), ApiError> {
     let obstruction_id: ObstructionId =
-        ObstructionId::parse_str(obstruction_id).map_err(|_| Status::BadRequest)?;
+        ObstructionId::parse_str(obstruction_id).map_err(|_| ApiError::new(Status::BadRequest))?;
     let obstruction_type: ObstructionType =
-        ObstructionType::parse(obstruction_type).map_err(|_| Status::BadRequest)?;
+        ObstructionType::parse(obstruction_type).map_err(|_| ApiError::new(Status::BadRequest))?;
     let Ok(tile_id) = TileId::parse(tile_id) else {
-        return Err(Status::BadRequest);
+        return Err(Status::BadRequest.into());
     };
 
     // TODO: Would it be better to use a CDN style direct browser file access for this?
     //  We would need to pre-create the OBJ files, and somehow embed the xy offset for the browser to apply relative
     //  to the terrain mesh
+
+    // Obstruction raster sizes aren't cheaply knowable up front (see
+    // obstruction_obj_endpoint_bytes), so this is a flat reservation. Held until the response
+    // stream (which owns a clone of the raster data) finishes, not just until this handler
+    // returns.
+    let reservation = memory_budget.try_reserve(obstruction_obj_endpoint_bytes())?;
 
     let (meta, obstruction) = tokio::try_join!(
         providers
@@ -118,6 +133,7 @@ pub async fn get_terrain_obstruction_obj(
     let y_offset = (*meta.sw_offset().northing() - *tile_sw.northing()) as isize;
 
     let obj_stream = TextStream! {
+        let _reservation = reservation;
         let mut stream = std::pin::pin!(
             obstruction.to_obj_stream(obstruction_type.clone(), obstruction_id, x_offset, y_offset)
         );
@@ -133,13 +149,18 @@ pub async fn get_terrain_obstruction_obj(
 pub async fn get_terrain_ortho(
     tile_id: &str,
     providers: &State<Providers>,
-) -> Result<JpegImage, Status> {
+    memory_budget: &State<MemoryBudget>,
+) -> Result<JpegImage, ApiError> {
     // TODO: Would it be better to use a CDN style direct browser file access for this?
     //   Especially since the requests will be balanced across many workers, which may or may
     //   not have shared cache storage
     let Ok(tile_id) = TileId::parse(tile_id) else {
-        return Err(Status::BadRequest);
+        return Err(Status::BadRequest.into());
     };
+
+    // One fixed-size ortho tile plus its adjustment/colorization copies — bounded, so a flat
+    // reservation covers any tile.
+    let _reservation = memory_budget.try_reserve(ortho_tile_endpoint_bytes())?;
 
     let ortho_img = providers.ortho_provider().get_ortho(tile_id).await?;
     let ortho_img = apply_photo_adjustments(ortho_img);

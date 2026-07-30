@@ -51,7 +51,7 @@ async function getSamplePoints(
 }
 
 class AnalysisError extends Error {
-  constructor(message: string, readonly retryable: boolean) {
+  constructor(message: string, readonly retryable: boolean, readonly retryAfterMs?: number) {
     super(message)
     this.name = 'AnalysisError'
   }
@@ -77,6 +77,18 @@ async function analyzePoint(
     throw new AnalysisError(String(err), true)  // network error / timeout → retryable
   }
   if (!res.ok) {
+    if (res.status === 413) {
+      // This link/frequency would never fit in the server's memory budget — retrying is
+      // pointless, so this is fatal rather than retryable.
+      throw new AnalysisError('This link is too long (or frequency too low) to analyze', false)
+    }
+    if (res.status === 503) {
+      // Server is throttling us for lack of memory headroom right now; other in-flight
+      // analyses should free it up shortly, so this is worth retrying with backoff.
+      const retryAfterHeader = res.headers.get('Retry-After')
+      const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined
+      throw new AnalysisError('Server is busy, retrying…', true, retryAfterMs)
+    }
     throw new AnalysisError(`HTTP ${res.status}`, res.status >= 500)
   }
   const d = await res.json() as { id: string; result: string }
@@ -86,6 +98,38 @@ async function analyzePoint(
     Obstructed:          'obstructed',
   }
   return { id: d.id, result: resultMap[d.result] ?? d.result.toLowerCase() } as PointAnalysis
+}
+
+const MAX_ANALYSIS_RETRIES = 6
+const BASE_BACKOFF_MS = 1000
+const MAX_BACKOFF_MS = 30000
+
+function backoffDelayMs(attempt: number, retryAfterMs?: number): number {
+  const exponential = Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS)
+  const jittered = exponential * (0.5 + Math.random() * 0.5)
+  // Never wait less than the server's suggested Retry-After, but still apply our own backoff
+  // growth on top of it for repeated throttling.
+  return retryAfterMs !== undefined ? Math.max(retryAfterMs, jittered) : jittered
+}
+
+// Wraps analyzePoint with exponential-backoff retry for throttled (retryable) failures, e.g.
+// the server rejecting a request because it doesn't currently have enough memory headroom.
+// Permanent failures (bad input, link too long to ever fit) are thrown immediately.
+async function analyzePointWithRetry(
+  pt: BackendSamplePoint,
+  nysB: [number, number, number],
+  freqGhz: number,
+  isAborted: () => boolean,
+): Promise<PointAnalysis> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await analyzePoint(pt, nysB, freqGhz)
+    } catch (err) {
+      if (isAborted()) throw err
+      if (!(err instanceof AnalysisError) || !err.retryable || attempt >= MAX_ANALYSIS_RETRIES) throw err
+      await new Promise(resolve => setTimeout(resolve, backoffDelayMs(attempt, err.retryAfterMs)))
+    }
+  }
 }
 
 function toErrorAnalysis(err: unknown): PointAnalysis {
@@ -187,7 +231,7 @@ export default function App() {
         if (abortRef.current) return
         setAnalyses(prev => { const next = [...prev]; next[ptIdx] = null; return next })
         try {
-          const result = await analyzePoint(points[ptIdx], nysBPoint, values.frequency_ghz)
+          const result = await analyzePointWithRetry(points[ptIdx], nysBPoint, values.frequency_ghz, () => abortRef.current)
           if (abortRef.current) return
           setAnalyses(prev => { const next = [...prev]; next[ptIdx] = result; return next })
         } catch (err) {
@@ -216,7 +260,7 @@ export default function App() {
       if (!nysB) return
       setAnalyses(prev => { const next = [...prev]; next[idx] = null; return next })
       try {
-        const result = await analyzePoint(samplePoints[idx], nysB, freqGhz)
+        const result = await analyzePointWithRetry(samplePoints[idx], nysB, freqGhz, () => false)
         setAnalyses(prev => { const next = [...prev]; next[idx] = result; return next })
       } catch (err) {
         setAnalyses(prev => { const next = [...prev]; next[idx] = toErrorAnalysis(err); return next })
@@ -252,7 +296,7 @@ export default function App() {
     setSamplePoints(prev => [...prev, point])
     setAnalyses(prev => [...prev, null])
     try {
-      const result = await analyzePoint(point, nysB, freqGhz)
+      const result = await analyzePointWithRetry(point, nysB, freqGhz, () => false)
       setAnalyses(prev => { const next = [...prev]; next[newIdx] = result; return next })
     } catch (err) {
       setAnalyses(prev => { const next = [...prev]; next[newIdx] = toErrorAnalysis(err); return next })

@@ -1,3 +1,4 @@
+use loscope::analysis::memory_budget::MemoryBudget;
 use loscope::endpoints::analysis::{
     fresnel_kml, get_fresnel_slice_obj, intersection_visualization, map_overview, point_analysis,
 };
@@ -24,6 +25,7 @@ async fn rocket() -> _ {
     init_coord_converter_factory(CoordinateConverter::new);
     rocket::build()
         .manage(Providers::new_from_env().await.unwrap())
+        .manage(MemoryBudget::new_from_env())
         .mount("/api", rocket::routes![health_check])
         .mount(
             "/api/rooftop",

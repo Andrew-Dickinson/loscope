@@ -2,7 +2,10 @@ use crate::analysis::fresnel_kml::build_fresnel_kml;
 use crate::analysis::fresnel_zone_obj::stream_fresnel_tile_slice_as_obj;
 use crate::analysis::intersection_vis::tile_intersection_to_png;
 use crate::analysis::map_overview::PointEvaluationOverview;
+use crate::analysis::memory_budget::MemoryBudget;
+use crate::analysis::memory_estimate::estimate_analysis_bytes;
 use crate::analysis::point_evaluation::{PointEvaluationInput, PointEvaluationOutput, evaluate_points, valid_analysis_frequency, PointEvaluationOutcome};
+use crate::endpoints::api_error::ApiError;
 use crate::providers::Providers;
 use crate::types::tiles::TileId;
 use crate::util::coord_conversion::with_coord_converter;
@@ -12,7 +15,7 @@ use rocket::http::{ContentType, Header, Status};
 use rocket::response::Responder;
 use rocket::response::stream::TextStream;
 use rocket::serde::json::Json;
-use rocket::{State};
+use rocket::State;
 use uuid::Uuid;
 
 #[derive(Responder)]
@@ -42,13 +45,19 @@ impl KmlDownload {
 pub async fn point_analysis(
     point_pair: Json<PointEvaluationInput>,
     providers: &State<Providers>,
-) -> Result<Json<PointEvaluationOutput>, Status> {
+    memory_budget: &State<MemoryBudget>,
+) -> Result<Json<PointEvaluationOutput>, ApiError> {
     if !point_pair.point_a().valid() || !point_pair.point_b().valid() {
-        return Err(Status::BadRequest);
+        return Err(Status::BadRequest.into());
     }
     if !valid_analysis_frequency(*point_pair.frequency_hz()) {
-        return Err(Status::BadRequest);
+        return Err(Status::BadRequest.into());
     }
+
+    // Reserve our estimated share of the process memory budget up front, before doing any of
+    // the actual (potentially huge) allocation work. Held until this function returns, at
+    // which point the reservation is dropped and its bytes are released back to the budget.
+    let _reservation = memory_budget.try_reserve(estimate_analysis_bytes(&point_pair))?;
 
     // TODO: Detect vegetation-only obstructions and report them as seasonal
 
@@ -77,7 +86,7 @@ pub async fn point_analysis(
         .map_err(|err| {
             eprintln!("{:?}", err);
             err
-        }).map_err(|_| Status::InternalServerError)?;
+        }).map_err(|_| ApiError::new(Status::InternalServerError))?;
 
     Ok(Json(result_envelope.into()))
 }

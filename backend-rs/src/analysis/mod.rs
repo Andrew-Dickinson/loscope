@@ -4,6 +4,8 @@ pub mod fresnel_zone;
 pub mod fresnel_zone_obj;
 pub mod intersection_vis;
 pub mod map_overview;
+pub mod memory_budget;
+pub mod memory_estimate;
 pub mod png_encoder;
 pub mod point_evaluation;
 pub mod tiles;
