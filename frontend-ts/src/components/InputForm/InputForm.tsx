@@ -112,6 +112,7 @@ export default function InputForm({ onSubmit }: InputFormProps) {
 
   return (
     <div style={styles.container}>
+      <div style={styles.contentWrap}>
       <div style={styles.card}>
         <img src={logo} alt="LOScope" style={styles.logo} />
 
@@ -278,6 +279,9 @@ export default function InputForm({ onSubmit }: InputFormProps) {
           </button>
         </form>
       </div>
+      </div>
+
+      <Footer />
 
       {showPicker && farEndBin && (
         <FarEndPicker
@@ -336,16 +340,108 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+const OTHER_PROJECTS: { label: string; href: string }[] = [
+  { label: 'IP Explorer',     href: 'http://ip-explorer.andrew.mesh.nycmesh.net/' },
+  { label: 'Node Explorer',   href: 'https://node-explorer.andrew.mesh.nycmesh.net/' },
+  { label: 'Outage Simulator', href: 'https://node-explorer.andrew.mesh.nycmesh.net/outage-analyzer' },
+  { label: 'OSPF API v1',     href: 'https://api.andrew.mesh.nycmesh.net/api/v1/mesh_ospf_data.json' },
+  { label: 'OSPF API v2',     href: 'https://api.andrew.mesh.nycmesh.net/api/v2/mesh_ospf_data.json' },
+  { label: 'OSPF Event Feed', href: 'https://api.andrew.mesh.nycmesh.net/api/v2/ospf-event-stream/viewer.html' },
+]
+
+const REPO_URL = 'https://github.com/Andrew-Dickinson/loscope'
+// Set via --build-arg GIT_COMMIT_HASH in Dockerfile.frontend (see docker_build.sh); undefined
+// in local `npm run dev`, where there's no single meaningful commit to point at.
+const COMMIT_SHA: string | undefined = import.meta.env.VITE_GIT_COMMIT_HASH || undefined
+const COMMIT_SHORT = COMMIT_SHA?.slice(0, 7)
+
+function Footer() {
+  return (
+    <footer className="los-footer" style={styles.footer}>
+      <style>{`
+        .los-footer a { color: inherit; text-decoration: none; transition: color 0.15s; }
+        .los-footer a:hover { color: #e6edf3; }
+        @media (min-width: 900px) {
+          .los-footer-inner { flex-direction: row !important; }
+        }
+      `}</style>
+      <div className="los-footer-inner" style={styles.footerInner}>
+        <div style={styles.footerLinks}>
+          <span style={{ color: '#6e7681' }}>Other projects:</span>
+          {OTHER_PROJECTS.map(p => (
+            <a key={p.href} href={p.href} target="_blank" rel="noopener noreferrer" style={{ color: '#8b949e' }}>
+              {p.label}
+            </a>
+          ))}
+        </div>
+        <div style={styles.footerSource}>
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#8b949e' }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+              <title>GitHub</title>
+              <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+            </svg>
+            <span>Source Code</span>
+          </a>
+          {COMMIT_SHA && (
+            <span style={{ fontSize: 11, color: '#484f58' }}>
+              (<a href={`${REPO_URL}/commit/${COMMIT_SHA}`} target="_blank" rel="noopener noreferrer" style={{ color: '#6e7681' }}>{COMMIT_SHORT}</a>)
+            </span>
+          )}
+        </div>
+      </div>
+    </footer>
+  )
+}
+
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    flex: 1, display: 'flex',
-    padding: 24, overflowY: 'auto',
+    flex: 1, display: 'flex', flexDirection: 'column',
+    padding: '24px 24px 0', overflowY: 'auto',
+  },
+  // Wraps just the card, centering it as a group on wide screens: grows to fill leftover
+  // vertical space (centering the card via its own margin:auto below) but never shrinks below
+  // the card's natural height — shrinking here caused the card's overflowing content to
+  // visually overlap the footer instead of pushing it down.
+  contentWrap: {
+    flex: '1 0 auto',
+    width: '100%', maxWidth: 1005,
+    margin: '0 auto',
+    display: 'flex',
   },
   card: {
     width: '100%', maxWidth: 560,
     margin: 'auto',
     background: 'rgba(22,27,34,0.9)', border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: 10, padding: '32px 36px',
+  },
+  // Full-width strip so its top border spans the whole screen; footerInner (below) re-applies
+  // the same max-width as contentWrap so the link content still aligns with the card above.
+  footer: {
+    width: '100%',
+    flexShrink: 0,
+    marginTop: 24,
+    borderTop: '1px solid rgba(255,255,255,0.06)',
+    background: '#0d1117',
+  },
+  footerInner: {
+    width: '100%', maxWidth: 1005,
+    margin: '0 auto',
+    display: 'flex', flexDirection: 'column', gap: 12,
+    alignItems: 'center', justifyContent: 'space-between',
+    padding: '16px 24px 24px',
+    fontSize: 12, fontFamily: 'monospace',
+  },
+  footerLinks: {
+    display: 'flex', flexWrap: 'wrap', gap: 12,
+    justifyContent: 'center',
+  },
+  footerSource: {
+    display: 'flex', alignItems: 'center', gap: 8,
   },
   logo:     { height: 64, marginBottom: 28, display: 'block' },
   form:     { display: 'flex', flexDirection: 'column' },

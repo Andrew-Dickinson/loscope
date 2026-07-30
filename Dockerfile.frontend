@@ -6,6 +6,11 @@ COPY frontend-ts/package.json frontend-ts/package-lock.json ./
 RUN npm ci
 
 COPY frontend-ts .
+
+# Vite only exposes env vars prefixed VITE_ to client code (import.meta.env) — see
+# InputForm.tsx's Footer, which reads VITE_GIT_COMMIT_HASH to link the exact commit deployed.
+ARG GIT_COMMIT_HASH
+ENV VITE_GIT_COMMIT_HASH=$GIT_COMMIT_HASH
 RUN npm run build
 
 
