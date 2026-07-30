@@ -55,6 +55,7 @@ async function analyzePoint(
   pt: BackendSamplePoint,
   nysB: [number, number, number],
   freqGhz: number,
+  obstructionTypes: string[],
   isAborted: () => boolean = () => false,
 ): Promise<PointAnalysis> {
   let res: Response
@@ -66,6 +67,7 @@ async function analyzePoint(
         point_a_nys: pt.sample_point.nys,
         point_b_nys: nysB,
         frequency_hz: freqGhz * 1e9,
+        obstruction_types: obstructionTypes,
       }),
     }, isAborted)
   } catch (err) {
@@ -120,6 +122,7 @@ export default function App() {
   const [nysB,         setNysB]         = useState<[number, number, number] | null>(null)
   const [freqGhz,        setFreqGhz]        = useState(24)
   const [mastOffsetFt,   setMastOffsetFt]   = useState(4)
+  const [obstructionTypes, setObstructionTypes] = useState<string[]>([])
   const [buildingOffset, setBuildingOffset] = useState<{ x_sw: number; y_sw: number } | null>(null)
 
   // Map state
@@ -149,6 +152,7 @@ export default function App() {
     setBinId(null); setBuildingLabel(null); setSamplePoints([]); setAnalyses([]); setActiveMap(null); setNysB(null); setBuildingOffset(null)
     setFreqGhz(values.frequency_ghz)
     setMastOffsetFt(values.mast_offset_ft)
+    setObstructionTypes(values.obstruction_types)
     setAppState('rooftop')
 
     try {
@@ -194,7 +198,7 @@ export default function App() {
         if (abortRef.current) return
         setAnalyses(prev => { const next = [...prev]; next[ptIdx] = null; return next })
         try {
-          const result = await analyzePoint(points[ptIdx], nysBPoint, values.frequency_ghz, () => abortRef.current)
+          const result = await analyzePoint(points[ptIdx], nysBPoint, values.frequency_ghz, values.obstruction_types, () => abortRef.current)
           if (abortRef.current) return
           setAnalyses(prev => { const next = [...prev]; next[ptIdx] = result; return next })
         } catch (err) {
@@ -223,7 +227,7 @@ export default function App() {
       if (!nysB) return
       setAnalyses(prev => { const next = [...prev]; next[idx] = null; return next })
       try {
-        const result = await analyzePoint(samplePoints[idx], nysB, freqGhz, () => false)
+        const result = await analyzePoint(samplePoints[idx], nysB, freqGhz, obstructionTypes, () => false)
         setAnalyses(prev => { const next = [...prev]; next[idx] = result; return next })
       } catch (err) {
         setAnalyses(prev => { const next = [...prev]; next[idx] = toErrorAnalysis(err); return next })
@@ -250,7 +254,7 @@ export default function App() {
     } catch (err) {
       setLoading({ message: String(err), isError: true })
     }
-  }, [analyses, samplePoints, nysB, freqGhz])
+  }, [analyses, samplePoints, nysB, freqGhz, obstructionTypes])
 
   const handleAddCustomPoint = useCallback(async (point: BackendSamplePoint) => {
     if (!nysB) return
@@ -258,12 +262,12 @@ export default function App() {
     setSamplePoints(prev => [...prev, point])
     setAnalyses(prev => [...prev, null])
     try {
-      const result = await analyzePoint(point, nysB, freqGhz, () => false)
+      const result = await analyzePoint(point, nysB, freqGhz, obstructionTypes, () => false)
       setAnalyses(prev => { const next = [...prev]; next[newIdx] = result; return next })
     } catch (err) {
       setAnalyses(prev => { const next = [...prev]; next[newIdx] = toErrorAnalysis(err); return next })
     }
-  }, [samplePoints, nysB, freqGhz])
+  }, [samplePoints, nysB, freqGhz, obstructionTypes])
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -272,7 +276,7 @@ export default function App() {
         onAbort={analyzing ? cancelAnalysis : undefined}
       />
 
-      <div style={{ display: appState === 'input' ? 'flex' : 'none', flex: 1 }}>
+      <div style={{ display: appState === 'input' ? 'flex' : 'none', flex: 1, minHeight: 0 }}>
         <InputForm onSubmit={handleSubmit} />
       </div>
 

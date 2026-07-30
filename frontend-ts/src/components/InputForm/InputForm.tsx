@@ -12,7 +12,18 @@ export interface RooftopSubmitValues {
   frequency_ghz: number
   mast_offset_ft: number
   sample_spacing?: number
+  obstruction_types: string[]
 }
+
+// Must match backend ObstructionType's snake_case serialization (backend-rs/src/types/obstructions.rs).
+const OBSTRUCTION_TYPES: { value: string; label: string }[] = [
+  { value: 'active_permits',              label: 'Active Building Permits' },
+  { value: 'approved_job_applications',   label: 'Approved Building Permit Applications' },
+  { value: 'recent_job_applications',     label: 'Recent Building Permit Applications' },
+  { value: 'new_construction_co',         label: 'New Certificates of Occupancy' },
+  { value: 'new_construction_footprints', label: 'Building Footprints Marked "New Construction"' },
+  { value: 'non_surveyed_bridge',         label: 'Major Bridges (missing from Lidar)' },
+]
 
 interface InputFormProps {
   onSubmit: (values: RooftopSubmitValues) => Promise<void>
@@ -52,6 +63,10 @@ export default function InputForm({ onSubmit }: InputFormProps) {
   const [farEndNys,    setFarEndNys]    = useState<[number, number, number] | null>(null)
   const [showPicker,   setShowPicker]   = useState(false)
   const [manualSampling, setManualSampling] = useState(false)
+  const [obstructionTypes, setObstructionTypes] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(OBSTRUCTION_TYPES.map(t => [t.value, true])),
+  )
+  const enabledObstructionTypes = OBSTRUCTION_TYPES.filter(t => obstructionTypes[t.value]).map(t => t.value)
 
   const set = (field: keyof FormFieldValues) => (e: ChangeEvent<HTMLInputElement>) =>
     setValues(v => ({ ...v, [field]: e.target.value }))
@@ -74,6 +89,7 @@ export default function InputForm({ onSubmit }: InputFormProps) {
         frequency_ghz: parseFloat(values.frequency_ghz) || 24,
         mast_offset_ft: parseFloat(values.mast_offset_ft) || 0,
         sample_spacing: manualSampling ? undefined : (parseInt(values.sample_spacing) || 15),
+        obstruction_types: enabledObstructionTypes,
       }
     } else {
       const latF = parseFloat(values.lat), lonF = parseFloat(values.lon), altF = parseFloat(values.alt_m)
@@ -85,6 +101,7 @@ export default function InputForm({ onSubmit }: InputFormProps) {
         frequency_ghz: parseFloat(values.frequency_ghz) || 24,
         mast_offset_ft: parseFloat(values.mast_offset_ft) || 0,
         sample_spacing: manualSampling ? undefined : (parseInt(values.sample_spacing) || 15),
+        obstruction_types: enabledObstructionTypes,
       }
     }
 
@@ -231,6 +248,26 @@ export default function InputForm({ onSubmit }: InputFormProps) {
                     value={values.mast_offset_ft} onChange={set('mast_offset_ft')} disabled={submitting} />
                 </Field>
               </div>
+
+              <div style={{ marginTop: 14 }}>
+                <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#8b949e', fontFamily: 'monospace' }}>
+                  Enabled Obstruction types
+                </label>
+                <div style={styles.checkboxGrid}>
+                  {OBSTRUCTION_TYPES.map(t => (
+                    <label key={t.value} style={styles.checkboxLabel}>
+                      <input
+                        type="checkbox"
+                        checked={obstructionTypes[t.value] ?? false}
+                        onChange={e => setObstructionTypes(prev => ({ ...prev, [t.value]: e.target.checked }))}
+                        disabled={submitting}
+                        style={styles.checkbox}
+                      />
+                      {t.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
             </Advanced>
           </Section>
 
@@ -301,11 +338,12 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flex: 1, display: 'flex',
     padding: 24, overflowY: 'auto',
   },
   card: {
     width: '100%', maxWidth: 560,
+    margin: 'auto',
     background: 'rgba(22,27,34,0.9)', border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: 10, padding: '32px 36px',
   },
@@ -317,6 +355,16 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6,
     color: '#e6edf3', fontSize: 13, fontFamily: 'monospace',
     padding: '8px 10px', outline: 'none', boxSizing: 'border-box',
+  },
+  checkboxGrid: {
+    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px',
+  },
+  checkboxLabel: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    fontSize: 12, color: '#8b949e', fontFamily: 'monospace', cursor: 'pointer',
+  },
+  checkbox: {
+    accentColor: '#388bfd', cursor: 'pointer', margin: 0,
   },
   pickBtn: {
     marginTop: 10, width: '100%', padding: '8px 0', borderRadius: 6,
