@@ -11,6 +11,7 @@ import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import type { ThreeEvent } from '@react-three/fiber'
 import BackgroundTiles from '../RooftopViewer/BackgroundTiles'
+import { fetchWithRetry } from '../../lib/fetchWithRetry'
 
 interface FarEndPickerProps {
   binId: string
@@ -327,14 +328,16 @@ export default function FarEndPicker({ binId, label, onConfirm, onCancel }: FarE
   const handleCameraChange = useCallback((atDefault: boolean) => { setShowReset(!atDefault) }, [])
 
   useEffect(() => {
-    fetch(`/api/rooftop/samplePoints/${binId}`, {
+    let cancelled = false
+    fetchWithRetry(`/api/rooftop/samplePoints/${binId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mast_offset_ft: 0, sample_spacing: 100 }),
-    })
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then(d => setBuildingOffset({ x_sw: d.sw_offset[0], y_sw: d.sw_offset[1] }))
-      .catch(err => setLoadError(String(err)))
+    }, () => cancelled)
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setBuildingOffset({ x_sw: d.sw_offset[0], y_sw: d.sw_offset[1] }) })
+      .catch(err => { if (!cancelled) setLoadError(String(err)) })
+    return () => { cancelled = true }
   }, [binId])
 
   const handleTerrainClick = useCallback((point: THREE.Vector3) => {

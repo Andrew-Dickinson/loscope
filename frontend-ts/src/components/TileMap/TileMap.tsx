@@ -8,6 +8,7 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, GeoJSON, ImageOverlay, useMap } from 'react-leaflet'
+import { fetchWithRetry } from '../../lib/fetchWithRetry'
 
 function PostImageOverlay({ url, bounds, opacity, zIndex }: {
   url: string
@@ -17,16 +18,17 @@ function PostImageOverlay({ url, bounds, opacity, zIndex }: {
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   useEffect(() => {
+    let cancelled = false
     let objectUrl: string | null = null
-    fetch(url, { method: 'POST' })
-      .then(r => r.ok ? r.blob() : null)
+    fetchWithRetry(url, { method: 'POST' }, () => cancelled)
+      .then(r => r.blob())
       .then(blob => {
-        if (!blob) return
+        if (cancelled) return
         objectUrl = URL.createObjectURL(blob)
         setBlobUrl(objectUrl)
       })
       .catch(() => {})
-    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl) }
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [url])
   if (!blobUrl) return null
   return <ImageOverlay url={blobUrl} bounds={bounds} opacity={opacity} zIndex={zIndex} />

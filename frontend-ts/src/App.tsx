@@ -9,6 +9,7 @@ import type { AnalysisOverview } from './components/TileMap/TileMap'
 import LoadingToast from './components/ui/LoadingToast'
 import type { LoadingState } from './components/ui/LoadingToast'
 import logo from './assets/logo.svg'
+import { fetchWithRetry, FetchError } from './lib/fetchWithRetry'
 
 type AppState = 'input' | 'rooftop' | 'map'
 
@@ -20,12 +21,11 @@ interface ActiveMap {
 // ── API helpers ───────────────────────────────────────────────────────────────
 
 async function toNys(lat: number, lon: number, alt_m: number): Promise<[number, number, number]> {
-  const res = await fetch('/api/coords/toNys', {
+  const res = await fetchWithRetry('/api/coords/toNys', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ gps: [lat, lon, alt_m] }),
   })
-  if (!res.ok) throw new Error(`Coordinate conversion failed: HTTP ${res.status}`)
   const d = await res.json() as { nys: [number, number, number] }
   return d.nys
 }
@@ -41,30 +41,25 @@ async function getSamplePoints(
 ): Promise<SamplePointsResponse> {
   const body: Record<string, unknown> = { mast_offset_ft: params.mast_offset_ft }
   if (params.sample_spacing !== undefined) body.sample_spacing = params.sample_spacing
-  const res = await fetch(`/api/rooftop/samplePoints/${binId}`, {
+  const res = await fetchWithRetry(`/api/rooftop/samplePoints/${binId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(`Sample points failed: HTTP ${res.status}`)
   return res.json() as Promise<SamplePointsResponse>
 }
 
-class AnalysisError extends Error {
-  constructor(message: string, readonly retryable: boolean, readonly retryAfterMs?: number) {
-    super(message)
-    this.name = 'AnalysisError'
-  }
-}
-
+// isAborted is polled by fetchWithRetry so cancellation (the "Stop" button, or navigating away)
+// interrupts an in-flight retry/backoff promptly instead of running to completion first.
 async function analyzePoint(
   pt: BackendSamplePoint,
   nysB: [number, number, number],
   freqGhz: number,
+  isAborted: () => boolean = () => false,
 ): Promise<PointAnalysis> {
   let res: Response
   try {
-    res = await fetch('/api/analysis/analyzePointPair', {
+    res = await fetchWithRetry('/api/analysis/analyzePointPair', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -72,24 +67,14 @@ async function analyzePoint(
         point_b_nys: nysB,
         frequency_hz: freqGhz * 1e9,
       }),
-    })
+    }, isAborted)
   } catch (err) {
-    throw new AnalysisError(String(err), true)  // network error / timeout → retryable
-  }
-  if (!res.ok) {
-    if (res.status === 413) {
-      // This link/frequency would never fit in the server's memory budget — retrying is
-      // pointless, so this is fatal rather than retryable.
-      throw new AnalysisError('This link is too long (or frequency too low) to analyze', false)
+    // 413 means this link/frequency would never fit in the server's memory budget —
+    // fetchWithRetry already knows not to retry it, but give it a clearer message here.
+    if (err instanceof FetchError && err.status === 413) {
+      throw new FetchError('This link is too long (or frequency too low) to analyze', false, 413)
     }
-    if (res.status === 503) {
-      // Server is throttling us for lack of memory headroom right now; other in-flight
-      // analyses should free it up shortly, so this is worth retrying with backoff.
-      const retryAfterHeader = res.headers.get('Retry-After')
-      const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined
-      throw new AnalysisError('Server is busy, retrying…', true, retryAfterMs)
-    }
-    throw new AnalysisError(`HTTP ${res.status}`, res.status >= 500)
+    throw err
   }
   const d = await res.json() as { id: string; result: string }
   const resultMap: Record<string, string> = {
@@ -100,57 +85,8 @@ async function analyzePoint(
   return { id: d.id, result: resultMap[d.result] ?? d.result.toLowerCase() } as PointAnalysis
 }
 
-const MAX_ANALYSIS_RETRIES = 6
-const BASE_BACKOFF_MS = 1000
-const MAX_BACKOFF_MS = 30000
-
-function backoffDelayMs(attempt: number, retryAfterMs?: number): number {
-  const exponential = Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS)
-  const jittered = exponential * (0.5 + Math.random() * 0.5)
-  // Never wait less than the server's suggested Retry-After, but still apply our own backoff
-  // growth on top of it for repeated throttling.
-  return retryAfterMs !== undefined ? Math.max(retryAfterMs, jittered) : jittered
-}
-
-// Sleeps in short increments so an abort can interrupt a long backoff wait (up to 30s) almost
-// immediately, instead of the caller having to wait out the full delay before noticing.
-const ABORT_POLL_MS = 100
-async function sleepAbortable(ms: number, isAborted: () => boolean): Promise<void> {
-  let waited = 0
-  while (waited < ms) {
-    if (isAborted()) return
-    const step = Math.min(ABORT_POLL_MS, ms - waited)
-    await new Promise(resolve => setTimeout(resolve, step))
-    waited += step
-  }
-}
-
-// Wraps analyzePoint with exponential-backoff retry for throttled (retryable) failures, e.g.
-// the server rejecting a request because it doesn't currently have enough memory headroom.
-// Permanent failures (bad input, link too long to ever fit) are thrown immediately. Checks
-// isAborted() before every attempt and during backoff waits so cancellation (the "Stop" button,
-// or navigating away) takes effect within ABORT_POLL_MS rather than after the current attempt's
-// full backoff delay elapses.
-async function analyzePointWithRetry(
-  pt: BackendSamplePoint,
-  nysB: [number, number, number],
-  freqGhz: number,
-  isAborted: () => boolean,
-): Promise<PointAnalysis> {
-  for (let attempt = 0; ; attempt++) {
-    if (isAborted()) throw new AnalysisError('Aborted', false)
-    try {
-      return await analyzePoint(pt, nysB, freqGhz)
-    } catch (err) {
-      if (isAborted()) throw err
-      if (!(err instanceof AnalysisError) || !err.retryable || attempt >= MAX_ANALYSIS_RETRIES) throw err
-      await sleepAbortable(backoffDelayMs(attempt, err.retryAfterMs), isAborted)
-    }
-  }
-}
-
 function toErrorAnalysis(err: unknown): PointAnalysis {
-  if (err instanceof AnalysisError && !err.retryable)
+  if (err instanceof FetchError && !err.retryable)
     return { id: '', result: 'error_fatal', errorMessage: err.message }
   return { id: '', result: 'error' }
 }
@@ -258,7 +194,7 @@ export default function App() {
         if (abortRef.current) return
         setAnalyses(prev => { const next = [...prev]; next[ptIdx] = null; return next })
         try {
-          const result = await analyzePointWithRetry(points[ptIdx], nysBPoint, values.frequency_ghz, () => abortRef.current)
+          const result = await analyzePoint(points[ptIdx], nysBPoint, values.frequency_ghz, () => abortRef.current)
           if (abortRef.current) return
           setAnalyses(prev => { const next = [...prev]; next[ptIdx] = result; return next })
         } catch (err) {
@@ -287,7 +223,7 @@ export default function App() {
       if (!nysB) return
       setAnalyses(prev => { const next = [...prev]; next[idx] = null; return next })
       try {
-        const result = await analyzePointWithRetry(samplePoints[idx], nysB, freqGhz, () => false)
+        const result = await analyzePoint(samplePoints[idx], nysB, freqGhz, () => false)
         setAnalyses(prev => { const next = [...prev]; next[idx] = result; return next })
       } catch (err) {
         setAnalyses(prev => { const next = [...prev]; next[idx] = toErrorAnalysis(err); return next })
@@ -307,8 +243,7 @@ export default function App() {
     setLoading({ message: 'Loading map overview…' })
 
     try {
-      const res = await fetch(`/api/analysis/overview/${analysis.id}`, { method: 'POST' })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const res = await fetchWithRetry(`/api/analysis/overview/${analysis.id}`, { method: 'POST' })
       const overview = await res.json() as AnalysisOverview
       setActiveMap({ analysisId: analysis.id, overview })
       setLoading(null)
@@ -323,7 +258,7 @@ export default function App() {
     setSamplePoints(prev => [...prev, point])
     setAnalyses(prev => [...prev, null])
     try {
-      const result = await analyzePointWithRetry(point, nysB, freqGhz, () => false)
+      const result = await analyzePoint(point, nysB, freqGhz, () => false)
       setAnalyses(prev => { const next = [...prev]; next[newIdx] = result; return next })
     } catch (err) {
       setAnalyses(prev => { const next = [...prev]; next[newIdx] = toErrorAnalysis(err); return next })
@@ -414,8 +349,7 @@ function KmlDownloadButton({ analysisId }: { analysisId: string }) {
     if (loading) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/analysis/fresnelKml/${analysisId}`, { method: 'POST' })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const res = await fetchWithRetry(`/api/analysis/fresnelKml/${analysisId}`, { method: 'POST' })
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')

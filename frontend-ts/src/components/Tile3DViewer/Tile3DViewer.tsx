@@ -24,6 +24,7 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import type { ThreeEvent } from '@react-three/fiber'
+import { fetchWithRetry } from '../../lib/fetchWithRetry'
 
 interface TileOverviewData {
   obstruction_ids: Record<string, string[]>  // { type: [id, ...] }
@@ -69,22 +70,21 @@ function useTileData(tileId: string | null, analysisId: string | null): TileData
     const run = async () => {
       try {
         // 1. Fetch tile overview (obstruction IDs by type)
-        const overviewRes = await fetch(`/api/tileview/terrain/tileOverview/${tileId}`)
-        if (!overviewRes.ok) throw new Error(`Tile overview HTTP ${overviewRes.status}`)
+        const overviewRes = await fetchWithRetry(`/api/tileview/terrain/tileOverview/${tileId}`, undefined, () => cancelled)
         const tileOverview = await overviewRes.json() as TileOverviewData
         if (cancelled) return
 
         // 2. Check if Fresnel zone OBJ is available (204 = not in this tile)
-        const zoneRes = await fetch(
+        const zoneRes = await fetchWithRetry(
           `/api/analysis/fresnelSliceObj/${analysisId}/${tileId}`,
-          { method: 'POST' }
+          { method: 'POST' },
+          () => cancelled,
         )
-        const zoneAvailable = zoneRes.ok && zoneRes.status !== 204
+        const zoneAvailable = zoneRes.status !== 204
         if (cancelled) return
 
         // 3. Fetch + decode TIFF heightmap
-        const tiffRes = await fetch(`/api/tileview/terrain/heightRaster/${tileId}`)
-        if (!tiffRes.ok) throw new Error(`Heightmap HTTP ${tiffRes.status}`)
+        const tiffRes = await fetchWithRetry(`/api/tileview/terrain/heightRaster/${tileId}`, undefined, () => cancelled)
         const buf = await tiffRes.arrayBuffer()
         if (cancelled) return
 
@@ -189,10 +189,10 @@ function useObjLoader(url: string, method = 'GET'): THREE.Group | null {
     if (method === 'GET') {
       new OBJLoader().load(url, loaded => { if (!cancelled) setObj(loaded) })
     } else {
-      fetch(url, { method })
-        .then(res => res.ok ? res.blob() : null)
+      fetchWithRetry(url, { method }, () => cancelled)
+        .then(res => res.blob())
         .then(blob => {
-          if (!blob || cancelled) return
+          if (cancelled) return
           blobUrl = URL.createObjectURL(blob)
           new OBJLoader().load(blobUrl, loaded => { if (!cancelled) setObj(loaded) })
         })
@@ -510,8 +510,8 @@ function useObstructionOverviews(obstructions: ObsEntry[]): Record<string, ObsOv
     let cancelled = false
     Promise.all(
       obstructions.map(({ type, id }) =>
-        fetch(`/api/tileview/terrain/obstructionOverview/${type}/${id}`)
-          .then(r => r.ok ? r.json() : null)
+        fetchWithRetry(`/api/tileview/terrain/obstructionOverview/${type}/${id}`, undefined, () => cancelled)
+          .then(r => r.json())
           .catch(() => null)
           .then(data => ({ key: `${type}/${id}`, data: data as ObsOverview | null }))
       )

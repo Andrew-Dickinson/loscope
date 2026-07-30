@@ -13,6 +13,7 @@
  */
 import { useEffect, useState } from 'react'
 import * as THREE from 'three'
+import { fetchWithRetry } from '../../lib/fetchWithRetry'
 
 interface TileInfo {
   id: string
@@ -29,8 +30,8 @@ export default function BackgroundTiles({ binId, buildingOffset }: BackgroundTil
 
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/rooftop/backgroundTileIds/${binId}`)
-      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    fetchWithRetry(`/api/rooftop/backgroundTileIds/${binId}`, undefined, () => cancelled)
+      .then(r => r.json())
       .then((data: { tiles: TileInfo[] }) => { if (!cancelled) setTiles(data.tiles) })
       .catch(() => {})
     return () => { cancelled = true }
@@ -71,8 +72,8 @@ function BackgroundTile({ binId, tileId, swNys, buildingOffset }: BackgroundTile
     let cancelled = false
     async function load() {
       try {
-        const resp = await fetch(`/api/rooftop/backgroundTileRaster/${binId}/${tileId}`)
-        if (!resp.ok || cancelled) return
+        const resp = await fetchWithRetry(`/api/rooftop/backgroundTileRaster/${binId}/${tileId}`, undefined, () => cancelled)
+        if (cancelled) return
         const buf = await resp.arrayBuffer()
         if (cancelled) return
 
