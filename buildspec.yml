@@ -1,0 +1,19 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - export DOCKERHUB_USER=$(aws secretsmanager get-secret-value --secret-id /creds/dockerhub --query SecretString --output text | jq -r '.DOCKERHUB_USER')
+      - export DOCKERHUB_PASS=$(aws secretsmanager get-secret-value --secret-id /creds/dockerhub --query SecretString --output text | jq -r '.DOCKERHUB_PASS')
+      - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+  build:
+    on-failure: ABORT
+    commands:
+      - echo Build started on `date`
+      - echo Building and pushing the Docker images...
+      - export AWS_ACCOUNT=$AWS_ACCOUNT_ID
+      - tools/ecs_deployment/ecr_push.sh
+  post_build:
+    commands:
+      - echo Deploying updated services...
+      - aws ecs update-service --cluster Mesh-Services --service loscope-service-27q7tsvx --force-new-deployment
