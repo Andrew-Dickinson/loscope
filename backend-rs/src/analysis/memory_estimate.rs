@@ -29,7 +29,7 @@ const DEFAULT_OBSTRUCTION_BYTES_PER_TILE_ESTIMATE: u64 = 256 * 1024;
 /// Multiplier applied to the raw estimate to cover allocator overhead, transient copies made
 /// while merging grids, and general slop between the model here and observed RSS. Tune via
 /// LOS_MEMORY_ESTIMATE_SAFETY_FACTOR.
-const DEFAULT_SAFETY_FACTOR: f64 = 1.3;
+const DEFAULT_SAFETY_FACTOR: f64 = 2.5;
 
 fn obstruction_bytes_per_tile_estimate() -> u64 {
     get_env(LOS_OBSTRUCTION_BYTES_PER_TILE_ESTIMATE)

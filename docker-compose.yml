@@ -1,40 +1,55 @@
+x-backend-common: &backend-common
+  build:
+    context: .
+    dockerfile: Dockerfile.backend
+  environment: &backend-common-environment
+    ROCKET_ADDRESS: "0.0.0.0"
+    ROCKET_PORT: "8000"
+    LOS_ASSET_S3_BUCKET: ${LOS_ASSET_S3_BUCKET}
+    LOS_ASSET_HTTP_BASE_URL: ${LOS_ASSET_HTTP_BASE_URL}
+    LOCAL_ASSET_CACHE_ROOT: /cache
+    LOS_ORTHOS_PREFIX: ${LOS_ORTHOS_PREFIX}
+    LOS_TERRAIN_TILE_PREFIX: ${LOS_TERRAIN_TILE_PREFIX}
+    LOS_OBSTRUCTION_PREFIX: ${LOS_OBSTRUCTION_PREFIX}
+    LOS_FOOTPRINTS_PREFIX: ${LOS_FOOTPRINTS_PREFIX}
+    MESHDB_API_TOKEN: ${MESHDB_API_TOKEN}
+    AWS_PROFILE: ${AWS_PROFILE}
+    REDIS_URL: redis://redis:6379
+    # Ceiling on estimated in-flight analysis memory before requests get throttled (503 +
+    # Retry-After). Kept well under the container's hard memory limit below to leave headroom
+    # for the process baseline, asset caches, and other memory-heavy endpoints (rooftop,
+    # tileview) that this budget doesn't cover. Keep this aligned with `limits.memory` below.
+    LOS_MAX_ANALYSIS_MEMORY_BYTES: "650000000" # 650 MB
+  volumes:
+    - ~/.aws:/root/.aws
+    - asset-cache:/cache
+  depends_on:
+    redis:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/api/healthcheck"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 10s
+  deploy: &backend-common-deploy
+    resources:
+      limits:
+        cpus: "5"
+        memory: 1000m
+      reservations:
+        memory: 1000m
+
 services:
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    environment:
-      ROCKET_ADDRESS: "0.0.0.0"
-      ROCKET_PORT: "8000"
-      LOS_ASSET_S3_BUCKET: ${LOS_ASSET_S3_BUCKET}
-      LOS_ASSET_HTTP_BASE_URL: ${LOS_ASSET_HTTP_BASE_URL}
-      LOCAL_ASSET_CACHE_ROOT: /cache
-      LOS_ORTHOS_PREFIX: ${LOS_ORTHOS_PREFIX}
-      LOS_TERRAIN_TILE_PREFIX: ${LOS_TERRAIN_TILE_PREFIX}
-      LOS_OBSTRUCTION_PREFIX: ${LOS_OBSTRUCTION_PREFIX}
-      LOS_FOOTPRINTS_PREFIX: ${LOS_FOOTPRINTS_PREFIX}
-      MESHDB_API_TOKEN: ${MESHDB_API_TOKEN}
-      AWS_PROFILE: ${AWS_PROFILE}
-      REDIS_URL: redis://redis:6379
-      # Ceiling on estimated in-flight analysis memory before requests get throttled (503 +
-      # Retry-After). Kept well under the container's hard memory limit below to leave headroom
-      # for the process baseline, asset caches, and other memory-heavy endpoints (rooftop,
-      # tileview) that this budget doesn't cover. Keep this aligned with `limits.memory` below.
-      LOS_MAX_ANALYSIS_MEMORY_BYTES: "536870912" # 512m
-    volumes:
-      - ~/.aws:/root/.aws
-      - asset-cache:/cache
+  backend-1:
+    <<: *backend-common
     ports:
-      - "8000:8000"
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/healthcheck"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      - "8001:8000"
+
+  backend-2:
+    <<: *backend-common
+    ports:
+      - "8002:8000"
 
   frontend:
     build:
@@ -43,8 +58,17 @@ services:
     ports:
       - "80:80"
     depends_on:
-      backend:
+      backend-1:
         condition: service_healthy
+      backend-2:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256m
+        reservations:
+          memory: 256m
 
   cache-janitor:
     build:
@@ -56,6 +80,13 @@ services:
     volumes:
       - asset-cache:/cache
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.065"
+          memory: 65m
+        reservations:
+          memory: 65m
 
   redis:
     image: redis:8-alpine
@@ -65,7 +96,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512m
+          cpus: "0.125"
+          memory: 900m
+        reservations:
+          memory: 900m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
