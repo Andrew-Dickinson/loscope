@@ -55,12 +55,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+    environment:
+      # Set to 1 or 2 to pick the upstream list directly and skip the startup
+      # probe for backend-2; leave unset to auto-detect instead. Keep this in
+      # sync with whatever you pass to `--scale backend-2=...` below.
+      BACKEND_COUNT: ${BACKEND_COUNT:-}
     ports:
       - "80:80"
     depends_on:
+      # backend-2 is intentionally not listed here: it's optional (run with
+      # `--scale backend-2=0` for single-backend mode) and nginx's entrypoint
+      # probes for it at container start rather than requiring it up front.
       backend-1:
-        condition: service_healthy
-      backend-2:
         condition: service_healthy
     deploy:
       resources:
