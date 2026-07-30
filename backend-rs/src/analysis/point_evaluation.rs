@@ -47,7 +47,7 @@ pub struct ZoneEvaluation {
     intersection: IntersectionResult,
 }
 
-#[derive(new, Serialize, Deserialize, SchemaWrite, SchemaRead, Getters, Clone)]
+#[derive(new, Serialize, Deserialize, SchemaWrite, SchemaRead, Getters, Clone, Debug)]
 pub struct PointEvaluationInput {
     #[serde(rename = "point_a_nys")]
     point_a: NYSCoords3,

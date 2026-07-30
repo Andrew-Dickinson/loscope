@@ -63,4 +63,20 @@ aws-smithy-mocks = "0.2.6"
 aws-sdk-s3 = { version = "1", features = ["test-util"] }
 wiremock = "0.6"
 tokio = { version = "1", features = ["test-util"] }
+proptest = "1.11.0"
+
+[features]
+# Gates the memory-budget-accounting integration test suite (tests/memory_budget_accounting.rs).
+# That suite installs a process-wide counting global allocator and drives real allocation-heavy
+# code paths with proptest-generated (including deliberately adversarial) inputs, so it does not
+# belong in the default `cargo test` run: some cases intentionally allocate hundreds of MB to GB
+# and the global allocator adds bookkeeping overhead to every allocation for the whole binary.
+# Run explicitly with:
+#   cargo test --features memory-audit --test memory_budget_accounting -- --test-threads=1
+memory-audit = []
+
+[[test]]
+name = "memory_budget_accounting"
+path = "tests/memory_budget_accounting.rs"
+required-features = ["memory-audit"]
 

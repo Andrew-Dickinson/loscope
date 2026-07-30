@@ -155,6 +155,35 @@ mod tests {
     }
 
     #[test]
+    fn shrink_to_releases_the_difference_immediately() {
+        let budget = MemoryBudget::new(1000);
+        let mut r = budget.try_reserve(700).unwrap();
+        r.shrink_to(300);
+        assert_eq!(budget.reserved_bytes.load(Ordering::SeqCst), 300);
+        // The freed 400 bytes should be immediately available to another reservation, without
+        // waiting for `r` to be dropped.
+        assert!(budget.try_reserve(650).is_ok());
+    }
+
+    #[test]
+    fn shrink_to_a_larger_value_is_a_no_op() {
+        let budget = MemoryBudget::new(1000);
+        let mut r = budget.try_reserve(300).unwrap();
+        r.shrink_to(900); // larger than currently held -- must not grow the reservation
+        assert_eq!(budget.reserved_bytes.load(Ordering::SeqCst), 300);
+    }
+
+    #[test]
+    fn shrunk_reservation_still_releases_remainder_on_drop() {
+        let budget = MemoryBudget::new(1000);
+        {
+            let mut r = budget.try_reserve(700).unwrap();
+            r.shrink_to(300);
+        }
+        assert_eq!(budget.reserved_bytes.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
     fn reservation_can_be_moved_into_an_owned_context() {
         // Regression guard for the streaming-endpoint use case: a Reservation must be movable
         // into a 'static / owned context (e.g. an async stream) without borrowing MemoryBudget.

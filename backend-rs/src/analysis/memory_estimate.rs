@@ -305,8 +305,12 @@ pub fn estimate_analysis_result_bytes(input: &PointEvaluationInput) -> u64 {
 mod tests {
     use super::*;
     use crate::types::coords::{GPSCoords3, NYSCoords3};
-    use crate::types::obstructions::ObstructionTypesFilter;
+    use crate::types::obstructions::{ObstructionMeta, ObstructionRaster, ObstructionTypesFilter};
+    use crate::types::tiles::TileId;
     use crate::util::coord_conversion::CoordinateConverter;
+    use ndarray::Array2;
+    use std::collections::HashMap;
+    use uuid::Uuid;
 
     fn gps_to_nys(lat: f64, lon: f64, alt_m: f64) -> NYSCoords3 {
         CoordinateConverter::new().to_nys_plane3(&GPSCoords3::new(lat, lon, alt_m))
@@ -314,6 +318,124 @@ mod tests {
 
     fn make_input(pa: NYSCoords3, pb: NYSCoords3, freq: f64) -> PointEvaluationInput {
         PointEvaluationInput::new(pa, pb, freq, ObstructionTypesFilter::All)
+    }
+
+    /// Reports the same fixed number of synthetic obstructions (all `ActivePermits`) for every
+    /// tile it's asked about.
+    struct FlatCountObstructionProvider {
+        count_per_tile: usize,
+    }
+
+    #[async_trait]
+    impl ObstructionProvider for FlatCountObstructionProvider {
+        async fn get_obstruction_ids_for_tile(
+            &self,
+            _tile_id: TileId,
+        ) -> Result<HashMap<ObstructionType, Vec<ObstructionId>>, AssetErr> {
+            let mut out = HashMap::new();
+            if self.count_per_tile > 0 {
+                out.insert(
+                    ObstructionType::ActivePermits,
+                    (0..self.count_per_tile).map(|_| Uuid::new_v4()).collect(),
+                );
+            }
+            Ok(out)
+        }
+
+        async fn get_obstruction_meta(
+            &self,
+            _obstruction_type: &ObstructionType,
+            _obstruction_id: ObstructionId,
+        ) -> Result<ObstructionMeta, AssetErr> {
+            unreachable!("not exercised by these tests")
+        }
+
+        async fn get_obstruction_raster(
+            &self,
+            _obstruction_type: &ObstructionType,
+            _obstruction_id: ObstructionId,
+        ) -> Result<ObstructionRaster, AssetErr> {
+            unreachable!("not exercised by these tests")
+        }
+    }
+
+    struct FailingObstructionProvider;
+
+    #[async_trait]
+    impl ObstructionProvider for FailingObstructionProvider {
+        async fn get_obstruction_ids_for_tile(
+            &self,
+            _tile_id: TileId,
+        ) -> Result<HashMap<ObstructionType, Vec<ObstructionId>>, AssetErr> {
+            Err(AssetErr::AssetDownloadError("simulated failure".into()))
+        }
+
+        async fn get_obstruction_meta(
+            &self,
+            _obstruction_type: &ObstructionType,
+            _obstruction_id: ObstructionId,
+        ) -> Result<ObstructionMeta, AssetErr> {
+            unreachable!("not exercised by these tests")
+        }
+
+        async fn get_obstruction_raster(
+            &self,
+            _obstruction_type: &ObstructionType,
+            _obstruction_id: ObstructionId,
+        ) -> Result<ObstructionRaster, AssetErr> {
+            unreachable!("not exercised by these tests")
+        }
+    }
+
+    fn short_link_input() -> PointEvaluationInput {
+        make_input(
+            gps_to_nys(40.700, -73.960, 30.0),
+            gps_to_nys(40.705, -73.950, 30.0),
+            5_000_000_000.0,
+        )
+    }
+
+    #[tokio::test]
+    async fn precise_estimate_with_no_obstructions_is_smaller_than_flat_default() {
+        let input = short_link_input();
+        let provider = FlatCountObstructionProvider { count_per_tile: 0 };
+        let precise = estimate_analysis_bytes_precise(&input, &provider).await.unwrap();
+        // No obstructions at all should never cost more than the flat-guess fallback, which pads
+        // for "a modest handful" per tile regardless of reality.
+        assert!(precise <= estimate_analysis_bytes(&input));
+    }
+
+    #[tokio::test]
+    async fn precise_estimate_scales_with_real_obstruction_count() {
+        let input = short_link_input();
+        let sparse = FlatCountObstructionProvider { count_per_tile: 1 };
+        let dense = FlatCountObstructionProvider { count_per_tile: 15 };
+        let sparse_estimate = estimate_analysis_bytes_precise(&input, &sparse).await.unwrap();
+        let dense_estimate = estimate_analysis_bytes_precise(&input, &dense).await.unwrap();
+        assert!(
+            dense_estimate > sparse_estimate,
+            "denser obstruction count should raise the estimate: sparse={sparse_estimate} dense={dense_estimate}"
+        );
+    }
+
+    #[tokio::test]
+    async fn precise_estimate_propagates_provider_errors() {
+        let input = short_link_input();
+        let provider = FailingObstructionProvider;
+        let result = estimate_analysis_bytes_precise(&input, &provider).await;
+        assert!(matches!(result, Err(AssetErr::AssetDownloadError(_))));
+    }
+
+    #[tokio::test]
+    async fn result_estimate_is_smaller_than_precise_peak_estimate() {
+        let input = short_link_input();
+        let provider = FlatCountObstructionProvider { count_per_tile: 5 };
+        let peak = estimate_analysis_bytes_precise(&input, &provider).await.unwrap();
+        let result = estimate_analysis_result_bytes(&input);
+        assert!(
+            result < peak,
+            "post-hoc result estimate ({result}) should be smaller than the pre-admission peak estimate ({peak})"
+        );
     }
 
     #[test]

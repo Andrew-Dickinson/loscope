@@ -728,6 +728,45 @@ mod tests {
     }
 
     #[test]
+    fn compute_fresnel_zone_footprint_matches_compute_fresnel_zone() {
+        // Same rationale/exclusions as fresnel_zone_dims_matches_compute_fresnel_zone above: this
+        // compares against the real (expensive) compute_fresnel_zone, so no long-distance/
+        // low-frequency inputs here.
+        let cases = [
+            make_input(
+                gps_to_nys(40.650, -73.800, 100.0),
+                gps_to_nys(40.7173, -74.0060, 10000.0),
+                5_000_000_000.0,
+            ),
+            make_input(
+                gps_to_nys(40.650, -73.979, 100.0),
+                gps_to_nys(40.7173, -74.0060, 100.0),
+                2_400_000_000.0,
+            ),
+            make_input(
+                gps_to_nys(40.650, -73.800, 100.0),
+                gps_to_nys(40.650, -74.000, 100.0),
+                5_000_000_000.0,
+            ),
+            make_input(
+                gps_to_nys(40.650, -73.800, 100.0),
+                gps_to_nys(40.8, -73.800, 100.0),
+                5_000_000_000.0,
+            ),
+        ];
+
+        for alpha in [ALPHA_ZONE_FULL, ALPHA_ZONE_INNER] {
+            for input in &cases {
+                let (widths, offsets, base_offset) = compute_fresnel_zone_footprint(input, alpha);
+                let zone = compute_fresnel_zone(input, alpha);
+                assert_eq!(&widths, zone.widths(), "widths mismatch at alpha={alpha}");
+                assert_eq!(&offsets, zone.offsets(), "offsets mismatch at alpha={alpha}");
+                assert_eq!(&base_offset, zone.base_offset(), "base_offset mismatch at alpha={alpha}");
+            }
+        }
+    }
+
+    #[test]
     fn fresnel_zone_dims_grows_with_distance_and_shrinks_with_frequency() {
         let short = make_input(
             gps_to_nys(40.700, -73.960, 30.0),
