@@ -7,6 +7,7 @@ use crate::providers::obstruction_provider::ObstructionProvider;
 use crate::types::coords::{NYSCoords2, NYSCoords3};
 use crate::types::errors::AssetErr;
 use crate::types::obstructions::ObstructionTypesFilter;
+use crate::types::fraction::FractionU8;
 use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::TileId;
 use crate::util::env::{LOS_DEBUG_DUMP_DIR, get_env};
@@ -20,7 +21,6 @@ use std::collections::HashSet;
 use std::path::Path;
 use derive_more::Display;
 use strum_macros::EnumDiscriminants;
-use typed_floats::tf64::PositiveFinite;
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -39,7 +39,7 @@ pub enum ResultStatus {
     Obstructed,          // alpha=0.6 blocked
 }
 
-pub type IntersectionResult = StairStepGrid<PositiveFinite>;
+pub type IntersectionResult = StairStepGrid<FractionU8>;
 
 #[derive(new, Serialize, Deserialize, SchemaWrite, SchemaRead, Getters)]
 pub struct ZoneEvaluation {
@@ -186,9 +186,9 @@ pub async fn evaluate_points(
     let max_intersection_full = intersection_full.max().unwrap();
     let max_intersection_inner = intersection_inner.max().unwrap();
 
-    let result = if *max_intersection_full == 0.0 {
+    let result = if max_intersection_full.is_zero() {
         ResultStatus::Unobstructed
-    } else if *max_intersection_inner == 0.0 {
+    } else if max_intersection_inner.is_zero() {
         ResultStatus::PartiallyObstructed
     } else {
         ResultStatus::Obstructed
@@ -265,22 +265,21 @@ fn intersect_inner(
     zone_point: &FresnelZonePoint,
     terrain: &u16,
     coords: (usize, usize),
-) -> PositiveFinite {
+) -> FractionU8 {
     let top = zone_point.top();
     let bottom = zone_point.bottom();
 
     let intersection = if *terrain >= top {
-        PositiveFinite::new(1.0).unwrap()
+        FractionU8::ONE
     } else if *terrain <= bottom {
-        PositiveFinite::new(0.0).unwrap()
+        FractionU8::ZERO
     } else {
         let height: f64 = (top - bottom).into();
         if height == 0.0 {
-            PositiveFinite::new(1.0).unwrap()
+            FractionU8::ONE
         } else {
             assert!(height > 0.0);
-            // Safety: from above, we know terrain > bottom, so this result must be positive
-            PositiveFinite::new(f64::from(*terrain - bottom) / height).unwrap()
+            FractionU8::new(f64::from(*terrain - bottom) / height)
         }
     };
 
@@ -292,7 +291,7 @@ fn intersect_inner(
     if Euclidean.distance_within(sample_point, endpoints.0, OCCLUSION_DISTANCE_USFT)
         || Euclidean.distance_within(sample_point, endpoints.1, OCCLUSION_DISTANCE_USFT)
     {
-        PositiveFinite::new(0.0).unwrap()
+        FractionU8::ZERO
     } else {
         intersection
     }
@@ -520,7 +519,7 @@ mod tests {
         // bottom=0, top=100, terrain=50 => 0.5
         let zone_point = FresnelZonePoint::new(0, 100);
         let result = intersect_inner(&far_endpoints(), &zero_offset(), &zone_point, &50, (0, 0));
-        assert!((f64::from(result) - 0.5).abs() < 1e-10);
+        assert!((f64::from(result) - 0.5).abs() < 1e-2);
     }
 
     #[test]
@@ -528,7 +527,7 @@ mod tests {
         // bottom=0, top=10, terrain=3 => 0.3
         let zone_point = FresnelZonePoint::new(0, 10);
         let result = intersect_inner(&far_endpoints(), &zero_offset(), &zone_point, &3, (0, 0));
-        assert!((f64::from(result) - 0.3).abs() < 1e-10);
+        assert!((f64::from(result) - 0.3).abs() < 1e-2);
     }
 
     #[test]
@@ -571,7 +570,7 @@ mod tests {
         let endpoints = (point!(x: 0.0, y: 0.0), point!(x: 0.0, y: 0.0));
         let zone_point = FresnelZonePoint::new(0, 10);
         let result = intersect_inner(&endpoints, &zero_offset(), &zone_point, &5, (1000, 1000));
-        assert!((f64::from(result) - 0.5).abs() < 1e-10);
+        assert!((f64::from(result) - 0.5).abs() < 1e-2);
     }
 
     #[test]

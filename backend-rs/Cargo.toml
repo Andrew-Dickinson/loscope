@@ -33,7 +33,6 @@ geo = "0.33.1"
 async-fn-stream = "0.2.2"
 futures-util = "0.3.32"
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
-typed_floats = { version = "1.0.7", features = ["serde", "libm"] }
 derive_more = "2.1.1"
 maplit = "1.0.2"
 pretty_assertions = "1.4.1"

@@ -1,7 +1,7 @@
 use crate::analysis::angle_context::AngleContext;
 use crate::analysis::point_evaluation::PointEvaluationInput;
 use crate::types::coords::NYSCoords2;
-use crate::types::stairstep::{StairStepGrid, WincodeGridElem};
+use crate::types::stairstep::StairStepGrid;
 use derive_more::From;
 use nalgebra::{Matrix3, Matrix4, SMatrix, Vector4};
 use ndarray::{Array1, Array2};
@@ -18,16 +18,6 @@ const EARTH_RADIUS_USFT: f64 = EARTH_RADIUS_METERS * USFT_PER_METER;
 #[derive(Serialize, Deserialize, SchemaWrite, SchemaRead, From, Default, Copy, Clone)]
 #[repr(C)]
 pub struct FresnelZonePoint(u16, u16);
-
-impl WincodeGridElem for FresnelZonePoint {
-    type Wire = FresnelZonePoint;
-    fn into_wire(self) -> FresnelZonePoint {
-        self
-    }
-    fn from_wire(w: FresnelZonePoint) -> Self {
-        w
-    }
-}
 
 impl FresnelZonePoint {
     pub fn new(bottom: u16, top: u16) -> FresnelZonePoint {

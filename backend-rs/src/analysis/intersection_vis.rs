@@ -1,7 +1,7 @@
 use crate::analysis::png_encoder;
+use crate::types::fraction::FractionU8;
 use image::{DynamicImage, ImageBuffer};
 use ndarray::Array2;
-use typed_floats::tf64::PositiveFinite;
 
 const TILE_SIDE: usize = png_encoder::TILE_SIDE;
 const UPSCALE: usize = png_encoder::UPSCALE;
@@ -47,14 +47,14 @@ fn write_px(raw: &mut [u8], idx: usize, color: [u8; 4]) {
 /// 4000×4000 RGBA image using a SunsetDark-inspired colormap, with a 2-pixel
 /// black outline around the filled region.
 pub fn tile_intersection_to_img(
-    intersection: Array2<Option<&PositiveFinite>>,
+    intersection: Array2<Option<&FractionU8>>,
 ) -> Option<DynamicImage> {
     // Build 4000×4000 pixel buffer: upscale 8x, flip north-up.
     // intersection[[x, y]]: x=easting (0..500), y=northing (0 = south).
     // Image row 0 = north (northing=499), col = easting, both repeated 8x.
     if intersection.iter().all(|cell| {
         let Some(val) = cell else { return true };
-        **val == 0.0
+        val.is_zero()
     }) {
         return None;
     }
@@ -191,10 +191,10 @@ pub fn tile_intersection_to_img(
 
 /// Encode the intersection raster as a PNG byte vector, or `None` if the intersection is empty.
 /// Uses the custom DEFLATE encoder which exploits image sparsity for fast encoding.
-pub fn tile_intersection_to_png(intersection: Array2<Option<&PositiveFinite>>) -> Option<Vec<u8>> {
+pub fn tile_intersection_to_png(intersection: Array2<Option<&FractionU8>>) -> Option<Vec<u8>> {
     if intersection
         .iter()
-        .all(|cell| cell.is_none_or(|v| *v == 0.0))
+        .all(|cell| cell.is_none_or(|v| v.is_zero()))
     {
         return None;
     }
@@ -221,12 +221,11 @@ pub fn tile_intersection_to_png(intersection: Array2<Option<&PositiveFinite>>) -
 
 #[cfg(test)]
 mod tests {
-    use super::{OUT_SIDE, TILE_SIDE, UPSCALE, tile_intersection_to_img};
+    use super::{FractionU8, OUT_SIDE, TILE_SIDE, UPSCALE, tile_intersection_to_img};
     use ndarray::Array2;
-    use typed_floats::tf64::PositiveFinite;
 
-    fn pf(v: f64) -> PositiveFinite {
-        PositiveFinite::new(v).unwrap()
+    fn pf(v: f64) -> FractionU8 {
+        FractionU8::new(v)
     }
 
     fn rgba_at(img: &image::DynamicImage, col: u32, row: u32) -> [u8; 4] {
@@ -238,14 +237,14 @@ mod tests {
     // All-None input → None
     #[test]
     fn all_none_returns_none() {
-        let grid: Array2<Option<&PositiveFinite>> = Array2::from_elem((TILE_SIDE, TILE_SIDE), None);
+        let grid: Array2<Option<&FractionU8>> = Array2::from_elem((TILE_SIDE, TILE_SIDE), None);
         assert!(tile_intersection_to_img(grid).is_none());
     }
 
     #[test]
     fn all_zero_returns_none() {
-        let zero = Some(PositiveFinite::default());
-        let grid: Array2<Option<&PositiveFinite>> =
+        let zero = Some(FractionU8::default());
+        let grid: Array2<Option<&FractionU8>> =
             Array2::from_elem((TILE_SIDE, TILE_SIDE), zero.as_ref());
         assert!(tile_intersection_to_img(grid).is_none());
     }
@@ -257,7 +256,7 @@ mod tests {
     #[test]
     fn single_cell_color_position_and_border() {
         let v = pf(0.1);
-        let mut grid: Array2<Option<&PositiveFinite>> =
+        let mut grid: Array2<Option<&FractionU8>> =
             Array2::from_elem((TILE_SIDE, TILE_SIDE), None);
         grid[[0, 0]] = Some(&v); // easting=0, northing=0 → SW corner
 
@@ -273,7 +272,7 @@ mod tests {
                 let px = rgba_at(&img, col, row);
                 assert_eq!(
                     px,
-                    [255, 187, 0, 255],
+                    [255, 186, 0, 255],
                     "filled pixel ({col},{row}) wrong color"
                 );
             }
@@ -296,7 +295,7 @@ mod tests {
     fn zero_value_pixels_are_transparent() {
         let zero = pf(0.0);
         let nonzero = pf(0.5);
-        let mut grid: Array2<Option<&PositiveFinite>> =
+        let mut grid: Array2<Option<&FractionU8>> =
             Array2::from_elem((TILE_SIDE, TILE_SIDE), None);
         grid[[1, 1]] = Some(&zero); // easting=1,  northing=1 → should be transparent
         grid[[20, 1]] = Some(&nonzero); // easting=20, northing=1 → should be opaque (far away)
@@ -330,7 +329,7 @@ mod tests {
     #[test]
     fn border_dilation_does_not_wrap_across_image_edges() {
         let v = pf(0.5);
-        let mut grid: Array2<Option<&PositiveFinite>> =
+        let mut grid: Array2<Option<&FractionU8>> =
             Array2::from_elem((TILE_SIDE, TILE_SIDE), None);
         grid[[0, TILE_SIDE - 1]] = Some(&v); // easting=0, northing=499 → image row 0, col 0
 

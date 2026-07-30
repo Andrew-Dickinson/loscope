@@ -1,5 +1,6 @@
 pub mod coords;
 pub mod errors;
+pub mod fraction;
 pub mod meshdb;
 pub mod obj_writer;
 pub mod obstructions;

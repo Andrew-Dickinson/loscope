@@ -50,10 +50,7 @@ impl From<&PointEvaluationOutcomeFull> for PointEvaluationOverview {
                                 .result_full()
                                 .intersection()
                                 .max_in_tile(tile_id)
-                                .cloned()
-                                .map(f64::from)
-                                .unwrap_or(0.0)
-                                > 0.0,
+                                .is_some_and(|v| !v.is_zero()),
                     })
                     .collect(),
                 overhead_ellipse_poly: generate_ellipse_poly(
