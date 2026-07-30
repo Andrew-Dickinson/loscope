@@ -10,7 +10,7 @@ use crate::types::stairstep::StairStepGrid;
 use crate::types::tiles::{SUBGRID_TILE_SIDE_LENGTH_USFT, TileId};
 use derive_new::new;
 use futures_util::{StreamExt, TryStreamExt, stream};
-use ndarray::{Array2, ArrayView2, s};
+use ndarray::{Array1, Array2, ArrayView2, s};
 use std::collections::{HashSet};
 
 const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_TILES: usize = 10;
@@ -18,31 +18,44 @@ const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_OBSTRUCTIONS: usize = 30;
 
 pub(crate) type TerrainGrid = StairStepGrid<u16>;
 
-pub fn get_intersecting_tiles(fresnel_zone: &FresnelZone) -> HashSet<TileId> {
-    let max_width = (fresnel_zone.values().ncols() as f64
+/// Takes a `FresnelZone`'s `widths`/`offsets`/`base_offset` directly (rather than the whole
+/// `&FresnelZone`) specifically so callers that only need to know which tiles a zone touches
+/// don't have to build the zone's `values` grid first — that's an O(rows x max_width) allocation
+/// (the dominant cost of a full zone computation) that this function never reads. See
+/// `analysis::fresnel_zone::compute_fresnel_zone_footprint`, which computes exactly these three
+/// things without ever allocating `values`, and `estimate_analysis_bytes_precise`
+/// (memory_estimate.rs), the caller that motivated this split: it needs the real tile set to
+/// query obstruction counts *before* reserving anything, so allocating the full zone here would
+/// have meant every estimate — including estimates for requests that end up rejected — paid the
+/// zone's full peak cost completely unaccounted for by the budget it's computing.
+pub fn get_intersecting_tiles(
+    widths: &Array1<usize>,
+    offsets: &Array1<usize>,
+    base_offset: &NYSCoords2,
+) -> HashSet<TileId> {
+    // Capacity hint only (avoids a few HashSet reallocations) -- doesn't need to be exact, so
+    // `widths`' own extent stands in for the `values` grid's shape.
+    let max_width = (widths.iter().max().copied().unwrap_or(0) as f64
         / f64::from(SUBGRID_TILE_SIDE_LENGTH_USFT))
     .ceil() as usize
         + 1;
-    let max_height = (fresnel_zone.values().nrows() as f64
-        / f64::from(SUBGRID_TILE_SIDE_LENGTH_USFT))
-    .ceil() as usize
-        + 1;
+    let max_height =
+        (widths.len() as f64 / f64::from(SUBGRID_TILE_SIDE_LENGTH_USFT)).ceil() as usize + 1;
     let max_tiles_count = max_width * max_height;
 
     let mut intersecting_tiles = HashSet::with_capacity(max_tiles_count);
 
-    fresnel_zone
-        .widths()
+    widths
         .iter()
-        .zip(fresnel_zone.offsets())
+        .zip(offsets)
         .enumerate()
         .for_each(|(i, (width, offset))| {
             if *width == 0 {
                 return;
             }
             let sample_point = NYSCoords2::new(
-                fresnel_zone.base_offset().easting() + *offset as f64,
-                fresnel_zone.base_offset().northing() + i as f64,
+                base_offset.easting() + *offset as f64,
+                base_offset.northing() + i as f64,
             );
             let west_tile = TileId::from_contained_point(&sample_point);
             let west_tile_e_edge =
@@ -452,7 +465,7 @@ mod test {
     #[test]
     fn test_get_intersecting_tiles_4_corner() {
         let zone = mock_fresnel_zone(NYSCoords2::new(1002498., 244998.));
-        let tiles = get_intersecting_tiles(&zone);
+        let tiles = get_intersecting_tiles(zone.widths(), zone.offsets(), zone.base_offset());
 
         assert_eq!(
             tiles,
@@ -468,7 +481,7 @@ mod test {
     #[test]
     fn test_get_intersecting_tiles_3_corner() {
         let zone = mock_fresnel_zone(NYSCoords2::new(1002497., 244997.));
-        let tiles = get_intersecting_tiles(&zone);
+        let tiles = get_intersecting_tiles(zone.widths(), zone.offsets(), zone.base_offset());
 
         assert_eq!(
             tiles,
@@ -483,7 +496,7 @@ mod test {
     #[test]
     fn test_get_intersecting_tiles_2_corner() {
         let zone = mock_fresnel_zone(NYSCoords2::new(1002496., 244997.));
-        let tiles = get_intersecting_tiles(&zone);
+        let tiles = get_intersecting_tiles(zone.widths(), zone.offsets(), zone.base_offset());
 
         assert_eq!(
             tiles,
@@ -497,7 +510,7 @@ mod test {
     #[test]
     fn test_get_intersecting_tiles_1_corner() {
         let zone = mock_fresnel_zone(NYSCoords2::new(1002496., 244996.));
-        let tiles = get_intersecting_tiles(&zone);
+        let tiles = get_intersecting_tiles(zone.widths(), zone.offsets(), zone.base_offset());
 
         assert_eq!(
             tiles,
@@ -515,7 +528,7 @@ mod test {
             array![1, 0, 0, 1,],
             NYSCoords2::new(1002490., 244990.),
         );
-        let tiles = get_intersecting_tiles(&zone);
+        let tiles = get_intersecting_tiles(zone.widths(), zone.offsets(), zone.base_offset());
 
         assert_eq!(
             tiles
@@ -542,7 +555,7 @@ mod test {
             array![0, 100, 200, 300, 400, 500],
             NYSCoords2::new(1002490., 244990.),
         );
-        let tiles = get_intersecting_tiles(&zone);
+        let tiles = get_intersecting_tiles(zone.widths(), zone.offsets(), zone.base_offset());
 
         assert_eq!(
             tiles
@@ -566,7 +579,7 @@ mod test {
             // 1002500,245000
             NYSCoords2::new(1002500., 245000.),
         );
-        let tiles = get_intersecting_tiles(&zone);
+        let tiles = get_intersecting_tiles(zone.widths(), zone.offsets(), zone.base_offset());
 
         assert_eq!(
             tiles

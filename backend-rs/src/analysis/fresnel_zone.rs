@@ -333,6 +333,91 @@ pub fn compute_fresnel_zone(
     )
 }
 
+/// Computes just the `widths`/`offsets`/`base_offset` a `FresnelZone` for this input would have —
+/// the only fields `get_intersecting_tiles` (analysis/tiles.rs) actually reads — without
+/// allocating or filling the O(rows x max_width) `values` grid `compute_fresnel_zone` builds
+/// alongside them. That grid is the dominant cost of a full zone computation (it's exactly what
+/// `zone_bytes` in memory_estimate.rs is sized around), so this is a real allocation avoided, not
+/// a cosmetic one: `estimate_analysis_bytes_precise` calls this specifically so that estimating a
+/// request's cost doesn't itself pay — completely unaccounted, since it runs before any budget
+/// reservation exists — the cost it's trying to estimate.
+///
+/// This is the outer per-row loop of `compute_fresnel_zone`, verbatim except for never
+/// allocating/writing `values` or the inner per-column loop that fills it. Kept in sync by
+/// `compute_fresnel_zone_footprint_matches_compute_fresnel_zone` below, which asserts identical
+/// `widths`/`offsets`/`base_offset` output across a range of inputs — mirroring how
+/// `fresnel_zone_dims_matches_compute_fresnel_zone` already keeps `fresnel_zone_dims` honest.
+pub fn compute_fresnel_zone_footprint(
+    point_evaluation_input: &PointEvaluationInput,
+    alpha: f64,
+) -> (Array1<usize>, Array1<usize>, NYSCoords2) {
+    let pa: (f64, f64, f64) = point_evaluation_input.point_a().into();
+    let mut pb: (f64, f64, f64) = point_evaluation_input.point_b().into();
+    let mut delta = (pb.0 - pa.0, pb.1 - pa.1, pb.2 - pa.2);
+
+    if delta.0 == 0.0 {
+        pb.0 += 0.1;
+        delta.0 = 0.1;
+    }
+
+    let dist = (delta.0 * delta.0 + delta.1 * delta.1 + delta.2 * delta.2).sqrt();
+    let mid = (
+        (pa.0 + pb.0) / 2.0,
+        (pa.1 + pb.1) / 2.0,
+        (pa.2 + pb.2) / 2.0,
+    );
+
+    let ctx = AngleContext::from_delta(delta);
+
+    let (q_ellipsoid, semi_major, semi_minor) =
+        construct_fresnel_quadratic(dist, *point_evaluation_input.frequency_hz(), alpha);
+
+    let a_nys_to_ell = nys_to_ellipsoid_transform(mid, &ctx);
+    let q_nys = a_nys_to_ell.transpose() * q_ellipsoid * a_nys_to_ell;
+
+    let max_t =
+        ((semi_minor * ctx.sin_omega).powi(2) + (semi_major * ctx.cos_omega).powi(2)).sqrt();
+    let y_vals = integer_grid(mid.1 - max_t, mid.1 + max_t);
+    let output_height = usize::try_from(y_vals.end() - y_vals.start() + 1).unwrap();
+
+    let x_base = (pa.0.min(pb.0) - semi_minor - OFFSET_BUFFER).floor() as i64;
+    let y_base = *y_vals.start();
+
+    let mut widths = Array1::<usize>::zeros(output_height);
+    let mut offsets = Array1::<usize>::zeros(output_height);
+
+    for (i, y) in y_vals.enumerate() {
+        let yf = y as f64;
+
+        let e = SMatrix::<f64, 4, 3>::from_row_slice(&[
+            1.0, 0.0, mid.0, 0.0, 0.0, yf, 0.0, 1.0, mid.2, 0.0, 0.0, 1.0,
+        ]);
+        let c_conic: Matrix3<f64> = e.transpose() * q_nys * e;
+
+        let (c_norm, u, _v) = match normalize_ellipse(&c_conic) {
+            Some(x) => x,
+            None => continue,
+        };
+        let half_w = match ellipse_half_width(&c_norm) {
+            Some(x) => x,
+            None => continue,
+        };
+
+        let ell_x_nys = u + mid.0;
+        let x_grid_nys = integer_grid(ell_x_nys - half_w, ell_x_nys + half_w);
+        if x_grid_nys.is_empty() {
+            continue;
+        }
+        let width = usize::try_from(x_grid_nys.end() - x_grid_nys.start() + 1).unwrap();
+        let x_row_base = *x_grid_nys.start();
+
+        widths[i] = width;
+        offsets[i] = (x_row_base - x_base) as usize;
+    }
+
+    (widths, offsets, NYSCoords2::new(x_base as f64, y_base as f64))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

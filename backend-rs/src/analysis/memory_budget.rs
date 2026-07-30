@@ -50,6 +50,28 @@ impl Drop for Reservation {
     }
 }
 
+impl Reservation {
+    /// Releases the difference between this reservation's current size and `new_bytes` back to
+    /// the budget immediately, shrinking the reservation in place rather than waiting for it to
+    /// be dropped. Lets a caller reserve an upfront worst-case estimate before doing expensive
+    /// work, then hand back whatever turned out to be unnecessary as soon as the real size is
+    /// known, so other concurrent requests see that headroom sooner instead of waiting for this
+    /// request to finish entirely.
+    ///
+    /// One-way release valve, not a general resize: a `new_bytes` at or above the currently-held
+    /// amount is a no-op rather than growing the reservation (this type intentionally has no way
+    /// to reserve *more* after the fact — callers that might need more should reserve for the
+    /// worst case up front instead).
+    pub fn shrink_to(&mut self, new_bytes: u64) {
+        if new_bytes >= self.bytes {
+            return;
+        }
+        let released = self.bytes - new_bytes;
+        self.reserved_bytes.fetch_sub(released, Ordering::SeqCst);
+        self.bytes = new_bytes;
+    }
+}
+
 impl MemoryBudget {
     pub fn new_from_env() -> Self {
         let limit_bytes = get_env(LOS_MAX_ANALYSIS_MEMORY_BYTES)

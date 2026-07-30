@@ -159,7 +159,8 @@ pub async fn evaluate_points(
         )));
     }
 
-    let tile_ids = get_intersecting_tiles(&zone_full);
+    let tile_ids =
+        get_intersecting_tiles(zone_full.widths(), zone_full.offsets(), zone_full.base_offset());
 
     let terrain_full = terrain_factory
         .load_terrain_grid(&tile_ids, &zone_full, &eval_input.obstruction_types)
@@ -437,7 +438,7 @@ mod tests {
             5_000_000_000.0,
         );
         let zone = compute_fresnel_zone(&input, ALPHA_ZONE_FULL);
-        let tiles = get_intersecting_tiles(&zone);
+        let tiles = get_intersecting_tiles(zone.widths(), zone.offsets(), zone.base_offset());
         let expected: HashSet<TileId> = [
             "997235_12", "997235_22", "997235_21", "997235_31", "997235_41",
             "235_01", "235_00", "235_10",
