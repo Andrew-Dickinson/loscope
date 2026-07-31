@@ -21,4 +21,4 @@ phases:
   post_build:
     commands:
       - echo Deploying updated services...
-      - aws ecs update-service --cluster Mesh-Services --service loscope-service-27q7tsvx --force-new-deployment
+      - aws ecs update-service --cluster Mesh-Services-Bigger-Instances --service loscope-service-qfy752gk --force-new-deployment
