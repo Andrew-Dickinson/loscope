@@ -10,7 +10,7 @@ phases:
     on-failure: ABORT
     commands:
       - echo Running unit and memory tests...
-      - docker run --rm -v "$CODEBUILD_SRC_DIR":/app -w /app rust:bookworm bash -c "apt-get update && apt-get install -y libopenjp2-7-dev cmake libsqlite3-dev sqlite3 && useradd -m tester && chown -R tester:tester /app && su tester -c 'cargo test -p loscope' && su tester -c 'cargo test -p loscope --features memory-audit --test memory_budget_accounting -- --test-threads=1'"
+      - docker run --rm -v "$CODEBUILD_SRC_DIR":/src:ro -w /work rust:bookworm bash -c "apt-get update && apt-get install -y libopenjp2-7-dev cmake libsqlite3-dev sqlite3 && useradd -m tester && cp -r /src/Cargo.toml /src/Cargo.lock /src/backend-rs /src/preprocessing-rs /work/ && chown -R tester:tester /work && su tester -c 'cd /work && cargo test -p loscope --lib' && su tester -c 'cd /work && cargo test -p loscope --release --features memory-audit --test memory_budget_accounting -- --test-threads=1'"
   build:
     on-failure: ABORT
     commands:
