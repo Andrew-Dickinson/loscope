@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react'
 import * as THREE from 'three'
 import { fetchWithRetry } from '../../lib/fetchWithRetry'
+import { RetryingTextureLoader } from '../../lib/retryingLoaders'
 
 interface TileInfo {
   id: string
@@ -111,7 +112,8 @@ function BackgroundTile({ binId, tileId, swNys, buildingOffset }: BackgroundTile
   // Load ortho texture
   useEffect(() => {
     let cancelled = false
-    const loader = new THREE.TextureLoader()
+    const loader = new RetryingTextureLoader()
+    loader.isAborted = () => cancelled
     loader.load(
       `/api/tileview/terrain/orthoImage/${tileId}`,
       tex => { if (!cancelled) setTexture(tex) },

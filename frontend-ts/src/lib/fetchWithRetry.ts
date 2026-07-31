@@ -16,12 +16,12 @@ export class AbortedError extends Error {
   }
 }
 
-const MAX_RETRIES = 6
+export const MAX_RETRIES = 6
 const BASE_BACKOFF_MS = 1000
 const MAX_BACKOFF_MS = 30000
 const ABORT_POLL_MS = 100
 
-function backoffDelayMs(attempt: number, retryAfterMs?: number): number {
+export function backoffDelayMs(attempt: number, retryAfterMs?: number): number {
   const exponential = Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS)
   const jittered = exponential * (0.5 + Math.random() * 0.5)
   // Never wait less than the server's suggested Retry-After, but still apply our own backoff

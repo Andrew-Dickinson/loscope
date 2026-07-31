@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { fetchWithRetry, AbortedError } from '../lib/fetchWithRetry'
 
 export interface JobState {
   status: string
@@ -27,16 +28,13 @@ export function useJob(jobId: string | null): JobState | null {
     const poll = async () => {
       while (!cancelRef.current) {
         try {
-          const res = await fetch(`/api/jobs/${jobId}`)
-          if (!res.ok) {
-            setJob(j => j ? { ...j, status: 'error', error: `HTTP ${res.status}` } : null)
-            return
-          }
+          const res = await fetchWithRetry(`/api/jobs/${jobId}`, undefined, () => cancelRef.current)
           const data = await res.json() as JobState
           setJob(data)
           if (data.status === 'done' || data.status === 'error') return
         } catch (err) {
-          setJob(j => j ? { ...j, status: 'error', error: String(err) } : null)
+          if (err instanceof AbortedError) return
+          setJob(j => j ? { ...j, status: 'error', error: err instanceof Error ? err.message : String(err) } : null)
           return
         }
         await new Promise(r => setTimeout(r, 800))

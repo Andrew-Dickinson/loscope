@@ -25,6 +25,7 @@ import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import type { ThreeEvent } from '@react-three/fiber'
 import { fetchWithRetry } from '../../lib/fetchWithRetry'
+import { RetryingTextureLoader, RetryingOBJLoader } from '../../lib/retryingLoaders'
 
 interface TileOverviewData {
   obstruction_ids: Record<string, string[]>  // { type: [id, ...] }
@@ -165,9 +166,11 @@ function TerrainMesh({ heightmap, orthoUrl, showOrtho, onReady, onLoaded, onOrth
 
   useEffect(() => {
     if (!orthoUrl) return
-    const loader = new THREE.TextureLoader()
-    loader.load(orthoUrl, tex => { setTexture(tex); onOrthoLoadedRef.current() }, undefined, () => {})
-    return () => {}
+    let cancelled = false
+    const loader = new RetryingTextureLoader()
+    loader.isAborted = () => cancelled
+    loader.load(orthoUrl, tex => { if (!cancelled) { setTexture(tex); onOrthoLoadedRef.current() } }, undefined, () => {})
+    return () => { cancelled = true }
   }, [orthoUrl])
 
   if (!geometry) return null
@@ -187,7 +190,9 @@ function useObjLoader(url: string, method = 'GET'): THREE.Group | null {
     let blobUrl: string | null = null
     setObj(null)
     if (method === 'GET') {
-      new OBJLoader().load(url, loaded => { if (!cancelled) setObj(loaded) })
+      const loader = new RetryingOBJLoader()
+      loader.isAborted = () => cancelled
+      loader.load(url, loaded => { if (!cancelled) setObj(loaded) })
     } else {
       fetchWithRetry(url, { method }, () => cancelled)
         .then(res => res.blob())

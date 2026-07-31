@@ -5,6 +5,7 @@
  */
 import { useState, useRef, useEffect } from 'react'
 import type { ChangeEvent } from 'react'
+import { fetchWithRetry, FetchError } from '../../lib/fetchWithRetry'
 
 interface GeoFeature {
   properties: {
@@ -100,21 +101,19 @@ export default function BuildingLookupField({ disabled, onBinResolved, onBinClea
     setNnLoading(true)
     nnDebounce.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/meshdb/resolve-number/${num}`)
-        if (res.ok) {
-          const data = await res.json()
-          setNnResolved(data)
-          const label = data.kind === 'nn'
-            ? `NN ${query} (BIN ${data.bin})`
-            : `Install ${query} (BIN ${data.bin})`
-          onBinResolved(data.bin, label)
-        } else if (res.status >= 400 && res.status < 500) {
+        const res = await fetchWithRetry(`/api/meshdb/resolve-number/${num}`)
+        const data = await res.json()
+        setNnResolved(data)
+        const label = data.kind === 'nn'
+          ? `NN ${query} (BIN ${data.bin})`
+          : `Install ${query} (BIN ${data.bin})`
+        onBinResolved(data.bin, label)
+      } catch (err) {
+        if (err instanceof FetchError && !err.retryable) {
           setNnError('Not a recognized NN or install number'); onBinCleared()
         } else {
-          setNnError('Resolution failed — check server configuration'); onBinCleared()
+          setNnError('Could not reach server'); onBinCleared()
         }
-      } catch {
-        setNnError('Could not reach server'); onBinCleared()
       } finally {
         setNnLoading(false)
       }

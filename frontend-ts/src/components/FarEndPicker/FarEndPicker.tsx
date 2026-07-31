@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'rea
 import { Canvas, useLoader, useThree } from '@react-three/fiber'
 import { OrbitControls, Html, useProgress } from '@react-three/drei'
 import * as THREE from 'three'
-import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { RetryingOBJLoader } from '../../lib/retryingLoaders'
 import type { ThreeEvent } from '@react-three/fiber'
 import BackgroundTiles from '../RooftopViewer/BackgroundTiles'
 import { fetchWithRetry } from '../../lib/fetchWithRetry'
@@ -34,7 +34,7 @@ function TerrainMesh({ objUrl, onPlacementClick, onLoaded }: {
   onPlacementClick: (point: THREE.Vector3) => void
   onLoaded: (obj: THREE.Object3D) => void
 }) {
-  const obj = useLoader(OBJLoader, objUrl)
+  const obj = useLoader(RetryingOBJLoader, objUrl)
   const pointerDownPos = useRef<{ x: number; y: number } | null>(null)
   const mat = useMemo(() => new THREE.MeshLambertMaterial({ color: 0x7a9ab8, side: THREE.DoubleSide }), [])
 
@@ -157,7 +157,7 @@ function CameraFit({ objUrl, defaultCamRef, resetCamFnRef }: {
   resetCamFnRef: React.MutableRefObject<(() => void) | null>
 }) {
   const { camera, controls, invalidate } = useThree()
-  const obj = useLoader(OBJLoader, objUrl)
+  const obj = useLoader(RetryingOBJLoader, objUrl)
 
   useEffect(() => {
     const oc = controls as unknown as { target: THREE.Vector3; update: () => void } | null

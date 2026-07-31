@@ -10,7 +10,7 @@ import { useRef, useMemo, useEffect, useState, Suspense, useCallback } from 'rea
 import { Canvas, useLoader, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, Html, useProgress } from '@react-three/drei'
 import * as THREE from 'three'
-import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { RetryingOBJLoader } from '../../lib/retryingLoaders'
 import { buildVoronoiMaterial } from './VoronoiMaterial'
 import BackgroundTiles from './BackgroundTiles'
 import type { ThreeEvent } from '@react-three/fiber'
@@ -77,7 +77,7 @@ interface TerrainMeshProps {
 }
 
 function TerrainMesh({ objUrl, samplePoints, analyses, placementMode, onPlacementClick, onTerrainLoaded }: TerrainMeshProps) {
-  const obj = useLoader(OBJLoader, objUrl)
+  const obj = useLoader(RetryingOBJLoader, objUrl)
   const pointerDownPos = useRef<{ x: number; y: number } | null>(null)
   useEffect(() => { onTerrainLoaded(obj) }, [obj, onTerrainLoaded])
 
@@ -484,7 +484,7 @@ function CameraFit({ binId, objUrl, stateRef, defaultCamRef, resetCamFnRef }: {
   resetCamFnRef: React.MutableRefObject<(() => void) | null>
 }) {
   const { camera, controls, invalidate } = useThree()
-  const obj = useLoader(OBJLoader, objUrl)
+  const obj = useLoader(RetryingOBJLoader, objUrl)
 
   useEffect(() => {
     const oc = controls as unknown as { target: THREE.Vector3; update: () => void } | null
