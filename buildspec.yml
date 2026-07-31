@@ -6,6 +6,11 @@ phases:
       - export DOCKERHUB_USER=$(aws secretsmanager get-secret-value --secret-id /creds/dockerhub --query SecretString --output text | jq -r '.DOCKERHUB_USER')
       - export DOCKERHUB_PASS=$(aws secretsmanager get-secret-value --secret-id /creds/dockerhub --query SecretString --output text | jq -r '.DOCKERHUB_PASS')
       - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+  pre_build:
+    on-failure: ABORT
+    commands:
+      - echo Running unit and memory tests...
+      - docker run --rm -v "$CODEBUILD_SRC_DIR":/app -w /app rust:bookworm bash -c "apt-get update && apt-get install -y libopenjp2-7-dev cmake libsqlite3-dev sqlite3 && cargo test -p loscope && cargo test -p loscope --features memory-audit --test memory_budget_accounting -- --test-threads=1"
   build:
     on-failure: ABORT
     commands:
