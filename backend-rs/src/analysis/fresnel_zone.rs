@@ -181,6 +181,12 @@ pub fn fresnel_zone_dims(point_evaluation_input: &PointEvaluationInput, alpha: f
         pb.0 += 0.1;
         delta.0 = 0.1;
     }
+    // Symmetric case: a due east-west link has delta.1 == 0.0, which makes sin_theta exactly
+    // zero in AngleContext, which then divides by zero again inside tan_omega and produces NaN.
+    if delta.1 == 0.0 {
+        pb.1 += 0.1;
+        delta.1 = 0.1;
+    }
 
     let dist = (delta.0 * delta.0 + delta.1 * delta.1 + delta.2 * delta.2).sqrt();
     let mid_y = (pa.1 + pb.1) / 2.0;
@@ -210,6 +216,12 @@ pub fn compute_fresnel_zone(
     if delta.0 == 0.0 {
         pb.0 += 0.1;
         delta.0 = 0.1;
+    }
+    // Symmetric case: a due east-west link has delta.1 == 0.0, which makes sin_theta exactly
+    // zero in AngleContext, which then divides by zero again inside tan_omega and produces NaN.
+    if delta.1 == 0.0 {
+        pb.1 += 0.1;
+        delta.1 = 0.1;
     }
 
     let dist = (delta.0 * delta.0 + delta.1 * delta.1 + delta.2 * delta.2).sqrt();
@@ -358,6 +370,12 @@ pub fn compute_fresnel_zone_footprint(
     if delta.0 == 0.0 {
         pb.0 += 0.1;
         delta.0 = 0.1;
+    }
+    // Symmetric case: a due east-west link has delta.1 == 0.0, which makes sin_theta exactly
+    // zero in AngleContext, which then divides by zero again inside tan_omega and produces NaN.
+    if delta.1 == 0.0 {
+        pb.1 += 0.1;
+        delta.1 = 0.1;
     }
 
     let dist = (delta.0 * delta.0 + delta.1 * delta.1 + delta.2 * delta.2).sqrt();
@@ -805,5 +823,20 @@ mod tests {
         let pb = NYSCoords3::new(1_000_000.0, 200_000.0, 500.0); // identical easting
         let input = make_input(pa, pb, 5_000_000_000.0);
         let _zone: FresnelZone = compute_fresnel_zone(&input, 1.0);
+    }
+
+    #[test]
+    fn test_fresnel_zone_identical_northing_does_not_panic() {
+        // A due east-west link has identical northing, so delta.1 == 0.0 -- sin_theta comes out
+        // exactly zero in AngleContext, which divides by zero again inside tan_omega and produces
+        // a NaN max_t, which used to fail integer_grid's `assert!(lo <= hi)` (any comparison
+        // against NaN is false). The function shifts pb.1 by 0.1 usft to avoid this, mirroring
+        // the identical-easting guard above.
+        let pa = NYSCoords3::new(1_000_000.0, 200_000.0, 300.0);
+        let pb = NYSCoords3::new(1_010_000.0, 200_000.0, 500.0); // identical northing
+        let input = make_input(pa, pb, 2_400_000_000.0);
+        let _zone: FresnelZone = compute_fresnel_zone(&input, 1.0);
+        let _dims = fresnel_zone_dims(&input, 1.0);
+        let _footprint = compute_fresnel_zone_footprint(&input, 1.0);
     }
 }

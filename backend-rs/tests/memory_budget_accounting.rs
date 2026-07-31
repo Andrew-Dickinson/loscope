@@ -207,17 +207,17 @@ proptest! {
     }
 }
 
-/// Documents (does not attempt to fix) a distinct, non-memory-accounting bug found incidentally
-/// while calibrating `near_east_west_point_pair_strategy` above: a link whose two endpoints have
-/// *exactly* equal northing (due-east/due-west, dy == 0.0 exactly) drives `AngleContext`'s
-/// `tan_theta = -dy/dx` to exactly 0, `sin_theta` to exactly 0, and
-/// `fresnel_zone_dims`/`compute_fresnel_zone`'s `2.0 * semi_minor / sin_theta` to +-infinity,
-/// which then fails the `assert!(lo <= hi)` in `fresnel_zone.rs::integer_grid` (NaN comparisons
-/// are always false) and panics. This is a crash/DoS-shaped bug in the geometry code, not a
-/// memory-budget under-count -- flagging here for visibility rather than silently discovering and
-/// discarding it, but leaving the fix to someone who owns that geometry math.
+/// Exact due-east link (two endpoints with *identical* northing, dy == 0.0 exactly) used to crash
+/// `fresnel_zone.rs::integer_grid`'s `assert!(lo <= hi)`: dy == 0.0 drove `sin_theta` to exactly
+/// 0, which sent `2.0 * semi_minor / sin_theta` to +-infinity/NaN (NaN comparisons are always
+/// false, so the assert failed). Fixed by nudging the endpoint by 0.1 usft when delta.1 == 0.0,
+/// mirroring the existing delta.0 == 0.0 guard (see `fresnel_zone.rs`, and
+/// `test_fresnel_zone_identical_northing_does_not_panic` there for the direct regression test).
+/// This test confirms the fix all the way through the actual memory-accounting path: now that the
+/// due-east case runs instead of panicking, its real allocation still needs to stay within what
+/// `estimate_analysis_bytes_precise` (what `point_analysis` actually calls) predicts for it.
 #[test]
-fn exact_due_east_link_panics_in_fresnel_geometry_not_a_memory_bug() {
+fn exact_due_east_link_stays_within_estimate() {
     let point_a = NYSCoords3::new(600_000.0, 300_000.0, 100.0);
     let point_b = NYSCoords3::new(615_000.0, 300_000.0, 100.0); // identical northing => dy == 0.0
     let input = loscope::analysis::point_evaluation::PointEvaluationInput::new(
@@ -225,16 +225,14 @@ fn exact_due_east_link_panics_in_fresnel_geometry_not_a_memory_bug() {
         loscope::types::obstructions::ObstructionTypesFilter::All,
     );
     let obs = NoObstructions;
-    // estimate_analysis_bytes_precise is what point_analysis actually calls now, and it calls
-    // compute_fresnel_zone (the same panic source) itself -- confirm the panic still surfaces
-    // through this path, not just the older flat estimator.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        block_on(estimate_analysis_bytes_precise(&input, &obs))
-    }));
+    let elev = FlatElevationProvider { value: 300 };
+    let estimate = block_on(estimate_analysis_bytes_precise(&input, &obs)).unwrap();
+    let (result, sample) = measure_async(evaluate_points(Uuid::new_v4(), input, &elev, &obs));
+    assert!(result.is_ok(), "evaluate_points failed unexpectedly: {:?}", result.err());
     assert!(
-        result.is_err(),
-        "expected exact due-east link to panic in fresnel_zone.rs (if this now passes, the \
-         underlying geometry bug was fixed -- update/remove this regression note accordingly)"
+        sample.delta_bytes <= estimate,
+        "measured {} bytes > estimate {} bytes (exact due-east link)",
+        sample.delta_bytes, estimate
     );
 }
 
