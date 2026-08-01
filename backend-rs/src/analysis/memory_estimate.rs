@@ -6,9 +6,7 @@ use crate::providers::obstruction_provider::ObstructionProvider;
 use crate::types::errors::AssetErr;
 use crate::types::obstructions::{ObstructionId, ObstructionType};
 use crate::types::tiles::SUBGRID_TILE_SIDE_LENGTH_USFT;
-use crate::util::env::{
-    LOS_MEMORY_ESTIMATE_SAFETY_FACTOR, LOS_OBSTRUCTION_BYTES_PER_TILE_ESTIMATE, get_env,
-};
+use crate::util::env::{LOS_MEMORY_ESTIMATE_SAFETY_FACTOR, get_env, LOS_OBSTRUCTION_BYTES_ESTIMATE};
 use std::collections::HashSet;
 
 const ALPHA_ZONE_FULL: f64 = 1.0;
@@ -33,47 +31,21 @@ const ELEVATION_TILE_BYTES: u64 = TILE_SIDE_USFT * TILE_SIDE_USFT * 2; // u16 pe
 
 /// Bytes budgeted per *individual* obstruction (not per tile) once its real raster is fetched --
 /// covers the ObstructionRaster (u16/px) held alongside its ObstructionMeta in
-/// TerrainFactory::load_terrain_grid's `obstructions: Vec`. Real building-footprint fixtures in
-/// tests/resources are ~30-70KB (150-230px @ 2 bytes/px); `ObstructionRaster::read_from_tiff`
-/// enforces no size cap, so the true worst case is a raster as large as an entire tile
-/// (500x500px @ 2 bytes/px = ~488KiB) -- this covers that worst case outright, with headroom,
-/// rather than just the realistic common case. Unlike the old flat per-tile guess
-/// (DEFAULT_OBSTRUCTION_BYTES_PER_TILE_ESTIMATE), this constant is multiplied by an *exact* count
-/// (see estimate_analysis_bytes_precise) instead of a blind per-tile assumption, so it doesn't
-/// need to stay tiny just to keep zero/few-obstruction tiles cheap -- that decoupling is what
-/// lets it be sized to the full theoretical worst case instead of just a typical one.
-const PER_OBSTRUCTION_BYTES_ESTIMATE: u64 = 600 * 1024;
-
-/// Conservative per-tile allowance for obstruction rasters (building heightmaps, permit
-/// footprints, etc) pulled in alongside each elevation tile, used only by the flat
-/// `estimate_analysis_bytes` fallback below (no production call site uses that fallback as of
-/// this writing — every real caller has provider access and uses `estimate_analysis_bytes_precise`
-/// instead, whose `PER_OBSTRUCTION_BYTES_ESTIMATE` replaces this per-tile guess with a real count).
-///
-/// This constant has its own real history worth keeping, though: it went through 256KiB (an
-/// under-count that `tests/memory_budget_accounting.rs`'s dense-obstruction property test caught
-/// measuring real `evaluate_points` allocation exceeding the estimate for plausible-density
-/// tiles) and was raised to 1MiB, the largest value that kept the pre-existing
-/// `short_link_estimate_is_small`/`moderate_link_estimate_is_reasonable` regression guards (typical
-/// traffic should stay well under 100MB) passing — going higher (tried up to 8MiB) closed more of
-/// the gap but pushed those guards over their threshold. That tension (a single flat per-tile
-/// constant can't simultaneously stay cheap for the common few-or-no-obstruction case *and* cover
-/// a tile packed with large obstructions, since it can't distinguish the two ahead of fetching
-/// data) is exactly why `estimate_analysis_bytes_precise` exists: querying the already-in-memory
-/// obstruction index for a real per-tile count sidesteps the tradeoff entirely instead of tuning
-/// around it. Left at 1MiB here as a reasonable value for the fallback path, should it ever gain
-/// a real caller.
-const DEFAULT_OBSTRUCTION_BYTES_PER_TILE_ESTIMATE: u64 = 1024 * 1024;
+/// TerrainFactory::load_terrain_grid's `obstructions: Vec`. Real obstructions
+/// are all <=1 MB -- this covers that worst case outright, with headroom,
+/// rather than just the realistic common case. The extra memory will be released when the actual
+/// file is loaded, so this over-approximation isn't that inefficient
+const DEFAULT_PER_OBSTRUCTION_BYTES_ESTIMATE: u64 = 1300 * 1024; // ~1.3 MiB
 
 /// Multiplier applied to the raw estimate to cover allocator overhead, transient copies made
 /// while merging grids, and general slop between the model here and observed RSS. Tune via
 /// LOS_MEMORY_ESTIMATE_SAFETY_FACTOR.
-const DEFAULT_SAFETY_FACTOR: f64 = 2.5;
+const DEFAULT_SAFETY_FACTOR: f64 = 1.5;
 
-fn obstruction_bytes_per_tile_estimate() -> u64 {
-    get_env(LOS_OBSTRUCTION_BYTES_PER_TILE_ESTIMATE)
+fn obstruction_bytes_estimate() -> u64 {
+    get_env(LOS_OBSTRUCTION_BYTES_ESTIMATE)
         .and_then(|v| v.parse().ok())
-        .unwrap_or(DEFAULT_OBSTRUCTION_BYTES_PER_TILE_ESTIMATE)
+        .unwrap_or(DEFAULT_PER_OBSTRUCTION_BYTES_ESTIMATE)
 }
 
 fn safety_factor() -> f64 {
@@ -202,30 +174,6 @@ fn estimate_tile_count(input: &PointEvaluationInput) -> u64 {
     (area_tiles + perimeter_tiles + 1.0) as u64
 }
 
-/// Estimates the peak heap bytes `evaluate_points` will allocate for this input, without
-/// running any of it or requiring provider access. Used to admit or throttle requests before
-/// they can OOM the process, as a fallback for call sites that don't have an `ObstructionProvider`
-/// handy (or don't want to pay for the real-tile-set computation) — prefer
-/// `estimate_analysis_bytes_precise` wherever a provider is available, since its
-/// obstruction-count term is real rather than a flat per-tile guess.
-pub fn estimate_analysis_bytes(input: &PointEvaluationInput) -> u64 {
-    let (rows_full, cols_full) = fresnel_zone_dims(input, ALPHA_ZONE_FULL);
-    let (rows_inner, cols_inner) = fresnel_zone_dims(input, ALPHA_ZONE_INNER);
-
-    let zone_cells = (rows_full as u64 * cols_full as u64) + (rows_inner as u64 * cols_inner as u64);
-    let zone_bytes = zone_cells * BYTES_PER_ZONE_CELL;
-
-    // terrain_full and terrain_inner load their (identical) tile sets sequentially, not
-    // concurrently (see evaluate_points) — the raw tile/obstruction data from the first load is
-    // dropped before the second load starts, so only one tile-loading pass is ever resident in
-    // memory at a peak moment. Not counted twice.
-    let tile_count = estimate_tile_count(input);
-    let tile_bytes = tile_count * (ELEVATION_TILE_BYTES + obstruction_bytes_per_tile_estimate());
-
-    let raw_estimate = zone_bytes + tile_bytes;
-    (raw_estimate as f64 * safety_factor()) as u64
-}
-
 /// A more accurate version of `estimate_analysis_bytes` that replaces its flat
 /// `tile_count * obstruction_bytes_per_tile_estimate()` guess with the *real* per-tile obstruction
 /// count, obtained from `obstruction_provider` — for the production `CachingObstructionProvider`
@@ -279,7 +227,7 @@ pub async fn estimate_analysis_bytes_precise(
             distinct_obstructions.extend(ids.into_iter().map(|id| (obs_type.clone(), id)));
         }
     }
-    let obstruction_bytes = distinct_obstructions.len() as u64 * PER_OBSTRUCTION_BYTES_ESTIMATE;
+    let obstruction_bytes = distinct_obstructions.len() as u64 * obstruction_bytes_estimate();
 
     let tile_bytes = tile_count * ELEVATION_TILE_BYTES + obstruction_bytes;
     let raw_estimate = zone_bytes + tile_bytes;
@@ -396,16 +344,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn precise_estimate_with_no_obstructions_is_smaller_than_flat_default() {
-        let input = short_link_input();
-        let provider = FlatCountObstructionProvider { count_per_tile: 0 };
-        let precise = estimate_analysis_bytes_precise(&input, &provider).await.unwrap();
-        // No obstructions at all should never cost more than the flat-guess fallback, which pads
-        // for "a modest handful" per tile regardless of reality.
-        assert!(precise <= estimate_analysis_bytes(&input));
-    }
-
-    #[tokio::test]
     async fn precise_estimate_scales_with_real_obstruction_count() {
         let input = short_link_input();
         let sparse = FlatCountObstructionProvider { count_per_tile: 1 };
@@ -436,80 +374,5 @@ mod tests {
             result < peak,
             "post-hoc result estimate ({result}) should be smaller than the pre-admission peak estimate ({peak})"
         );
-    }
-
-    #[test]
-    fn short_link_estimate_is_small() {
-        let input = make_input(
-            gps_to_nys(40.700, -73.960, 30.0),
-            gps_to_nys(40.705, -73.950, 30.0),
-            5_000_000_000.0,
-        );
-        // A few-block link should be well under 100MB.
-        assert!(estimate_analysis_bytes(&input) < 100 * 1024 * 1024);
-    }
-
-    #[test]
-    fn long_link_estimate_exceeds_short_link() {
-        let short = make_input(
-            gps_to_nys(40.700, -73.960, 30.0),
-            gps_to_nys(40.705, -73.950, 30.0),
-            5_000_000_000.0,
-        );
-        let long = make_input(
-            gps_to_nys(40.500, -74.200, 200.0),
-            gps_to_nys(41.200, -73.200, 200.0),
-            5_000_000_000.0,
-        );
-        assert!(estimate_analysis_bytes(&long) > estimate_analysis_bytes(&short));
-    }
-
-    #[test]
-    fn lower_frequency_increases_estimate_for_same_link() {
-        let higher_freq = make_input(
-            gps_to_nys(40.500, -74.200, 200.0),
-            gps_to_nys(41.200, -73.200, 200.0),
-            5_000_000_000.0,
-        );
-        let lower_freq = make_input(
-            gps_to_nys(40.500, -74.200, 200.0),
-            gps_to_nys(41.200, -73.200, 200.0),
-            1_000_000.0,
-        );
-        assert!(estimate_analysis_bytes(&lower_freq) > estimate_analysis_bytes(&higher_freq));
-    }
-
-    #[test]
-    fn moderate_link_estimate_is_reasonable() {
-        // A realistic ~2-mile point-to-point link at a common ISP frequency — the shape of
-        // request that's actually common in production, as opposed to the deliberately
-        // pathological cases elsewhere in this file. Should land in the tens-of-MB range: this
-        // is a regression guard for the tile-count overcounting bugs fixed here (axis-aligned
-        // bounding box instead of the real diagonal footprint, doubling for sequential-not-
-        // concurrent tile loads, and multiplicative tiles_along×tiles_across overcounting for
-        // narrow bands). Note that zone_bytes (the Fresnel/terrain/intersection arrays) is
-        // exact, not estimated — see fresnel_zone_dims_matches_compute_fresnel_zone — so it
-        // legitimately grows for longer links; this test picks a length representative of
-        // typical usage rather than asserting an arbitrary bound at any distance.
-        let input = make_input(
-            gps_to_nys(40.700, -73.960, 30.0),
-            gps_to_nys(40.718, -73.940, 30.0),
-            2_400_000_000.0,
-        );
-        let estimate = estimate_analysis_bytes(&input);
-        assert!(estimate < 100 * 1024 * 1024, "estimate was {estimate} bytes");
-    }
-
-    #[test]
-    fn extreme_long_low_frequency_link_is_huge() {
-        // This is the shape of request that OOMs an unthrottled server: a very long link at a
-        // very low frequency. The estimate should be in the multi-gigabyte range, well above
-        // any reasonable per-request memory budget.
-        let input = make_input(
-            gps_to_nys(40.000, -75.500, 200.0),
-            gps_to_nys(42.500, -71.500, 200.0),
-            1_000_000.0,
-        );
-        assert!(estimate_analysis_bytes(&input) > 1024 * 1024 * 1024);
     }
 }
