@@ -23,6 +23,10 @@ pub const LOS_MEMORY_ESTIMATE_SAFETY_FACTOR: &str = "LOS_MEMORY_ESTIMATE_SAFETY_
 pub const LOS_MEMORY_PROFILE_PATH: &str = "LOS_MEMORY_PROFILE_PATH";
 pub const LOS_MEMORY_PROFILE_INTERVAL_MS: &str = "LOS_MEMORY_PROFILE_INTERVAL_MS";
 
+// See util::download_concurrency_profiler.
+pub const LOS_DOWNLOAD_CONCURRENCY_PROFILE_PATH: &str = "LOS_DOWNLOAD_CONCURRENCY_PROFILE_PATH";
+pub const LOS_DOWNLOAD_CONCURRENCY_PROFILE_INTERVAL_MS: &str = "LOS_DOWNLOAD_CONCURRENCY_PROFILE_INTERVAL_MS";
+
 pub fn expect_env(env_var_name: &str) -> Result<String, ProviderInitErr> {
     get_env(env_var_name).ok_or(
         ProviderInitErr::EnvVarError(format!("Please set env var {}", env_var_name))

@@ -6,12 +6,41 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::fs::read_to_string;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tempfile::NamedTempFile;
 use typed_path::Utf8UnixPath;
 use crate::providers::backends::distributed_mutex::DistributedMutexManager;
 use crate::providers::backends::local_path_lock::LocalPathLock;
 
 const CACHE_ID_FILE_NAME: &str = "cache-id";
+
+// Temporary diagnostic (see util::download_concurrency_profiler): process-wide count of
+// get_asset calls currently past the cache-miss check and lock acquisition, i.e. actively
+// downloading from upstream. There's only ever one CachingAssetProvider per process (see
+// Providers::new_from_env), so a plain static avoids threading a handle through the
+// constructor -- and every test call site along with it -- just to observe this count.
+static IN_FLIGHT_DOWNLOADS: AtomicUsize = AtomicUsize::new(0);
+
+pub fn in_flight_downloads() -> usize {
+    IN_FLIGHT_DOWNLOADS.load(Ordering::SeqCst)
+}
+
+// RAII guard: increments on creation, decrements on drop (including early return via `?`), so
+// the count always reflects reality even when a fetch errors out partway through.
+struct InFlightDownloadGuard;
+
+impl InFlightDownloadGuard {
+    fn new() -> Self {
+        IN_FLIGHT_DOWNLOADS.fetch_add(1, Ordering::SeqCst);
+        InFlightDownloadGuard
+    }
+}
+
+impl Drop for InFlightDownloadGuard {
+    fn drop(&mut self) {
+        IN_FLIGHT_DOWNLOADS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 #[async_trait]
 pub trait AssetProvider {
@@ -190,6 +219,7 @@ impl AssetProvider for CachingAssetProvider {
         }
 
         println!("Calling upstream fetcher for {asset_type:?} {asset_id:?}");
+        let _in_flight_guard = InFlightDownloadGuard::new();
 
         let item_dir = item_path_buf.parent().unwrap();
         fs::create_dir_all(item_dir).map_err(|err| AssetErr::LocalFileSystemError(

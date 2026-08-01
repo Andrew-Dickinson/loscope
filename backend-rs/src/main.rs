@@ -14,6 +14,7 @@ use loscope::endpoints::tileview::{
 };
 use loscope::providers::Providers;
 use loscope::util::coord_conversion::{CoordinateConverter, init_coord_converter_factory};
+use loscope::util::download_concurrency_profiler;
 use loscope::util::memory_profiler;
 
 #[rocket::get("/healthcheck")]
@@ -26,6 +27,7 @@ async fn rocket() -> _ {
     init_coord_converter_factory(CoordinateConverter::new);
     let memory_budget = MemoryBudget::new_from_env();
     memory_profiler::start_if_configured(memory_budget.clone());
+    download_concurrency_profiler::start_if_configured();
     rocket::build()
         .manage(Providers::new_from_env().await.unwrap())
         .manage(memory_budget)
