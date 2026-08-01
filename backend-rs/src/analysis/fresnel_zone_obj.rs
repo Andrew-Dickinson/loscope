@@ -14,6 +14,15 @@ pub fn stream_fresnel_tile_slice_as_obj(
     let fresnel_raster = fresnel_zone
         .rasterize_in_tile(tile_id)
         .mapv(|opt| opt.copied());
+    // Runs during response streaming, after get_fresnel_slice_obj's memory_paranoid::scope() has
+    // already returned -- not covered by a tracked reservation, so this only ever produces a
+    // one-time coverage-gap warning, never a panic. (rasterize_in_tile()'s own allocation is
+    // separately checked inside StairStepGrid::rasterize_in_tile.)
+    crate::analysis::memory_paranoid::check(
+        "stream_fresnel_tile_slice_as_obj::fresnel_raster_mapv",
+        fresnel_raster.len() as u64
+            * std::mem::size_of::<Option<crate::analysis::fresnel_zone::FresnelZonePoint>>() as u64,
+    );
 
     fn_stream(|e| async move {
         e.emit(format!(

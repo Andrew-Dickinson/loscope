@@ -19,6 +19,12 @@ pub const LOS_MAX_ANALYSIS_MEMORY_BYTES: &str = "LOS_MAX_ANALYSIS_MEMORY_BYTES";
 pub const LOS_OBSTRUCTION_BYTES_PER_TILE_ESTIMATE: &str = "LOS_OBSTRUCTION_BYTES_PER_TILE_ESTIMATE";
 pub const LOS_MEMORY_ESTIMATE_SAFETY_FACTOR: &str = "LOS_MEMORY_ESTIMATE_SAFETY_FACTOR";
 
+// See analysis::memory_paranoid. When set (to any non-empty value), every reservation-guarded
+// endpoint tracks the real size of each non-trivial allocation it makes and panics -- after
+// logging the full breakdown -- the moment the running total for a request exceeds what
+// memory_budget reserved for it.
+pub const LOS_MEMORY_PARANOID_MODE: &str = "LOS_MEMORY_PARANOID_MODE";
+
 // See util::memory_profiler.
 pub const LOS_MEMORY_PROFILE_PATH: &str = "LOS_MEMORY_PROFILE_PATH";
 pub const LOS_MEMORY_PROFILE_INTERVAL_MS: &str = "LOS_MEMORY_PROFILE_INTERVAL_MS";

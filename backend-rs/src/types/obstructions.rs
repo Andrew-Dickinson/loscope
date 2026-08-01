@@ -261,6 +261,13 @@ impl ObstructionRaster {
         let image_data = inner().map_err(|err| AssetErr::AssetContentError(format!(
                 "Error parsing obstruction tiff for id {obstruction_id}: {err}"
             )))?;
+        // read_from_tiff enforces no size cap (see PER_OBSTRUCTION_BYTES_ESTIMATE's doc comment
+        // in memory_estimate.rs) -- this is the one place that can catch a raster whose real
+        // decoded size exceeds what the estimator assumed.
+        crate::analysis::memory_paranoid::check(
+            "ObstructionRaster::read_from_tiff::heightmap",
+            image_data.len() as u64 * 2,
+        );
 
         Ok(ObstructionRaster {
             heightmap: image_data,
@@ -286,6 +293,14 @@ impl ObstructionRaster {
         y_offset: isize,
     ) -> impl Stream<Item = String> {
         let heightmap = self.heightmap.clone();
+        // Runs during response streaming, after the handler's memory_paranoid::scope() has
+        // already returned -- not covered by a tracked reservation, so this only ever produces a
+        // one-time coverage-gap warning, never a panic. Still worth checking: it's a real,
+        // non-trivial allocation (up to ~488KiB per obstruction_obj_endpoint_bytes' worst case).
+        crate::analysis::memory_paranoid::check(
+            "ObstructionRaster::to_obj_stream::heightmap_clone",
+            heightmap.len() as u64 * 2,
+        );
         assert!(heightmap.nrows() < MAX_OBJ_SIZE_USFT);
         assert!(heightmap.ncols() < MAX_OBJ_SIZE_USFT);
 

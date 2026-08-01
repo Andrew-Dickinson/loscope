@@ -7,6 +7,7 @@ use crate::analysis::memory_estimate::{
     estimate_analysis_bytes_precise, estimate_analysis_result_bytes, estimate_full_recompute_bytes,
     intersection_visualization_png_bytes,
 };
+use crate::analysis::memory_paranoid;
 use crate::analysis::point_evaluation::{PointEvaluationInput, PointEvaluationOutput, evaluate_points, valid_analysis_frequency, PointEvaluationOutcome};
 use crate::endpoints::api_error::ApiError;
 use crate::providers::Providers;
@@ -72,11 +73,15 @@ pub async fn point_analysis(
 
     // TODO: Detect vegetation-only obstructions and report them as seasonal
 
-    let result = evaluate_points(
-        Uuid::new_v4(),
-        input,
-        providers.elevation_tile_provider().as_ref(),
-        providers.obstruction_provider().as_ref(),
+    let result = memory_paranoid::scope(
+        "point_analysis",
+        estimate,
+        evaluate_points(
+            Uuid::new_v4(),
+            input,
+            providers.elevation_tile_provider().as_ref(),
+            providers.obstruction_provider().as_ref(),
+        ),
     )
     .await
     .map_err(|err| {
@@ -145,11 +150,16 @@ pub async fn map_overview(
         estimate_for_get_full(&analysis_id, providers).await?;
     let mut reservation = memory_budget.try_reserve(peak_estimate)?;
 
-    let analysis_outcome = providers.point_eval_result_provider().get_full(
-        &analysis_id,
-        providers.elevation_tile_provider().as_ref(),
-        providers.obstruction_provider().as_ref()
-    ).await?;
+    let analysis_outcome = memory_paranoid::scope(
+        "map_overview",
+        peak_estimate,
+        providers.point_eval_result_provider().get_full(
+            &analysis_id,
+            providers.elevation_tile_provider().as_ref(),
+            providers.obstruction_provider().as_ref(),
+        ),
+    )
+    .await?;
     reservation.shrink_to(result_size_estimate);
 
     Ok(Json((&analysis_outcome).into()))
@@ -173,21 +183,29 @@ pub async fn intersection_visualization(
     // shrinking in between. The reservation is dropped when this function returns either way, so
     // there's no separate benefit to shrinking again after rendering finishes.
     let (peak_estimate, _) = estimate_for_get_full(&analysis_id, providers).await?;
-    let _reservation =
-        memory_budget.try_reserve(peak_estimate + intersection_visualization_png_bytes())?;
+    let total_reserved = peak_estimate + intersection_visualization_png_bytes();
+    let _reservation = memory_budget.try_reserve(total_reserved)?;
 
-    let analysis_outcome = providers.point_eval_result_provider().get_full(
-        &analysis_id,
-        providers.elevation_tile_provider().as_ref(),
-        providers.obstruction_provider().as_ref()
-    ).await?;
+    let png_bytes = memory_paranoid::scope("intersection_visualization", total_reserved, async {
+        let analysis_outcome = providers
+            .point_eval_result_provider()
+            .get_full(
+                &analysis_id,
+                providers.elevation_tile_provider().as_ref(),
+                providers.obstruction_provider().as_ref(),
+            )
+            .await?;
 
-    let Some(png_bytes) = tile_intersection_to_png(
-        analysis_outcome
-            .result_full()
-            .intersection()
-            .rasterize_in_tile(tile_id),
-    ) else {
+        Ok::<Option<Vec<u8>>, ApiError>(tile_intersection_to_png(
+            analysis_outcome
+                .result_full()
+                .intersection()
+                .rasterize_in_tile(tile_id),
+        ))
+    })
+    .await?;
+
+    let Some(png_bytes) = png_bytes else {
         return Err(Status::NoContent.into());
     };
 
@@ -210,11 +228,16 @@ pub async fn get_fresnel_slice_obj(
         estimate_for_get_full(&analysis_id, providers).await?;
     let mut reservation = memory_budget.try_reserve(peak_estimate)?;
 
-    let analysis = providers.point_eval_result_provider().get_full(
-        &analysis_id,
-        providers.elevation_tile_provider().as_ref(),
-        providers.obstruction_provider().as_ref()
-    ).await?;
+    let analysis = memory_paranoid::scope(
+        "get_fresnel_slice_obj",
+        peak_estimate,
+        providers.point_eval_result_provider().get_full(
+            &analysis_id,
+            providers.elevation_tile_provider().as_ref(),
+            providers.obstruction_provider().as_ref(),
+        ),
+    )
+    .await?;
     // Unlike the non-streaming endpoints, the zone data this references has to stay resident for
     // as long as the client is still downloading the stream, not just until this function
     // returns — so the (now-shrunk) reservation is moved into the stream body rather than
@@ -246,11 +269,16 @@ pub async fn fresnel_kml(
         estimate_for_get_full(&analysis_id, providers).await?;
     let mut reservation = memory_budget.try_reserve(peak_estimate)?;
 
-    let analysis_outcome = providers.point_eval_result_provider().get_full(
-        &analysis_id,
-        providers.elevation_tile_provider().as_ref(),
-        providers.obstruction_provider().as_ref()
-    ).await?;
+    let analysis_outcome = memory_paranoid::scope(
+        "fresnel_kml",
+        peak_estimate,
+        providers.point_eval_result_provider().get_full(
+            &analysis_id,
+            providers.elevation_tile_provider().as_ref(),
+            providers.obstruction_provider().as_ref(),
+        ),
+    )
+    .await?;
     reservation.shrink_to(result_size_estimate);
 
     let original_inputs = analysis_outcome.output().input();

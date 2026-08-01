@@ -1,5 +1,6 @@
 use crate::analysis::memory_budget::MemoryBudget;
 use crate::analysis::memory_estimate::{elevation_tile_endpoint_bytes, obstruction_obj_endpoint_bytes, ortho_tile_endpoint_bytes};
+use crate::analysis::memory_paranoid;
 use crate::endpoints::api_error::ApiError;
 use crate::providers::Providers;
 use crate::types::obstructions::{ObstructionId, ObstructionMeta, ObstructionType};
@@ -60,18 +61,24 @@ pub async fn get_terrain_raster(
     };
 
     // One fixed-size elevation tile — bounded, so a flat reservation covers any tile.
-    let _reservation = memory_budget.try_reserve(elevation_tile_endpoint_bytes())?;
+    let tile_estimate = elevation_tile_endpoint_bytes();
+    let _reservation = memory_budget.try_reserve(tile_estimate)?;
 
-    // TODO: Would it be better to use a CDN style direct browser file access for this?
-    let tile = providers
-        .elevation_tile_provider()
-        .get_elevation_tile(tile_id)
-        .await?;
+    let tiff_bytes = memory_paranoid::scope("get_terrain_raster", tile_estimate, async {
+        // TODO: Would it be better to use a CDN style direct browser file access for this?
+        let tile = providers
+            .elevation_tile_provider()
+            .get_elevation_tile(tile_id)
+            .await?;
 
-    let width = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
-    let mut tiff_bytes = Vec::<u8>::with_capacity(2 * width * width);
-    tile.write_to_tiff(Cursor::new(&mut tiff_bytes))
-        .map_err(|_| ApiError::new(Status::InternalServerError))?;
+        let width = SUBGRID_TILE_SIDE_LENGTH_USFT as usize;
+        let mut tiff_bytes = Vec::<u8>::with_capacity(2 * width * width);
+        tile.write_to_tiff(Cursor::new(&mut tiff_bytes))
+            .map_err(|_| ApiError::new(Status::InternalServerError))?;
+        memory_paranoid::check("get_terrain_raster::tiff_bytes", tiff_bytes.len() as u64);
+        Ok::<Vec<u8>, ApiError>(tiff_bytes)
+    })
+    .await?;
     Ok(TiffImage(tiff_bytes))
 }
 
@@ -117,16 +124,24 @@ pub async fn get_terrain_obstruction_obj(
     // obstruction_obj_endpoint_bytes), so this is a flat reservation. Held until the response
     // stream (which owns a clone of the raster data) finishes, not just until this handler
     // returns.
-    let reservation = memory_budget.try_reserve(obstruction_obj_endpoint_bytes())?;
+    let obstruction_estimate = obstruction_obj_endpoint_bytes();
+    let reservation = memory_budget.try_reserve(obstruction_estimate)?;
 
-    let (meta, obstruction) = tokio::try_join!(
-        providers
-            .obstruction_provider()
-            .get_obstruction_meta(&obstruction_type, obstruction_id),
-        providers
-            .obstruction_provider()
-            .get_obstruction_raster(&obstruction_type, obstruction_id),
-    )?;
+    let (meta, obstruction) = memory_paranoid::scope(
+        "get_terrain_obstruction_obj",
+        obstruction_estimate,
+        async {
+            tokio::try_join!(
+                providers
+                    .obstruction_provider()
+                    .get_obstruction_meta(&obstruction_type, obstruction_id),
+                providers
+                    .obstruction_provider()
+                    .get_obstruction_raster(&obstruction_type, obstruction_id),
+            )
+        },
+    )
+    .await?;
 
     let tile_sw = tile_id.get_sw_corner();
     let x_offset = (*meta.sw_offset().easting() - *tile_sw.easting()) as isize;
@@ -160,20 +175,32 @@ pub async fn get_terrain_ortho(
 
     // One fixed-size ortho tile plus its adjustment/colorization copies — bounded, so a flat
     // reservation covers any tile.
-    let _reservation = memory_budget.try_reserve(ortho_tile_endpoint_bytes())?;
+    let ortho_estimate = ortho_tile_endpoint_bytes();
+    let _reservation = memory_budget.try_reserve(ortho_estimate)?;
 
-    let ortho_img = providers.ortho_provider().get_ortho(tile_id).await?;
-    let ortho_img = apply_photo_adjustments(ortho_img);
+    let jpeg_bytes = memory_paranoid::scope("get_terrain_ortho", ortho_estimate, async {
+        let ortho_img = providers.ortho_provider().get_ortho(tile_id).await?;
+        let ortho_img = apply_photo_adjustments(ortho_img);
 
-    let classification_tile = providers.terrain_classification_provider()
-        .get_terrain_classification_tile(tile_id).await
-        .map_err(|err| {println!("{err}"); err})?;
-    let ortho_img = colorize_from_classifications(ortho_img, classification_tile);
+        let classification_tile = providers
+            .terrain_classification_provider()
+            .get_terrain_classification_tile(tile_id)
+            .await
+            .map_err(|err| {
+                println!("{err}");
+                err
+            })?;
+        let ortho_img = colorize_from_classifications(ortho_img, classification_tile);
 
-    let mut jpeg_bytes: Vec<u8> = Vec::new();
-    ortho_img
-        .write_to(&mut Cursor::new(&mut jpeg_bytes), ImageFormat::Jpeg)
-        .unwrap();
+        let mut jpeg_bytes: Vec<u8> = Vec::new();
+        ortho_img
+            .write_to(&mut Cursor::new(&mut jpeg_bytes), ImageFormat::Jpeg)
+            .unwrap();
+        memory_paranoid::check("get_terrain_ortho::jpeg_bytes", jpeg_bytes.len() as u64);
+
+        Ok::<Vec<u8>, ApiError>(jpeg_bytes)
+    })
+    .await?;
 
     Ok(JpegImage(jpeg_bytes))
 }

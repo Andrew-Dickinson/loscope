@@ -90,6 +90,10 @@ impl<'a> RooftopHeightMapFactory<'a> {
         let output_w: usize = (poly_e - poly_w).try_into().unwrap();
 
         let mut heightmap = Array2::<u16>::zeros((output_w, output_h));
+        crate::analysis::memory_paranoid::check(
+            "RooftopHeightMapFactory::create::heightmap",
+            (output_w as u64) * (output_h as u64) * 2,
+        );
 
         for tile_id in intersecting_tiles {
             // Compute intersection between tile data
@@ -136,6 +140,10 @@ impl<'a> RooftopHeightMapFactory<'a> {
         }
 
         let buffered_footprint = footprint.buffer(0.5);
+        crate::analysis::memory_paranoid::check(
+            "RooftopHeightMapFactory::create::mask",
+            (output_w as u64) * (output_h as u64),
+        );
         let mask = Array2::<bool>::from_shape_fn((output_w, output_h), |(x, y)| {
             buffered_footprint.contains(
                 // Unwraps are safe on all platforms where usize >= u32, as f64 is safe because
@@ -170,6 +178,10 @@ impl<'a> RooftopHeightMapFactory<'a> {
 fn filter_heightmap_outliers(heightmap: &mut Array2<u16>, mask: &Array2<bool>) {
     const THRESHOLD_INCHES: f64 = FILTER_DISTANCE_Z_USFT * 12.0;
     let original = heightmap.clone();
+    crate::analysis::memory_paranoid::check(
+        "filter_heightmap_outliers::original_clone",
+        original.len() as u64 * 2,
+    );
     let (nrows, ncols) = (heightmap.nrows(), heightmap.ncols());
 
     for xi in 0..nrows {

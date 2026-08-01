@@ -44,6 +44,15 @@ impl OrthoProvider for CachingOrthoProvider {
             .read_to_end(&mut asset_buf).map_err(|read_err| AssetErr::AssetContentError(format!(
                     "Unable to read content from asset {fname}: {read_err}"
                 )))?;
+        // This is the one term in ortho_tile_endpoint_bytes() that's a flat constant
+        // (ORTHO_SOURCE_RAW_BUFFER_BYTES) rather than a computed figure, precisely because the
+        // real file size isn't known until this read completes -- see that constant's doc
+        // comment. Checking the real size here is exactly what would catch that constant falling
+        // out of date with real asset sizes.
+        crate::analysis::memory_paranoid::check(
+            "CachingOrthoProvider::get_ortho::asset_buf",
+            asset_buf.len() as u64,
+        );
 
         let bounds = to_ortho_bounds(tile_id.subgrid_id().relative_bounds());
         let rgba_img = decode_jp2_region(

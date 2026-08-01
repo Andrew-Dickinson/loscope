@@ -151,7 +151,17 @@ pub fn decode_jp2_region(
         let data_b = std::slice::from_raw_parts(comps[2].data, num_pixels);
         let data_a = std::slice::from_raw_parts(comps[3].data, num_pixels);
 
+        // These four buffers were allocated by the C OpenJPEG library's own malloc, not Rust's
+        // allocator -- invisible to any Rust-side accounting (including a global-allocator
+        // hook), which is exactly why this crate doesn't use one. We know their exact size here
+        // (num_pixels * 4 bytes each, OPJ_INT32-per-sample), so charge it manually.
+        crate::analysis::memory_paranoid::check(
+            "decode_jp2_region::c_component_buffers",
+            (num_pixels as u64) * 4 * (std::mem::size_of::<OPJ_INT32>() as u64),
+        );
+
         let mut rgba = vec![0u8; num_pixels * 4];
+        crate::analysis::memory_paranoid::check("decode_jp2_region::rgba", rgba.len() as u64);
         for i in 0..num_pixels {
             rgba[i * 4] = data_r[i].clamp(0, 255) as u8;
             rgba[i * 4 + 1] = data_g[i].clamp(0, 255) as u8;

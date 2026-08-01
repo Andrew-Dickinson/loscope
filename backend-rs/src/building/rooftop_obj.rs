@@ -16,6 +16,13 @@ impl RooftopHeightMap {
     pub fn to_rooftop_obj_stream(&self) -> impl Stream<Item = String> {
         let heightmap = self.heightmap().clone();
         let mask = self.mask().clone();
+        // Runs during response streaming, after render_rooftop's memory_paranoid::scope() has
+        // already returned -- not covered by a tracked reservation, so this only ever produces a
+        // one-time coverage-gap warning, never a panic.
+        crate::analysis::memory_paranoid::check(
+            "RooftopHeightMap::to_rooftop_obj_stream::heightmap_and_mask_clone",
+            heightmap.len() as u64 * 2 + mask.len() as u64,
+        );
         assert!(heightmap.nrows() < MAX_OBJ_SIZE_USFT);
         assert!(heightmap.ncols() < MAX_OBJ_SIZE_USFT);
 

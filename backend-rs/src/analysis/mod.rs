@@ -6,6 +6,7 @@ pub mod intersection_vis;
 pub mod map_overview;
 pub mod memory_budget;
 pub mod memory_estimate;
+pub mod memory_paranoid;
 pub mod png_encoder;
 pub mod point_evaluation;
 pub mod tiles;

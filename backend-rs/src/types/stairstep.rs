@@ -56,6 +56,12 @@ impl<T> StairStepGrid<T> {
             offsets: self.offsets.clone(),
             base_offset: self.base_offset.clone(),
         };
+        crate::analysis::memory_paranoid::check(
+            "StairStepGrid::merge::values",
+            (self.values.shape()[0] as u64)
+                * (self.values.shape()[1] as u64)
+                * (std::mem::size_of::<V>() as u64),
+        );
 
         for i in 0..self.widths().len() {
             let self_row = self.values().row(i);
@@ -81,6 +87,10 @@ impl<T> StairStepGrid<T> {
 
 impl<T> StairStepGrid<T> {
     pub fn rasterize_in_tile(&self, tile_id: TileId) -> Array2<Option<&T>> {
+        crate::analysis::memory_paranoid::check(
+            "StairStepGrid::rasterize_in_tile::values",
+            (SUBGRID_TILE_SIDE_LENGTH_USFT as u64).pow(2) * (std::mem::size_of::<Option<&T>>() as u64),
+        );
         // Safety: rasterize_in_tile_iter is guaranteed to return a vec of the right size, so
         // this unwrap should never panic
         Array2::<Option<&T>>::from_shape_vec(

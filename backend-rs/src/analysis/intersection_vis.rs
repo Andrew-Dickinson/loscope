@@ -60,6 +60,7 @@ pub fn tile_intersection_to_img(
     }
 
     let mut raw = vec![0u8; OUT_SIDE * OUT_SIDE * 4];
+    crate::analysis::memory_paranoid::check("tile_intersection_to_img::raw", raw.len() as u64);
     let mut source_filled = vec![false; TILE_SIDE * TILE_SIDE];
 
     // Iterate source cells once, writing each color to its 8×8 output block.
@@ -201,6 +202,10 @@ pub fn tile_intersection_to_png(intersection: Array2<Option<&FractionU8>>) -> Op
 
     let mut source_filled = vec![false; TILE_SIDE * TILE_SIDE];
     let mut cell_color = vec![[0u8; 4]; TILE_SIDE * TILE_SIDE];
+    crate::analysis::memory_paranoid::check(
+        "tile_intersection_to_png::source_filled_and_cell_color",
+        source_filled.len() as u64 + cell_color.len() as u64 * 4,
+    );
 
     for sy in 0..TILE_SIDE {
         for sx in 0..TILE_SIDE {

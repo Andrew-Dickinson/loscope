@@ -403,6 +403,7 @@ pub fn encode_png(source_filled: &[bool], cell_color: &[[u8; 4]]) -> Vec<u8> {
 
     emit_eob(&mut w);
     let deflate_bits = w.finish();
+    crate::analysis::memory_paranoid::check("encode_png::deflate_bits", deflate_bits.len() as u64);
 
     // zlib wrapper (RFC 1950).
     let adler_val = adler.finish();
@@ -410,6 +411,7 @@ pub fn encode_png(source_filled: &[bool], cell_color: &[[u8; 4]]) -> Vec<u8> {
     zlib.extend_from_slice(&[0x78, 0x01]);
     zlib.extend_from_slice(&deflate_bits);
     zlib.extend_from_slice(&adler_val.to_be_bytes());
+    crate::analysis::memory_paranoid::check("encode_png::zlib", zlib.capacity() as u64);
 
     // PNG file.
     let mut png = Vec::with_capacity(8 + 25 + 12 + zlib.len() + 12);
@@ -422,6 +424,7 @@ pub fn encode_png(source_filled: &[bool], cell_color: &[[u8; 4]]) -> Vec<u8> {
     write_chunk(&mut png, b"IHDR", &ihdr);
     write_chunk(&mut png, b"IDAT", &zlib);
     write_chunk(&mut png, b"IEND", b"");
+    crate::analysis::memory_paranoid::check("encode_png::png", png.capacity() as u64);
 
     png
 }

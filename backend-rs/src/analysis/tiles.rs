@@ -180,12 +180,20 @@ impl<'a> TerrainFactory<'a> {
         obs_filter: &ObstructionTypesFilter,
     ) -> Result<TerrainGrid, AssetErr> {
         let mut height_values = Array2::<u16>::zeros(zone.values().raw_dim());
+        crate::analysis::memory_paranoid::check(
+            "load_terrain_grid::height_values",
+            (height_values.len() as u64) * (std::mem::size_of::<u16>() as u64),
+        );
 
         let tiles: Vec<ElevationTile> = stream::iter(tile_ids.iter().copied())
             .map(|id| self.tile_provider.get_elevation_tile(id))
             .buffered(PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_TILES)
             .try_collect()
             .await?;
+        crate::analysis::memory_paranoid::check(
+            "load_terrain_grid::tiles",
+            tiles.len() as u64 * (SUBGRID_TILE_SIDE_LENGTH_USFT as u64).pow(2) * 2,
+        );
 
         let all_obstruction_ids: HashSet<(ObstructionType, ObstructionId)> =
             stream::iter(tile_ids.iter().copied())
@@ -215,6 +223,13 @@ impl<'a> TerrainFactory<'a> {
                 .buffered(PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_OBSTRUCTIONS)
                 .try_collect()
                 .await?;
+        crate::analysis::memory_paranoid::check(
+            "load_terrain_grid::obstructions",
+            obstructions
+                .iter()
+                .map(|(_, raster)| raster.heightmap().len() as u64 * 2)
+                .sum(),
+        );
 
         for tile in &tiles {
             bilt_tile(tile, &mut height_values, zone);

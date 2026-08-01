@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use crate::analysis::memory_budget::MemoryBudget;
 use crate::analysis::memory_estimate::{elevation_tile_endpoint_bytes, estimate_heightmap_bytes};
+use crate::analysis::memory_paranoid;
 use crate::building::background_tiles::zero_footprint_pixels;
 use crate::building::bin_id::BINId;
 use crate::building::heightmap::{RooftopHeightMapFactory, get_intersecting_tiles, heightmap_pixel_dims};
@@ -40,16 +41,19 @@ pub async fn render_rooftop(
     // Held until the response stream (which owns the heightmap data) finishes, not just until
     // this handler returns — released early would let the budget think this memory is free
     // while it's still resident and being streamed to the client.
-    let reservation = memory_budget.try_reserve(estimate_heightmap_bytes(w, h))?;
+    let heightmap_estimate = estimate_heightmap_bytes(w, h);
+    let reservation = memory_budget.try_reserve(heightmap_estimate)?;
 
     let factory = RooftopHeightMapFactory::new(
         providers.footprint_provider().as_ref(),
         providers.elevation_tile_provider().as_ref(),
     );
-    let heightmap = factory.create(bin_id).await.map_err(|e| {
-        eprintln!("{:?}", e);
-        e
-    })?;
+    let heightmap = memory_paranoid::scope("render_rooftop", heightmap_estimate, factory.create(bin_id))
+        .await
+        .map_err(|e| {
+            eprintln!("{:?}", e);
+            e
+        })?;
 
     let obj_stream = TextStream! {
         let _reservation = reservation;
@@ -91,16 +95,19 @@ pub async fn sample_points(
     let (w, h) = heightmap_pixel_dims(&poly_bounds);
     // Released when this function returns, which is after the heightmap has already been
     // consumed into the (much smaller) sample point list below — no streaming to worry about.
-    let _reservation = memory_budget.try_reserve(estimate_heightmap_bytes(w, h))?;
+    let heightmap_estimate = estimate_heightmap_bytes(w, h);
+    let _reservation = memory_budget.try_reserve(heightmap_estimate)?;
 
     let factory = RooftopHeightMapFactory::new(
         providers.footprint_provider().as_ref(),
         providers.elevation_tile_provider().as_ref(),
     );
-    let heightmap = factory.create(bin_id).await.map_err(|e| {
-        eprintln!("{:?}", e);
-        e
-    })?;
+    let heightmap = memory_paranoid::scope("sample_points", heightmap_estimate, factory.create(bin_id))
+        .await
+        .map_err(|e| {
+            eprintln!("{:?}", e);
+            e
+        })?;
 
     Ok(Json(SamplePoints::new(
         sample_config
@@ -184,40 +191,45 @@ pub async fn background_tile_raster(
 
     // One footprint (small) + one fixed-size elevation tile — bounded, so a flat reservation
     // covers this regardless of which building/tile is requested.
-    let _reservation = memory_budget.try_reserve(elevation_tile_endpoint_bytes())?;
+    let tile_estimate = elevation_tile_endpoint_bytes();
+    let _reservation = memory_budget.try_reserve(tile_estimate)?;
 
-    let (footprint, mut tile) = tokio::try_join!(
-        async {
-            providers
-                .footprint_provider()
-                .get_footprint(bin_id)
-                .await
-                .map_err(|e| {
-                    eprintln!("{:?}", e);
-                    ApiError::from(e)
-                })
-        },
-        async {
-            providers
-                .elevation_tile_provider()
-                .get_elevation_tile(tile_id)
-                .await
-                .map_err(|e| {
-                    eprintln!("{:?}", e);
-                    ApiError::from(e)
-                })
-        },
-    )?;
+    let tiff_bytes = memory_paranoid::scope("background_tile_raster", tile_estimate, async {
+        let (footprint, mut tile) = tokio::try_join!(
+            async {
+                providers
+                    .footprint_provider()
+                    .get_footprint(bin_id)
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{:?}", e);
+                        ApiError::from(e)
+                    })
+            },
+            async {
+                providers
+                    .elevation_tile_provider()
+                    .get_elevation_tile(tile_id)
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{:?}", e);
+                        ApiError::from(e)
+                    })
+            },
+        )?;
 
-    tile.mutate_elevation_values(
-        move |elevation_inches| {
+        tile.mutate_elevation_values(move |elevation_inches| {
             zero_footprint_pixels(&footprint, tile_id, elevation_inches);
-        }
-    );
+        });
 
-    let mut tiff_bytes = Vec::<u8>::new();
-    tile.write_to_tiff(Cursor::new(&mut tiff_bytes))
-        .map_err(|_| ApiError::new(Status::InternalServerError))?;
+        let mut tiff_bytes = Vec::<u8>::new();
+        tile.write_to_tiff(Cursor::new(&mut tiff_bytes))
+            .map_err(|_| ApiError::new(Status::InternalServerError))?;
+        memory_paranoid::check("background_tile_raster::tiff_bytes", tiff_bytes.len() as u64);
+
+        Ok::<Vec<u8>, ApiError>(tiff_bytes)
+    })
+    .await?;
 
     Ok(TiffImage(tiff_bytes))
 }

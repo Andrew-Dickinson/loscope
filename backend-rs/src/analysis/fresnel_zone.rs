@@ -262,6 +262,10 @@ pub fn compute_fresnel_zone(
     let y_base = *y_vals.start();
 
     let mut values = Array2::<FresnelZonePoint>::default((output_height, max_width));
+    crate::analysis::memory_paranoid::check(
+        "compute_fresnel_zone::values",
+        (output_height as u64) * (max_width as u64) * (std::mem::size_of::<FresnelZonePoint>() as u64),
+    );
     let mut widths = Array1::<usize>::zeros(output_height);
     let mut offsets = Array1::<usize>::zeros(output_height);
 
