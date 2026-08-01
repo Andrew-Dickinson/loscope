@@ -16,6 +16,10 @@ pub struct ObstructionMetaOutput {
     pub width: usize,
     pub height: usize,
     pub raster_file: String,
+    // Shared by every sub-obstruction produced when a too-large raster is split into one
+    // obstruction per tile (see obstructions::split); unset for non-split obstructions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub obstruction_group_id: Option<ObstructionId>,
 }
 
 #[cfg(test)]
@@ -43,6 +47,7 @@ mod tests {
             width: 10,
             height: 10,
             raster_file: format!("{id}.tif"),
+            obstruction_group_id: None,
         };
 
         let json = serde_json::to_string(&output).expect("serialization failed");

@@ -6,9 +6,24 @@ use anyhow::{Context, Result};
 use loscope::types::obstructions::ObstructionRaster;
 
 use super::model::ObstructionMetaOutput;
+use super::split;
 
-/// Write an obstruction TIF + JSON pair to `{out_dir}/{type}/{uuid}.*`.
+/// Write an obstruction TIF + JSON pair to `{out_dir}/{type}/{uuid}.*`. Rasters over the size
+/// threshold in `split::maybe_split` are transparently split into one file pair per intersecting
+/// tile instead of a single oversized one.
 pub fn write_obstruction(meta: &ObstructionMetaOutput, raster: &ObstructionRaster, out_dir: &Path) -> Result<()> {
+    match split::maybe_split(meta, raster) {
+        None => write_single_obstruction(meta, raster, out_dir),
+        Some(chunks) => {
+            for (chunk_meta, chunk_raster) in &chunks {
+                write_single_obstruction(chunk_meta, chunk_raster, out_dir)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn write_single_obstruction(meta: &ObstructionMetaOutput, raster: &ObstructionRaster, out_dir: &Path) -> Result<()> {
     let type_dir = out_dir.join(meta.obstruction_type.as_ref());
     fs::create_dir_all(&type_dir)?;
 
@@ -57,6 +72,7 @@ mod tests {
             width: 2,
             height: 2,
             raster_file: format!("{id}.tif"),
+            obstruction_group_id: None,
         };
 
         let raster = ObstructionRaster::new(Array2::from_shape_vec((2, 2), vec![100u16, 200, 300, 400]).unwrap());

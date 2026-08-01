@@ -118,7 +118,7 @@ pub enum ObstructionType {
 
 pub type ObstructionId = Uuid;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AttributeValue {
     String(String),
@@ -154,6 +154,8 @@ struct ObstructionMetaDeHelper {
     x_offset: Option<f64>,
     y_offset: Option<f64>,
     tile_ids: Vec<TileId>,
+    #[serde(default)]
+    obstruction_group_id: Option<ObstructionId>,
 }
 
 impl ObstructionMeta {
@@ -174,6 +176,7 @@ impl ObstructionMeta {
             attributes: h.attributes,
             sw_offset,
             tile_ids: h.tile_ids,
+            obstruction_group_id: h.obstruction_group_id,
         })
     }
 }
@@ -193,6 +196,11 @@ pub struct ObstructionMeta {
 
     // Tiles intersected by the footprint
     tile_ids: Vec<TileId>,
+
+    // Shared by every sub-obstruction produced when a too-large raster (e.g. a tax lot spanning
+    // hundreds of tiles) is split into one obstruction per tile; unset for non-split obstructions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    obstruction_group_id: Option<ObstructionId>,
 }
 
 impl ObstructionMeta {
@@ -211,6 +219,13 @@ impl ObstructionMeta {
             .map_err(|e| serde_json::Error::custom(e.to_string()))
     }
 }
+
+/// Hard cap on a decoded obstruction raster's size (2 bytes/pixel). Enforced on write by
+/// loscope-preprocessing's `obstructions::split`, which splits any raster over this size into
+/// one sub-obstruction per tile before it ever reaches disk; enforced again here on read as a
+/// safety net against ever loading an oversized raster into memory (e.g. a file written before
+/// splitting existed, or a bug in the writer).
+pub const MAX_OBSTRUCTION_RASTER_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug,new)]
 pub struct ObstructionRaster {
@@ -236,7 +251,6 @@ impl ObstructionRaster {
         // so a closure it is
         let inner = move || -> Result<Array2<u16>, Box<dyn std::error::Error>> {
             let mut reader = Decoder::new(io)?;
-            let image_data = reader.read_image()?;
             let width: usize = reader.dimensions()?.0.try_into()?;
             let height: usize = reader.dimensions()?.1.try_into()?;
 
@@ -248,6 +262,20 @@ impl ObstructionRaster {
                 )));
             }
 
+            // Checked against the TIFF header's dimensions before decoding, so an oversized
+            // raster is rejected without ever allocating the full pixel buffer.
+            let raster_bytes = width as u64 * height as u64 * 2;
+            if raster_bytes > MAX_OBSTRUCTION_RASTER_BYTES {
+                return Err(Box::new(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "Obstruction raster too large: {width}x{height}px ({raster_bytes} bytes) \
+                         exceeds {MAX_OBSTRUCTION_RASTER_BYTES}-byte cap"
+                    ),
+                )));
+            }
+
+            let image_data = reader.read_image()?;
             if let DecodingResult::U16(image_data) = image_data {
                 Ok(Array2::from_shape_vec((height, width), image_data).map_err(Box::new)?)
             } else {
@@ -261,9 +289,6 @@ impl ObstructionRaster {
         let image_data = inner().map_err(|err| AssetErr::AssetContentError(format!(
                 "Error parsing obstruction tiff for id {obstruction_id}: {err}"
             )))?;
-        // read_from_tiff enforces no size cap (see PER_OBSTRUCTION_BYTES_ESTIMATE's doc comment
-        // in memory_estimate.rs) -- this is the one place that can catch a raster whose real
-        // decoded size exceeds what the estimator assumed.
         crate::analysis::memory_paranoid::check(
             "ObstructionRaster::read_from_tiff::heightmap",
             image_data.len() as u64 * 2,
@@ -352,7 +377,41 @@ impl ObstructionRaster {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ndarray::Array2;
     use std::io::Cursor;
+
+    fn tiff_bytes_for(width: usize, height: usize) -> Vec<u8> {
+        let raster = ObstructionRaster::new(Array2::<u16>::zeros((height, width)));
+        let mut bytes = Vec::new();
+        raster
+            .write_to_tiff(std::io::Cursor::new(&mut bytes))
+            .unwrap();
+        bytes
+    }
+
+    #[test]
+    fn read_from_tiff_accepts_raster_at_the_cap() {
+        // 500x500px * 2 bytes = 500,000 bytes, comfortably under the 1 MiB cap.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("small.tif");
+        std::fs::write(&path, tiff_bytes_for(500, 500)).unwrap();
+
+        let raster =
+            ObstructionRaster::read_from_tiff(Uuid::new_v4(), File::open(&path).unwrap());
+        assert!(raster.is_ok());
+    }
+
+    #[test]
+    fn read_from_tiff_rejects_raster_over_the_cap() {
+        // 800x800px * 2 bytes = 1,280,000 bytes, over the 1 MiB (1,048,576-byte) cap.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("huge.tif");
+        std::fs::write(&path, tiff_bytes_for(800, 800)).unwrap();
+
+        let err = ObstructionRaster::read_from_tiff(Uuid::new_v4(), File::open(&path).unwrap())
+            .unwrap_err();
+        assert!(matches!(err, AssetErr::AssetContentError(_)));
+    }
 
     const NEW_STYLE_PAYLOAD: &str = r#"{
         "obstruction_id": "0020fb43-ffab-4083-9bc4-c60d97961d94",
@@ -585,5 +644,53 @@ mod tests {
         assert!(roundtripped.includes(&ObstructionType::RecentJobApplications));
         assert!(roundtripped.includes(&ObstructionType::ActivePermits));
         assert!(!roundtripped.includes(&ObstructionType::NewConstructionFootprints));
+    }
+
+    // --- obstruction_group_id ---
+
+    #[test]
+    fn payload_without_group_id_deserializes_to_none() {
+        let meta = ObstructionMeta::from_json(
+            Cursor::new(NEW_STYLE_PAYLOAD.as_bytes()),
+            ObstructionType::NewConstructionFootprints,
+        )
+        .unwrap();
+        assert_eq!(*meta.obstruction_group_id(), None);
+    }
+
+    #[test]
+    fn payload_with_group_id_deserializes_and_serializes_it() {
+        let payload = r#"{
+            "obstruction_id": "0020fb43-ffab-4083-9bc4-c60d97961d94",
+            "obstruction_type": "new_construction_footprints",
+            "attributes": {},
+            "tile_ids": ["2190_31"],
+            "offset_nys": [1004021.0, 190791.0],
+            "obstruction_group_id": "83167e5c-c108-4d85-905c-6dc3224cc367"
+        }"#;
+        let meta = ObstructionMeta::from_json(
+            Cursor::new(payload.as_bytes()),
+            ObstructionType::NewConstructionFootprints,
+        )
+        .unwrap();
+        let expected = Uuid::parse_str("83167e5c-c108-4d85-905c-6dc3224cc367").unwrap();
+        assert_eq!(*meta.obstruction_group_id(), Some(expected));
+
+        let json: serde_json::Value = serde_json::to_value(&meta).unwrap();
+        assert_eq!(
+            json.get("obstruction_group_id").and_then(|v| v.as_str()),
+            Some("83167e5c-c108-4d85-905c-6dc3224cc367")
+        );
+    }
+
+    #[test]
+    fn unset_group_id_is_omitted_from_serialized_json() {
+        let meta = ObstructionMeta::from_json(
+            Cursor::new(NEW_STYLE_PAYLOAD.as_bytes()),
+            ObstructionType::NewConstructionFootprints,
+        )
+        .unwrap();
+        let json: serde_json::Value = serde_json::to_value(&meta).unwrap();
+        assert!(json.get("obstruction_group_id").is_none());
     }
 }

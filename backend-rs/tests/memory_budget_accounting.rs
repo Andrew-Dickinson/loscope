@@ -402,7 +402,7 @@ proptest! {
         let raster = ObstructionRaster::new(Array2::<u16>::zeros((raster_w, raster_h)));
         let meta = ObstructionMeta::new(
             obstruction_id, obstruction_type.clone(), std::collections::HashMap::new(),
-            loscope::types::coords::NYSCoords2::new(0.0, 0.0), vec![],
+            loscope::types::coords::NYSCoords2::new(0.0, 0.0), vec![], None,
         );
         let _ = &meta;
 

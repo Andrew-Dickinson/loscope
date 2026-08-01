@@ -431,6 +431,7 @@ fn run_import_geojson(
                     width: w as usize,
                     height: h as usize,
                     raster_file: format!("{uuid}.tif"),
+                    obstruction_group_id: None,
                 };
 
                 write_obstruction(&meta, &raster, out_dir)
@@ -820,6 +821,7 @@ fn run_build_obstructions(
                 width: w as usize,
                 height: h as usize,
                 raster_file: format!("{uuid}.tif"),
+                obstruction_group_id: None,
             };
 
             write_obstruction(&meta, &raster, out_dir)?;

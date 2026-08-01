@@ -135,6 +135,7 @@ impl ObstructionProvider for DenseObstructionProvider {
             HashMap::new(),
             NYSCoords2::new(0.0, 0.0),
             vec![],
+            None,
         ))
     }
 
