@@ -3,7 +3,7 @@ use crate::types::errors::AssetErr;
 use std::fs;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::fs::read_to_string;
 use std::sync::Arc;
 use tempfile::NamedTempFile;
@@ -91,6 +91,17 @@ impl CachingAssetProvider {
             Err(err) => Err(err),
         }
     }
+
+    // Ok(None) means "not cached yet", distinct from an actual filesystem error.
+    fn open_cached_asset(item_path: &Path) -> Result<Option<File>, AssetErr> {
+        match File::open(item_path) {
+            Ok(file_handle) => Ok(Some(file_handle)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(AssetErr::LocalFileSystemError(format!(
+                "Error checking for cached asset at {item_path:?}: {e}"
+            ))),
+        }
+    }
 }
 
 #[async_trait]
@@ -149,6 +160,16 @@ impl AssetProvider for CachingAssetProvider {
             )
         )?;
 
+        let item_path_buf = self.cache_root.join(&cache_local_path);
+        let item_path = item_path_buf.as_path();
+
+        // Fast path: an already-cached asset is immutable and needs no cross-process
+        // coordination to read, so check before paying for the distributed lock. This is
+        // the common case for concurrent requests that share tiles/obstructions.
+        if let Some(file_handle) = Self::open_cached_asset(item_path)? {
+            return Ok(file_handle);
+        }
+
         let mut path_lock = LocalPathLock::new(
             cache_local_path_str,
             &self.local_cache_id,
@@ -162,19 +183,10 @@ impl AssetProvider for CachingAssetProvider {
             )));
         }
 
-        let item_path_buf = self.cache_root.join(&cache_local_path);
-        let item_path = item_path_buf.as_path();
-
-        // If we have the asset cached on disk already, return it
-        match File::open(item_path) {
-            Ok(file_handle) => return Ok(file_handle),
-            Err(e) => {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    return Err(AssetErr::LocalFileSystemError(format!(
-                        "Error checking for cached asset at {item_path:?}: {e}"
-                    )));
-                }
-            }
+        // Re-check now that we hold the lock: another process may have fetched and cached
+        // this asset while we were waiting for it.
+        if let Some(file_handle) = Self::open_cached_asset(item_path)? {
+            return Ok(file_handle);
         }
 
         println!("Calling upstream fetcher for {asset_type:?} {asset_id:?}");
@@ -425,6 +437,42 @@ mod tests {
         assert_eq!(read_file_contents(&mut file), "fetched-content");
 
         assert!(cache_root.join("OrthoImage").join("test.jpg").exists());
+    }
+
+    // Panics if lock() is ever called -- used to prove the cache-hit fast path never
+    // touches the (potentially cross-process, network-round-trip) distributed lock.
+    struct PanicOnLockMutexManager;
+
+    #[async_trait]
+    impl crate::providers::backends::distributed_mutex::DistributedMutexManager for PanicOnLockMutexManager {
+        async fn lock(&self, key: &str, _: Duration) -> Result<Box<dyn crate::providers::backends::distributed_mutex::AcquiredLock>, crate::providers::backends::distributed_mutex::LockError> {
+            panic!("lock() should not be called for a cache hit, requested key: {key}");
+        }
+        async fn unlock(&self, _: Box<dyn crate::providers::backends::distributed_mutex::AcquiredLock>) {
+            panic!("unlock() should not be called for a cache hit");
+        }
+    }
+
+    #[tokio::test]
+    async fn cache_hit_never_acquires_the_lock() {
+        let temp_dir = test_temp_dir!();
+        let cache_root = temp_dir.as_path_untracked().to_path_buf();
+
+        let cache_path = cache_root.join("OrthoImage").join("test.jpg");
+        std::fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
+        std::fs::write(&cache_path, b"cached-content").unwrap();
+
+        let provider = CachingAssetProvider::new(
+            Box::new(MockAssetFetcher { should_succeed: false }),
+            Arc::new(PanicOnLockMutexManager),
+            cache_root,
+        ).unwrap();
+
+        let mut file = provider
+            .get_asset(AssetType::OrthoImage, "test.jpg")
+            .await
+            .unwrap();
+        assert_eq!(read_file_contents(&mut file), "cached-content");
     }
 
     #[tokio::test]
