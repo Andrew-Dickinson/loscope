@@ -769,7 +769,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-      <div style={{ flex: 1, position: 'relative' }}>
+      <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', position: 'relative' }}>
         <Canvas
           camera={{ fov: 50, near: 1, far: 20000 }}
           gl={{ antialias: true }}

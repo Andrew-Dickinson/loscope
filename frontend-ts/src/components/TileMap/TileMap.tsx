@@ -9,6 +9,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, GeoJSON, ImageOverlay, useMap } from 'react-leaflet'
 import { fetchWithRetry } from '../../lib/fetchWithRetry'
+import { useIsSmallScreen } from '../../hooks/useIsSmallScreen'
 
 function PostImageOverlay({ url, bounds, opacity, zIndex }: {
   url: string
@@ -153,6 +154,7 @@ export default function TileMap({ overview, analysisId }: TileMapProps) {
   const [activeTileId, setActiveTileId] = useState<string | null>(null)
   const [panelOpen, setPanelOpen]       = useState(false)
   const mapRef = useRef<L.Map | null>(null)
+  const isSmallScreen = useIsSmallScreen()
 
   const tilesGeoJson   = buildTilesGeoJson(overview.tiles)
   const losGeoJson     = buildLosGeoJson(overview.endpoints)
@@ -185,9 +187,9 @@ export default function TileMap({ overview, analysisId }: TileMapProps) {
   })()
 
   return (
-    <div style={{ height: '100%', display: 'flex' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: isSmallScreen ? 'column' : 'row' }}>
       {/* Map panel */}
-      <div style={{ flex: panelOpen ? '0 0 60%' : 1, height: '100%', position: 'relative' }}>
+      <div style={{ flex: panelOpen ? (isSmallScreen ? '0 0 35%' : '0 0 60%') : 1, minHeight: 0, minWidth: 0, width: '100%', height: isSmallScreen ? undefined : '100%', position: 'relative' }}>
         <MapContainer
           center={center}
           zoom={14}
@@ -252,7 +254,7 @@ export default function TileMap({ overview, analysisId }: TileMapProps) {
 
       {/* 3D tile panel */}
       {panelOpen && (
-        <div style={styles.panel3d}>
+        <div style={isSmallScreen ? styles.panel3dStacked : styles.panel3d}>
           <div style={styles.panel3dHeader}>
             <span style={styles.panel3dTitle}>{activeTileId || 'Tile 3D'}</span>
             <button
@@ -262,7 +264,7 @@ export default function TileMap({ overview, analysisId }: TileMapProps) {
               ×
             </button>
           </div>
-          <div style={{ flex: 1, overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
             <Tile3DViewer tileId={activeTileId} analysisId={analysisId} />
           </div>
         </div>
@@ -279,6 +281,15 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     background: '#0e1117',
     borderLeft: '2px solid #1c2128',
+  },
+  panel3dStacked: {
+    flex: '0 0 65%',
+    minHeight: 0,
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    background: '#0e1117',
+    borderTop: '2px solid #1c2128',
   },
   panel3dHeader: {
     flexShrink: 0,
