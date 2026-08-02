@@ -16,7 +16,6 @@ pub const REDIS_URL: &str = "REDIS_URL";
 pub const LOS_DEBUG_DUMP_DIR: &str = "LOS_DEBUG_DUMP_DIR";
 
 pub const LOS_MAX_ANALYSIS_MEMORY_BYTES: &str = "LOS_MAX_ANALYSIS_MEMORY_BYTES";
-pub const LOS_OBSTRUCTION_BYTES_ESTIMATE: &str = "LOS_OBSTRUCTION_BYTES_PER_TILE_ESTIMATE";
 pub const LOS_MEMORY_ESTIMATE_SAFETY_FACTOR: &str = "LOS_MEMORY_ESTIMATE_SAFETY_FACTOR";
 
 // See analysis::memory_paranoid. When set (to any non-empty value), every reservation-guarded

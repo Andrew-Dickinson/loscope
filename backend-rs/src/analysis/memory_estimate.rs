@@ -6,8 +6,9 @@ use crate::providers::obstruction_provider::ObstructionProvider;
 use crate::types::errors::AssetErr;
 use crate::types::obstructions::{ObstructionId, ObstructionType};
 use crate::types::tiles::SUBGRID_TILE_SIDE_LENGTH_USFT;
-use crate::util::env::{LOS_MEMORY_ESTIMATE_SAFETY_FACTOR, get_env, LOS_OBSTRUCTION_BYTES_ESTIMATE};
+use crate::util::env::{LOS_MEMORY_ESTIMATE_SAFETY_FACTOR, get_env};
 use std::collections::HashSet;
+use futures_util::{stream, StreamExt, TryStreamExt};
 
 const ALPHA_ZONE_FULL: f64 = 1.0;
 const ALPHA_ZONE_INNER: f64 = 0.6;
@@ -29,24 +30,12 @@ const BYTES_PER_ZONE_CELL_RESULT: u64 = 4 + 1;
 const TILE_SIDE_USFT: u64 = SUBGRID_TILE_SIDE_LENGTH_USFT as u64;
 const ELEVATION_TILE_BYTES: u64 = TILE_SIDE_USFT * TILE_SIDE_USFT * 2; // u16 per cell
 
-/// Bytes budgeted per *individual* obstruction (not per tile) once its real raster is fetched --
-/// covers the ObstructionRaster (u16/px) held alongside its ObstructionMeta in
-/// TerrainFactory::load_terrain_grid's `obstructions: Vec`. Real obstructions
-/// are all <=1 MB -- this covers that worst case outright, with headroom,
-/// rather than just the realistic common case. The extra memory will be released when the actual
-/// file is loaded, so this over-approximation isn't that inefficient
-const DEFAULT_PER_OBSTRUCTION_BYTES_ESTIMATE: u64 = 1300 * 1024; // ~1.3 MiB
-
 /// Multiplier applied to the raw estimate to cover allocator overhead, transient copies made
 /// while merging grids, and general slop between the model here and observed RSS. Tune via
 /// LOS_MEMORY_ESTIMATE_SAFETY_FACTOR.
 const DEFAULT_SAFETY_FACTOR: f64 = 1.5;
 
-fn obstruction_bytes_estimate() -> u64 {
-    get_env(LOS_OBSTRUCTION_BYTES_ESTIMATE)
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(DEFAULT_PER_OBSTRUCTION_BYTES_ESTIMATE)
-}
+const BYTES_PER_OBSTRUCTION_PIXEL: u64 = 2;
 
 fn safety_factor() -> f64 {
     get_env(LOS_MEMORY_ESTIMATE_SAFETY_FACTOR)
@@ -227,7 +216,20 @@ pub async fn estimate_analysis_bytes_precise(
             distinct_obstructions.extend(ids.into_iter().map(|id| (obs_type.clone(), id)));
         }
     }
-    let obstruction_bytes = distinct_obstructions.len() as u64 * obstruction_bytes_estimate();
+
+    let obstruction_bytes: u64 = stream::iter(distinct_obstructions.iter().cloned())
+        .map(async |(obstruction_type, obstruction_id)| {
+            let obstruction_meta = obstruction_provider.get_obstruction_meta(
+                &obstruction_type, obstruction_id
+            ).await?;
+
+            return Ok(obstruction_meta.width() * obstruction_meta.height() * BYTES_PER_OBSTRUCTION_PIXEL);
+        })
+        .buffered(crate::analysis::tiles::PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_OBSTRUCTIONS)
+        .try_collect::<Vec<_>>()
+        .await?
+        .into_iter()
+        .sum();
 
     let tile_bytes = tile_count * ELEVATION_TILE_BYTES + obstruction_bytes;
     let raw_estimate = zone_bytes + tile_bytes;
@@ -252,11 +254,10 @@ pub fn estimate_analysis_result_bytes(input: &PointEvaluationInput) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::coords::{GPSCoords3, NYSCoords3};
+    use crate::types::coords::{GPSCoords3, NYSCoords2, NYSCoords3};
     use crate::types::obstructions::{ObstructionMeta, ObstructionRaster, ObstructionTypesFilter};
     use crate::types::tiles::TileId;
     use crate::util::coord_conversion::CoordinateConverter;
-    use ndarray::Array2;
     use std::collections::HashMap;
     use uuid::Uuid;
 
@@ -292,10 +293,19 @@ mod tests {
 
         async fn get_obstruction_meta(
             &self,
-            _obstruction_type: &ObstructionType,
-            _obstruction_id: ObstructionId,
+            obstruction_type: &ObstructionType,
+            obstruction_id: ObstructionId,
         ) -> Result<ObstructionMeta, AssetErr> {
-            unreachable!("not exercised by these tests")
+            Ok(ObstructionMeta::new(
+                obstruction_id,
+                obstruction_type.clone(),
+                HashMap::new(),
+                NYSCoords2::new(0.0, 0.0),
+                Vec::new(),
+                64,
+                64,
+                None,
+            ))
         }
 
         async fn get_obstruction_raster(

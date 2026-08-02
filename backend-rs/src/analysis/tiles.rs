@@ -14,7 +14,7 @@ use ndarray::{Array1, Array2, ArrayView2, s};
 use std::collections::{HashSet};
 
 const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_TILES: usize = 10;
-const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_OBSTRUCTIONS: usize = 30;
+pub(crate) const PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_OBSTRUCTIONS: usize = 30;
 
 pub(crate) type TerrainGrid = StairStepGrid<u16>;
 
@@ -634,7 +634,9 @@ mod test {
             "attributes": {{}},
             "x_offset": {sw_easting},
             "y_offset": {sw_northing},
-            "tile_ids": []
+            "tile_ids": [],
+            "width": 64,
+            "height":640
         }}"#
                 )
                 .into_bytes(),

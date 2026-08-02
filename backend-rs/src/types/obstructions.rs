@@ -151,6 +151,8 @@ struct ObstructionMetaDeHelper {
     attributes: HashMap<String, AttributeValue>,
     #[serde(rename = "offset_nys")]
     sw_offset: Option<NYSCoords2>,
+    width: u64,
+    height: u64,
     x_offset: Option<f64>,
     y_offset: Option<f64>,
     tile_ids: Vec<TileId>,
@@ -176,6 +178,8 @@ impl ObstructionMeta {
             attributes: h.attributes,
             sw_offset,
             tile_ids: h.tile_ids,
+            width: h.width,
+            height: h.height,
             obstruction_group_id: h.obstruction_group_id,
         })
     }
@@ -196,6 +200,10 @@ pub struct ObstructionMeta {
 
     // Tiles intersected by the footprint
     tile_ids: Vec<TileId>,
+
+    // Dimensions of the associated raster
+    width: u64,
+    height: u64,
 
     // Shared by every sub-obstruction produced when a too-large raster (e.g. a tax lot spanning
     // hundreds of tiles) is split into one obstruction per tile; unset for non-split obstructions.
@@ -666,6 +674,8 @@ mod tests {
             "attributes": {},
             "tile_ids": ["2190_31"],
             "offset_nys": [1004021.0, 190791.0],
+            "width": 182,
+            "height": 80,
             "obstruction_group_id": "83167e5c-c108-4d85-905c-6dc3224cc367"
         }"#;
         let meta = ObstructionMeta::from_json(
