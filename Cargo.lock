@@ -3602,6 +3602,7 @@ dependencies = [
  "eproj",
  "futures-util",
  "geo",
+ "geojson",
  "image 0.25.10",
  "kml",
  "maplit",

@@ -5,7 +5,7 @@ use loscope::endpoints::analysis::{
 use loscope::endpoints::coords::gps_to_nys;
 use loscope::endpoints::meshdb::resolve_number;
 use loscope::endpoints::rooftop::{
-    background_tile_ids, background_tile_raster, render_rooftop,
+    background_tile_ids, background_tile_raster, footprint_geojson, render_rooftop,
     sample_points as sample_points_endpoint,
 };
 use loscope::endpoints::tileview::{
@@ -38,7 +38,8 @@ async fn rocket() -> _ {
                 render_rooftop,
                 sample_points_endpoint,
                 background_tile_ids,
-                background_tile_raster
+                background_tile_raster,
+                footprint_geojson
             ],
         )
         .mount(

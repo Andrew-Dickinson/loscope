@@ -11,6 +11,7 @@ use crate::sample_points::point::SamplePoints;
 use crate::sample_points::sample_grid::sample_points_for_rooftop;
 use crate::types::coords::NYSCoords2;
 use crate::types::tiles::TileId;
+use crate::util::coord_conversion::with_coord_converter;
 use futures_util::{StreamExt};
 use rocket::http::{ContentType, Status};
 use rocket::response::stream::TextStream;
@@ -18,7 +19,8 @@ use rocket::serde::json::Json;
 use rocket::{State};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
-use geo::Buffer;
+use geo::{Buffer, MapCoords};
+use geojson::{Feature, Geometry, GeometryValue, JsonObject, JsonValue};
 
 const BACKGROUND_TILE_BUFFER_ZONE_USFT: f64 = 250.0;
 
@@ -169,6 +171,37 @@ pub async fn background_tile_ids(
         .collect();
 
     Ok(Json(BackgroundTileIds { tiles }))
+}
+
+#[get("/footprintGeoJson/<bin_id>")]
+pub async fn footprint_geojson(
+    bin_id: &str,
+    providers: &State<Providers>,
+) -> Result<(ContentType, Json<Feature>), Status> {
+    let Ok(bin_id) = BINId::parse(bin_id) else {
+        return Err(Status::BadRequest);
+    };
+
+    let footprint_nys = providers.footprint_provider().get_footprint(bin_id).await?;
+
+    // GeoJSON coordinates are (lon, lat) — matches (x, y) here since we map straight from the
+    // NYS State Plane (x=easting, y=northing) polygon to WGS84 (x=lon, y=lat).
+    let footprint_wgs84 = with_coord_converter(|converter| {
+        footprint_nys.map_coords(|c| {
+            let gps = converter.to_gps2(&NYSCoords2::new(c.x, c.y));
+            geo::coord! { x: *gps.lon(), y: *gps.lat() }
+        })
+    });
+
+    let mut feature = Feature::from(Geometry::new(GeometryValue::from(&footprint_wgs84)));
+    let mut properties = JsonObject::new();
+    properties.insert(
+        "bin".to_string(),
+        JsonValue::String(bin_id.as_str().to_string()),
+    );
+    feature.properties = Some(properties);
+
+    Ok((ContentType::new("application", "geo+json"), Json(feature)))
 }
 
 #[derive(Responder)]
