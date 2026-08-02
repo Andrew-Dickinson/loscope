@@ -283,8 +283,12 @@ function ObsObj({ type, obsId, tileId, color, onHit, onLoaded, onBoundsReady, vi
       rotation={OBJ_ROTATION}
       position={OBJ_POSITION}
       visible={visible}
-      onPointerDown={(e: ThreeEvent<PointerEvent>) => { pointerDownPos.current = { x: e.clientX, y: e.clientY } }}
+      onPointerDown={(e: ThreeEvent<PointerEvent>) => {
+        if (!visible) return
+        pointerDownPos.current = { x: e.clientX, y: e.clientY }
+      }}
       onClick={(e: ThreeEvent<MouseEvent>) => {
+        if (!visible) return
         const down = pointerDownPos.current
         if (!down) return
         const dx = e.clientX - down.x
