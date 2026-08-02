@@ -126,7 +126,7 @@ impl ObstructionProvider for DenseObstructionProvider {
         obstruction_id: ObstructionId,
     ) -> Result<ObstructionMeta, AssetErr> {
         let dims = self.dims.lock().unwrap();
-        let _ = dims
+        let &(w, h) = dims
             .get(&obstruction_id)
             .ok_or_else(|| AssetErr::AssetNotFound("unknown synthetic obstruction id".into()))?;
         Ok(ObstructionMeta::new(
@@ -135,6 +135,8 @@ impl ObstructionProvider for DenseObstructionProvider {
             HashMap::new(),
             NYSCoords2::new(0.0, 0.0),
             vec![],
+            w as u64,
+            h as u64,
             None,
         ))
     }
