@@ -12,6 +12,8 @@ import { RetryingOBJLoader } from '../../lib/retryingLoaders'
 import type { ThreeEvent } from '@react-three/fiber'
 import BackgroundTiles from '../RooftopViewer/BackgroundTiles'
 import CompassRose from '../ui/CompassRose'
+import MiniMap from '../ui/MiniMap'
+import { useIsSmallScreen } from '../../hooks/useIsSmallScreen'
 import { fetchWithRetry } from '../../lib/fetchWithRetry'
 
 interface FarEndPickerProps {
@@ -327,6 +329,7 @@ export default function FarEndPicker({ binId, label, onConfirm, onCancel }: FarE
   const defaultCamRef  = useRef<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>(null)
   const resetCamFnRef  = useRef<(() => void) | null>(null)
   const handleCameraChange = useCallback((atDefault: boolean) => { setShowReset(!atDefault) }, [])
+  const isSmallScreen = useIsSmallScreen()
 
   useEffect(() => {
     let cancelled = false
@@ -400,9 +403,10 @@ export default function FarEndPicker({ binId, label, onConfirm, onCancel }: FarE
               resetCamFnRef={resetCamFnRef}
               onCameraChange={handleCameraChange}
             />
-            <CompassRose />
+            <CompassRose bottom={isSmallScreen ? undefined : 290} scale={isSmallScreen ? 0.7 : 1} />
           </Canvas>
         )}
+        {!isSmallScreen && !loadError && <MiniMap binId={binId} />}
       </div>
     </div>
   )

@@ -14,6 +14,8 @@ import { RetryingOBJLoader } from '../../lib/retryingLoaders'
 import { buildVoronoiMaterial } from './VoronoiMaterial'
 import BackgroundTiles from './BackgroundTiles'
 import CompassRose from '../ui/CompassRose'
+import MiniMap from '../ui/MiniMap'
+import { useIsSmallScreen } from '../../hooks/useIsSmallScreen'
 import type { ThreeEvent } from '@react-three/fiber'
 
 export interface EncodedPoint {
@@ -933,6 +935,7 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
   const defaultCamRef = useRef<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>(null)
   const resetCamFnRef = useRef<(() => void) | null>(null)
   const handleCameraChange = useCallback((atDefault: boolean) => { setShowReset(!atDefault) }, [])
+  const isSmallScreen = useIsSmallScreen()
 
   // Store pendingWorldPos as the measurement point (mast tip), not the surface.
   // This way the draggable sphere sits exactly where the cursor is.
@@ -978,8 +981,10 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
           onPlacementClick={handleTerrainClick}
           buildingOffset={buildingOffset}
         />
-        <CompassRose />
+        <CompassRose bottom={isSmallScreen ? undefined : 290} scale={isSmallScreen ? 0.7 : 1} />
       </Canvas>
+
+      {!isSmallScreen && <MiniMap binId={binId} />}
 
       {showReset && (
         <button
@@ -991,14 +996,16 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
         </button>
       )}
 
-      <div style={styles.legend}>
-        <div style={styles.legendTitle}>LOS Status</div>
-        <LegendRow color="#00cc88" label={`Unobstructed (${n_clear})`} />
-        <LegendRow color="#ffcc00" label={`Partial (${n_partial})`} />
-        <LegendRow color="#ff1a00" label={`Obstructed (${n_full})`} />
-        {pending > 0 && <LegendRow color="#94a3b8" label={`Pending (${pending})`} />}
-        {n_error > 0 && <LegendRow color="#94a3b8" label={`Error (${n_error})`} />}
-      </div>
+      {!isSmallScreen && (
+        <div style={styles.legend}>
+          <div style={styles.legendTitle}>LOS Status</div>
+          <LegendRow color="#00cc88" label={`Unobstructed (${n_clear})`} />
+          <LegendRow color="#ffcc00" label={`Partial (${n_partial})`} />
+          <LegendRow color="#ff1a00" label={`Obstructed (${n_full})`} />
+          {pending > 0 && <LegendRow color="#94a3b8" label={`Pending (${pending})`} />}
+          {n_error > 0 && <LegendRow color="#94a3b8" label={`Error (${n_error})`} />}
+        </div>
+      )}
 
       <div style={styles.placementPanel}>
         {!placementMode ? (

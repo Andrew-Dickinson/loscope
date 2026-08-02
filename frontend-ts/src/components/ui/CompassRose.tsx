@@ -39,8 +39,10 @@ function styledDiv(style: Partial<CSSStyleDeclaration>) {
 }
 
 /** Renders inside a <Canvas>; has no visual output of its own — instead it
- *  builds and maintains a flat DOM compass badge alongside the canvas. */
-export default function CompassRose({ scale = 1 }: { scale?: number }) {
+ *  builds and maintains a flat DOM compass badge alongside the canvas.
+ *  `bottom`, if given, is a final (unscaled) px value that overrides the
+ *  default bottom margin — for stacking above another corner overlay. */
+export default function CompassRose({ scale = 1, bottom }: { scale?: number; bottom?: number }) {
   const { gl } = useThree()
   const needleRef = useRef<HTMLDivElement | null>(null)
   const northLabelRef = useRef<HTMLSpanElement | null>(null)
@@ -54,7 +56,7 @@ export default function CompassRose({ scale = 1 }: { scale?: number }) {
     const badge = styledDiv({
       position: 'absolute',
       right: px(BASE.margin),
-      bottom: px(BASE.margin),
+      bottom: bottom !== undefined ? `${bottom}px` : px(BASE.margin),
       width: px(BASE.diameter),
       height: px(BASE.diameter),
       borderRadius: '50%',
@@ -141,7 +143,7 @@ export default function CompassRose({ scale = 1 }: { scale?: number }) {
       needleRef.current = null
       northLabelRef.current = null
     }
-  }, [gl, scale])
+  }, [gl, scale, bottom])
 
   useFrame(({ camera }) => {
     const el = needleRef.current
