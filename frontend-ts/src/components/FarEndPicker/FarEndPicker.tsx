@@ -11,6 +11,7 @@ import * as THREE from 'three'
 import { RetryingOBJLoader } from '../../lib/retryingLoaders'
 import type { ThreeEvent } from '@react-three/fiber'
 import BackgroundTiles from '../RooftopViewer/BackgroundTiles'
+import CompassRose from '../ui/CompassRose'
 import { fetchWithRetry } from '../../lib/fetchWithRetry'
 
 interface FarEndPickerProps {
@@ -399,6 +400,7 @@ export default function FarEndPicker({ binId, label, onConfirm, onCancel }: FarE
               resetCamFnRef={resetCamFnRef}
               onCameraChange={handleCameraChange}
             />
+            <CompassRose />
           </Canvas>
         )}
       </div>

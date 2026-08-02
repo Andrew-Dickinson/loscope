@@ -26,6 +26,7 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import type { ThreeEvent } from '@react-three/fiber'
 import { fetchWithRetry } from '../../lib/fetchWithRetry'
 import { RetryingTextureLoader, RetryingOBJLoader } from '../../lib/retryingLoaders'
+import CompassRose from '../ui/CompassRose'
 
 interface TileOverviewData {
   obstruction_ids: Record<string, string[]>  // { type: [id, ...] }
@@ -790,6 +791,7 @@ export default function Tile3DViewer({ tileId, analysisId }: Tile3DViewerProps) 
             resetCamFnRef={resetCamFnRef}
             onCameraChange={handleCameraChange}
           />
+          <CompassRose scale={0.7} />
         </Canvas>
         {showReset && (
           <button

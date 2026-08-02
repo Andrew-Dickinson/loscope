@@ -13,6 +13,7 @@ import * as THREE from 'three'
 import { RetryingOBJLoader } from '../../lib/retryingLoaders'
 import { buildVoronoiMaterial } from './VoronoiMaterial'
 import BackgroundTiles from './BackgroundTiles'
+import CompassRose from '../ui/CompassRose'
 import type { ThreeEvent } from '@react-three/fiber'
 
 export interface EncodedPoint {
@@ -977,6 +978,7 @@ export default function RooftopViewer({ binId, samplePoints, analyses, cameraSta
           onPlacementClick={handleTerrainClick}
           buildingOffset={buildingOffset}
         />
+        <CompassRose />
       </Canvas>
 
       {showReset && (
