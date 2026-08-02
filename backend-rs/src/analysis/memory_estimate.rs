@@ -37,6 +37,12 @@ const DEFAULT_SAFETY_FACTOR: f64 = 1.5;
 
 const BYTES_PER_OBSTRUCTION_PIXEL: u64 = 2;
 
+/// TIFF header + IFD + decoder-internal transient buffers on top of raw pixel bytes, per
+/// obstruction raster fetched via `ObstructionRaster::read_from_tiff` — the same class of
+/// per-file overhead `TIFF_ENCODE_OVERHEAD_BYTES` covers on the elevation-tile encode side, just
+/// not captured by `width * height * BYTES_PER_OBSTRUCTION_PIXEL` alone.
+const TIFF_DECODE_OVERHEAD_BYTES: u64 = 4096;
+
 fn safety_factor() -> f64 {
     get_env(LOS_MEMORY_ESTIMATE_SAFETY_FACTOR)
         .and_then(|v| v.parse().ok())
@@ -60,10 +66,16 @@ pub fn estimate_heightmap_bytes(output_w: usize, output_h: usize) -> u64 {
     (raw as f64 * safety_factor()) as u64
 }
 
+/// TIFF header + IFD (tag directory) overhead on top of raw pixel bytes. The output buffer's
+/// initial capacity (`2 * ELEVATION_TILE_BYTES`) is sized to raw pixel bytes alone, so this
+/// overhead pushes it past capacity and triggers a grow-and-copy; budgeted generously (measured
+/// overhead is a few hundred bytes) to cover that reallocation rather than just the header itself.
+const TIFF_ENCODE_OVERHEAD_BYTES: u64 = 4096;
+
 /// get_terrain_raster and background_tile_raster each fetch exactly one fixed-size elevation
 /// tile and re-encode it as TIFF: source tile + TIFF output buffer of comparable size.
 pub fn elevation_tile_endpoint_bytes() -> u64 {
-    ((2 * ELEVATION_TILE_BYTES) as f64 * safety_factor()) as u64
+    ((2 * ELEVATION_TILE_BYTES + TIFF_ENCODE_OVERHEAD_BYTES) as f64 * safety_factor()) as u64
 }
 
 /// get_terrain_ortho decodes one JP2 tile (1000×1000 RGBA8 — see ortho_provider tests), then
@@ -223,7 +235,8 @@ pub async fn estimate_analysis_bytes_precise(
                 &obstruction_type, obstruction_id
             ).await?;
 
-            return Ok(obstruction_meta.width() * obstruction_meta.height() * BYTES_PER_OBSTRUCTION_PIXEL);
+            return Ok(obstruction_meta.width() * obstruction_meta.height() * BYTES_PER_OBSTRUCTION_PIXEL
+                + TIFF_DECODE_OVERHEAD_BYTES);
         })
         .buffered(crate::analysis::tiles::PER_LOAD_TILES_CALL_CONCURRENCY_LIMIT_OBSTRUCTIONS)
         .try_collect::<Vec<_>>()
